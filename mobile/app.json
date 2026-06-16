@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "Memory App",
+    "slug": "memory-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "memorymobile",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
