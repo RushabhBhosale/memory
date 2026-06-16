@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Personal Memory API",
-    "description": "API for saving, searching, retrieving, and deleting personal memories.",
+    "description": "Private memory database API for a GPT assistant. Use this API whenever the user asks to save a memory, remember something, search memories, check the database, check DB, look up saved information, find schedules, find interviews, or retrieve personal notes. Do not ask for clarification before searching when the user says to check the DB or database.",
     "version": "1.0.0"
   },
   "servers": [
@@ -17,10 +17,33 @@
   ],
   "paths": {
     "/api/memories": {
+      "get": {
+        "operationId": "listMemories",
+        "summary": "List recent memories",
+        "description": "List all saved memories newest first. Use this when the user asks broadly what is saved, asks for all memories, or asks for any scheduled items without a specific search term.",
+        "responses": {
+          "200": {
+            "description": "Recent memories.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListMemoriesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      },
       "post": {
         "operationId": "saveMemory",
         "summary": "Save a memory",
-        "description": "Create a new memory with a required title and optional content, category, tags, and source.",
+        "description": "Create a new memory with a required title and optional content, category, tags, and source. Use this when the user asks to remember, save, store, note down, or add information to the memory database.",
         "requestBody": {
           "required": true,
           "content": {
@@ -58,13 +81,13 @@
       "get": {
         "operationId": "searchMemories",
         "summary": "Search memories",
-        "description": "Search memories by title, content, category, or tags. Search tolerates reordered words and minor spelling mistakes. Results are ranked by relevance, with newest memories first for ties, and limited to 20.",
+        "description": "Search the private memory database by title, content, category, or tags. Use this immediately when the user asks to check DB, check database, look up saved information, find an interview, find a schedule, or asks a question that may be answered from saved memories. Pass the user's important words as q, for example 'Shubham Mane interview' or 'interviews scheduled'. Search ignores filler words, tolerates reordered words, and tolerates minor spelling mistakes. Results are ranked by relevance, with newest memories first for ties, and limited to 20.",
         "parameters": [
           {
             "name": "q",
             "in": "query",
             "required": true,
-            "description": "Search text to match against title, content, category, and tags.",
+            "description": "Important search words from the user's request. For 'when is Shubham Mane interview check in db', use 'Shubham Mane interview'. For 'any interviews scheduled check database', use 'interviews scheduled'.",
             "schema": {
               "type": "string",
               "minLength": 1
@@ -282,6 +305,26 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/Memory"
+          }
+        }
+      },
+      "ListMemoriesResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "count",
+          "data"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Memory"
+            }
           }
         }
       },

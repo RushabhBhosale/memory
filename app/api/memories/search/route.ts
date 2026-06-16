@@ -9,6 +9,54 @@ export const runtime = 'nodejs';
 
 const SEARCH_RESULT_LIMIT = 20;
 const SEARCH_CANDIDATE_LIMIT = 1000;
+const STOP_WORDS = new Set([
+  'a',
+  'about',
+  'all',
+  'also',
+  'am',
+  'an',
+  'and',
+  'any',
+  'are',
+  'as',
+  'at',
+  'be',
+  'can',
+  'check',
+  'database',
+  'db',
+  'did',
+  'do',
+  'does',
+  'for',
+  'from',
+  'give',
+  'have',
+  'i',
+  'in',
+  'info',
+  'is',
+  'it',
+  'me',
+  'memory',
+  'my',
+  'of',
+  'on',
+  'please',
+  'show',
+  'tell',
+  'the',
+  'there',
+  'to',
+  'up',
+  'was',
+  'what',
+  'when',
+  'where',
+  'which',
+  'with'
+]);
 
 const getErrorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Internal server error';
@@ -36,6 +84,13 @@ const normalizeText = (value: string) =>
     .trim();
 
 const tokenize = (value: string) => normalizeText(value).split(/\s+/).filter(Boolean);
+
+const getQueryTokens = (value: string) => {
+  const tokens = tokenize(value);
+  const meaningfulTokens = tokens.filter((token) => !STOP_WORDS.has(token));
+
+  return meaningfulTokens.length ? meaningfulTokens : tokens;
+};
 
 const getSearchText = (memory: SearchableMemory) =>
   [
@@ -134,18 +189,28 @@ const scoreMemory = (memory: SearchableMemory, query: string, queryTokens: strin
   }
 
   let score = normalizedSearchText.includes(normalizeText(query)) ? 10 : 0;
+  let matchedTokens = 0;
 
   for (const queryToken of queryTokens) {
     const tokenScore = scoreQueryToken(queryToken, uniqueMemoryTokens);
 
-    if (!tokenScore) {
-      return 0;
+    if (tokenScore) {
+      matchedTokens += 1;
+      score += tokenScore;
     }
-
-    score += tokenScore;
   }
 
-  return score;
+  if (!matchedTokens) {
+    return 0;
+  }
+
+  const requiredMatches = queryTokens.length <= 2 ? 1 : Math.ceil(queryTokens.length * 0.55);
+
+  if (matchedTokens < requiredMatches) {
+    return 0;
+  }
+
+  return score + matchedTokens * 2;
 };
 
 export async function GET(request: Request) {
@@ -166,7 +231,7 @@ export async function GET(request: Request) {
       );
     }
 
-    const queryTokens = tokenize(query);
+    const queryTokens = getQueryTokens(query);
 
     if (!queryTokens.length) {
       return NextResponse.json(
