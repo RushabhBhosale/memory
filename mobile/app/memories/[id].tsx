@@ -11,6 +11,7 @@ import {
 import { router, useLocalSearchParams } from 'expo-router';
 
 import { deleteMemory, getMemory, Memory } from '../../services/api';
+import { cardShadow, colors } from '../../styles/theme';
 
 const formatDateTime = (value: string) =>
   new Intl.DateTimeFormat(undefined, {
@@ -105,16 +106,29 @@ export default function DetailScreen() {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>{memory.title}</Text>
-      <Text style={styles.meta}>
-        {memory.category} · {memory.source}
-      </Text>
-      <Text style={styles.date}>Created {formatDateTime(memory.createdAt)}</Text>
-      <Text style={styles.date}>Updated {formatDateTime(memory.updatedAt)}</Text>
+      <View style={styles.headerPanel}>
+        <Text style={styles.category}>{memory.category}</Text>
+        <Text style={styles.title}>{memory.title}</Text>
+        <Text style={styles.meta}>Source: {memory.source}</Text>
+        <Text style={styles.date}>Created {formatDateTime(memory.createdAt)}</Text>
+        <Text style={styles.date}>Updated {formatDateTime(memory.updatedAt)}</Text>
 
-      {memory.tags.length ? <Text style={styles.tags}>{memory.tags.join(', ')}</Text> : null}
+        {memory.tags.length ? (
+          <View style={styles.tagRow}>
+            {memory.tags.map((tag) => (
+              <View key={tag} style={styles.tagPill}>
+                <Text style={styles.tagText}>{tag}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+      </View>
 
-      <Text style={styles.body}>{memory.content}</Text>
+      {memory.content ? (
+        <Text style={styles.body}>{memory.content}</Text>
+      ) : (
+        <Text style={styles.emptyBody}>No additional notes.</Text>
+      )}
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
@@ -136,44 +150,86 @@ export default function DetailScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#f7f7f8'
+    backgroundColor: colors.background
   },
   content: {
-    padding: 16
+    padding: 18,
+    paddingBottom: 34
+  },
+  headerPanel: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 18,
+    ...cardShadow
+  },
+  category: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: '800',
+    marginBottom: 8,
+    textTransform: 'uppercase'
   },
   title: {
-    color: '#111827',
-    fontSize: 26,
+    color: colors.text,
+    fontSize: 28,
     fontWeight: '800',
-    marginBottom: 8
+    lineHeight: 34,
+    marginBottom: 12
   },
   meta: {
-    color: '#374151',
+    color: colors.textMuted,
     fontWeight: '600',
     marginBottom: 6
   },
   date: {
-    color: '#6b7280',
+    color: colors.textSoft,
     marginBottom: 4
   },
-  tags: {
-    color: '#2563eb',
+  tagRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
     marginTop: 14
   },
+  tagPill: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 5
+  },
+  tagText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700'
+  },
   body: {
-    backgroundColor: '#ffffff',
-    borderColor: '#e5e7eb',
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderRadius: 8,
     borderWidth: 1,
-    color: '#111827',
+    color: colors.text,
     fontSize: 16,
     lineHeight: 24,
     marginTop: 18,
-    padding: 14
+    padding: 16,
+    ...cardShadow
+  },
+  emptyBody: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    color: colors.textSoft,
+    fontSize: 15,
+    lineHeight: 22,
+    marginTop: 18,
+    padding: 16
   },
   deleteButton: {
     alignItems: 'center',
-    backgroundColor: '#dc2626',
+    backgroundColor: colors.danger,
     borderRadius: 8,
     marginTop: 24,
     padding: 14
@@ -186,13 +242,13 @@ const styles = StyleSheet.create({
     fontWeight: '700'
   },
   secondaryButton: {
-    backgroundColor: '#e5e7eb',
+    backgroundColor: colors.surfaceMuted,
     borderRadius: 8,
     paddingHorizontal: 14,
     paddingVertical: 10
   },
   secondaryButtonText: {
-    color: '#111827',
+    color: colors.text,
     fontWeight: '600'
   },
   centerState: {
@@ -203,10 +259,10 @@ const styles = StyleSheet.create({
     padding: 16
   },
   mutedText: {
-    color: '#6b7280'
+    color: colors.textMuted
   },
   errorText: {
-    color: '#b91c1c',
+    color: colors.danger,
     marginTop: 16,
     textAlign: 'center'
   }

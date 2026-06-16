@@ -11,7 +11,7 @@ export type Memory = {
 
 export type CreateMemoryInput = {
   title: string;
-  content: string;
+  content?: string;
   category?: string;
   tags?: string[];
 };

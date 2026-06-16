@@ -11,6 +11,7 @@ import {
 import { router, useFocusEffect } from 'expo-router';
 
 import { listMemories, Memory, searchMemories } from '../services/api';
+import { cardShadow, colors } from '../styles/theme';
 
 const formatDate = (value: string) =>
   new Intl.DateTimeFormat(undefined, {
@@ -56,22 +57,38 @@ export default function HomeScreen() {
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
-        <Text style={styles.title}>Recent memories</Text>
-        <Pressable style={styles.primaryButton} onPress={() => router.push('/add')}>
+        <View>
+          <Text style={styles.eyebrow}>Memory</Text>
+          <Text style={styles.title}>Recent entries</Text>
+        </View>
+        <Pressable
+          style={({ pressed }) => [
+            styles.primaryButton,
+            pressed && styles.primaryButtonPressed
+          ]}
+          onPress={() => router.push('/add')}
+        >
           <Text style={styles.primaryButtonText}>Add</Text>
         </Pressable>
       </View>
 
-      <View style={styles.searchRow}>
+      <View style={styles.searchPanel}>
         <TextInput
           value={query}
           onChangeText={setQuery}
           onSubmitEditing={() => loadMemories()}
           placeholder="Search memories"
+          placeholderTextColor={colors.textSoft}
           returnKeyType="search"
           style={styles.searchInput}
         />
-        <Pressable style={styles.secondaryButton} onPress={() => loadMemories()}>
+        <Pressable
+          style={({ pressed }) => [
+            styles.secondaryButton,
+            pressed && styles.secondaryButtonPressed
+          ]}
+          onPress={() => loadMemories()}
+        >
           <Text style={styles.secondaryButtonText}>Search</Text>
         </Pressable>
       </View>
@@ -114,11 +131,19 @@ export default function HomeScreen() {
               <Text style={styles.cardMeta}>
                 {item.category} · {formatDate(item.createdAt)}
               </Text>
-              <Text numberOfLines={2} style={styles.cardContent}>
-                {item.content}
-              </Text>
+              {item.content ? (
+                <Text numberOfLines={2} style={styles.cardContent}>
+                  {item.content}
+                </Text>
+              ) : null}
               {item.tags.length ? (
-                <Text style={styles.tags}>{item.tags.join(', ')}</Text>
+                <View style={styles.tagRow}>
+                  {item.tags.slice(0, 3).map((tag) => (
+                    <View key={tag} style={styles.tagPill}>
+                      <Text style={styles.tagText}>{tag}</Text>
+                    </View>
+                  ))}
+                </View>
               ) : null}
             </Pressable>
           )}
@@ -131,86 +156,123 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#f7f7f8',
-    padding: 16
+    backgroundColor: colors.background,
+    padding: 18
   },
   header: {
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16
+    marginBottom: 18
+  },
+  eyebrow: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 4,
+    textTransform: 'uppercase'
   },
   title: {
-    color: '#111827',
-    fontSize: 24,
-    fontWeight: '700'
+    color: colors.text,
+    fontSize: 28,
+    fontWeight: '800'
   },
-  searchRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 8
-  },
-  searchInput: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d1d5db',
+  searchPanel: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderRadius: 8,
     borderWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10,
+    padding: 8,
+    ...cardShadow
+  },
+  searchInput: {
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    color: colors.text,
     flex: 1,
     paddingHorizontal: 12,
-    paddingVertical: 10
+    paddingVertical: 11
   },
   primaryButton: {
-    backgroundColor: '#2563eb',
+    backgroundColor: colors.accent,
     borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10
+    paddingHorizontal: 18,
+    paddingVertical: 11
+  },
+  primaryButtonPressed: {
+    backgroundColor: colors.accentPressed
   },
   primaryButtonText: {
-    color: '#ffffff',
+    color: colors.surface,
     fontWeight: '700'
   },
   secondaryButton: {
-    backgroundColor: '#e5e7eb',
+    backgroundColor: colors.surfaceMuted,
     borderRadius: 8,
     paddingHorizontal: 14,
-    paddingVertical: 10
+    paddingVertical: 11
+  },
+  secondaryButtonPressed: {
+    opacity: 0.78
   },
   secondaryButtonText: {
-    color: '#111827',
+    color: colors.text,
     fontWeight: '600'
   },
   clearText: {
-    color: '#2563eb',
-    marginBottom: 8
+    color: colors.accent,
+    fontWeight: '700',
+    marginBottom: 10
   },
   list: {
     paddingBottom: 24
   },
   card: {
-    backgroundColor: '#ffffff',
-    borderColor: '#e5e7eb',
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderRadius: 8,
     borderWidth: 1,
     marginBottom: 12,
-    padding: 14
+    padding: 16,
+    ...cardShadow
   },
   cardTitle: {
-    color: '#111827',
-    fontSize: 17,
-    fontWeight: '700',
-    marginBottom: 4
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '800',
+    marginBottom: 6
   },
   cardMeta: {
-    color: '#6b7280',
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: '600',
     marginBottom: 8
   },
   cardContent: {
-    color: '#374151',
-    lineHeight: 20
+    color: colors.textMuted,
+    lineHeight: 21
   },
-  tags: {
-    color: '#2563eb',
-    marginTop: 8
+  tagRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 12
+  },
+  tagPill: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 5
+  },
+  tagText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700'
   },
   centerState: {
     alignItems: 'center',
@@ -219,10 +281,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center'
   },
   mutedText: {
-    color: '#6b7280'
+    color: colors.textMuted
   },
   errorText: {
-    color: '#b91c1c',
+    color: colors.danger,
     textAlign: 'center'
   }
 });

@@ -19,7 +19,7 @@ const memorySchema = new Schema<MemoryDocument>(
     },
     content: {
       type: String,
-      required: [true, 'Content is required'],
+      default: '',
       trim: true
     },
     category: {

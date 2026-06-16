@@ -13,6 +13,7 @@ import {
 import { router } from 'expo-router';
 
 import { createMemory } from '../services/api';
+import { cardShadow, colors } from '../styles/theme';
 
 const parseTags = (value: string) =>
   value
@@ -29,8 +30,8 @@ export default function AddScreen() {
   const [error, setError] = useState('');
 
   const saveMemory = async () => {
-    if (!title.trim() || !content.trim()) {
-      setError('Title and content are required');
+    if (!title.trim()) {
+      setError('Title is required');
       return;
     }
 
@@ -38,17 +39,15 @@ export default function AddScreen() {
       setSaving(true);
       setError('');
 
-      const memory = await createMemory({
+      const parsedTags = parseTags(tags);
+      await createMemory({
         title: title.trim(),
-        content: content.trim(),
+        content: content.trim() || undefined,
         category: category.trim() || undefined,
-        tags: parseTags(tags)
+        tags: parsedTags.length ? parsedTags : undefined
       });
 
-      router.replace({
-        pathname: '/memories/[id]',
-        params: { id: memory._id }
-      });
+      router.replace('/');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to create memory');
     } finally {
@@ -62,40 +61,50 @@ export default function AddScreen() {
       style={styles.screen}
     >
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={styles.label}>Title</Text>
-        <TextInput
-          value={title}
-          onChangeText={setTitle}
-          placeholder="A useful title"
-          style={styles.input}
-        />
+        <View style={styles.panel}>
+          <Text style={styles.label}>Title</Text>
+          <TextInput
+            value={title}
+            onChangeText={setTitle}
+            placeholder="A useful title"
+            placeholderTextColor={colors.textSoft}
+            style={styles.input}
+          />
 
-        <Text style={styles.label}>Content</Text>
-        <TextInput
-          value={content}
-          onChangeText={setContent}
-          multiline
-          placeholder="What do you want to remember?"
-          style={[styles.input, styles.textArea]}
-          textAlignVertical="top"
-        />
+          <Text style={styles.label}>Content</Text>
+          <TextInput
+            value={content}
+            onChangeText={setContent}
+            multiline
+            placeholder="Add detail when it helps"
+            placeholderTextColor={colors.textSoft}
+            style={[styles.input, styles.textArea]}
+            textAlignVertical="top"
+          />
 
-        <Text style={styles.label}>Category</Text>
-        <TextInput
-          value={category}
-          onChangeText={setCategory}
-          placeholder="general"
-          style={styles.input}
-        />
+          <View style={styles.twoColumnRow}>
+            <View style={styles.fieldColumn}>
+              <Text style={styles.label}>Category</Text>
+              <TextInput
+                value={category}
+                onChangeText={setCategory}
+                placeholder="general"
+                placeholderTextColor={colors.textSoft}
+                style={styles.input}
+              />
+            </View>
+          </View>
 
-        <Text style={styles.label}>Tags</Text>
-        <TextInput
-          value={tags}
-          onChangeText={setTags}
-          placeholder="comma, separated, tags"
-          autoCapitalize="none"
-          style={styles.input}
-        />
+          <Text style={styles.label}>Tags</Text>
+          <TextInput
+            value={tags}
+            onChangeText={setTags}
+            placeholder="comma, separated, tags"
+            placeholderTextColor={colors.textSoft}
+            autoCapitalize="none"
+            style={styles.input}
+          />
+        </View>
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
@@ -122,34 +131,53 @@ export default function AddScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#f7f7f8'
+    backgroundColor: colors.background
   },
   content: {
-    padding: 16
+    padding: 18,
+    paddingBottom: 32
   },
-  label: {
-    color: '#111827',
-    fontWeight: '700',
-    marginBottom: 6,
-    marginTop: 12
-  },
-  input: {
-    backgroundColor: '#ffffff',
-    borderColor: '#d1d5db',
+  panel: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderRadius: 8,
     borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10
+    padding: 16,
+    ...cardShadow
+  },
+  label: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 7,
+    marginTop: 14
+  },
+  input: {
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    color: colors.text,
+    fontSize: 16,
+    paddingHorizontal: 13,
+    paddingVertical: 12
   },
   textArea: {
-    minHeight: 150
+    minHeight: 150,
+    lineHeight: 22
+  },
+  twoColumnRow: {
+    flexDirection: 'row'
+  },
+  fieldColumn: {
+    flex: 1
   },
   primaryButton: {
     alignItems: 'center',
-    backgroundColor: '#2563eb',
+    backgroundColor: colors.accent,
     borderRadius: 8,
-    marginTop: 20,
-    padding: 14
+    marginTop: 18,
+    padding: 15
   },
   disabledButton: {
     opacity: 0.7
@@ -160,15 +188,21 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     alignItems: 'center',
-    marginTop: 14,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 8,
+    marginTop: 12,
     padding: 12
   },
   secondaryButtonText: {
-    color: '#2563eb',
+    color: colors.text,
     fontWeight: '700'
   },
   errorText: {
-    color: '#b91c1c',
-    marginTop: 12
+    backgroundColor: colors.dangerSurface,
+    borderRadius: 8,
+    color: colors.danger,
+    marginTop: 14,
+    padding: 12,
+    textAlign: 'center'
   }
 });

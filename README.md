@@ -113,6 +113,12 @@ MEMORY_API_KEY=
 https://your-vercel-domain.vercel.app/api/memories
 ```
 
+Privacy policy page:
+
+```bash
+https://your-vercel-domain.vercel.app/privacy
+```
+
 ## Expo Mobile App
 
 The Expo React Native app lives in `mobile/`.

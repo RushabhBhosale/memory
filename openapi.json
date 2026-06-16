@@ -7,7 +7,7 @@
   },
   "servers": [
     {
-      "url": "https://your-domain.com"
+      "url": "https://memory-green-kappa.vercel.app"
     }
   ],
   "security": [
@@ -20,7 +20,7 @@
       "post": {
         "operationId": "saveMemory",
         "summary": "Save a memory",
-        "description": "Create a new memory with a title, content, optional category, tags, and source.",
+        "description": "Create a new memory with a required title and optional content, category, tags, and source.",
         "requestBody": {
           "required": true,
           "content": {
@@ -58,7 +58,7 @@
       "get": {
         "operationId": "searchMemories",
         "summary": "Search memories",
-        "description": "Search memories by title, content, category, or tags. Results are sorted newest first and limited to 20.",
+        "description": "Search memories by title, content, category, or tags. Search tolerates reordered words and minor spelling mistakes. Results are ranked by relevance, with newest memories first for ties, and limited to 20.",
         "parameters": [
           {
             "name": "q",
@@ -101,7 +101,14 @@
         "description": "Retrieve the full details of a single memory.",
         "parameters": [
           {
-            "$ref": "#/components/parameters/MemoryId"
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "MongoDB ObjectId of the memory.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-fA-F0-9]{24}$"
+            }
           }
         ],
         "responses": {
@@ -135,7 +142,14 @@
         "description": "Delete a memory by ID.",
         "parameters": [
           {
-            "$ref": "#/components/parameters/MemoryId"
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "MongoDB ObjectId of the memory.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-fA-F0-9]{24}$"
+            }
           }
         ],
         "responses": {
@@ -173,25 +187,12 @@
         "name": "x-api-key"
       }
     },
-    "parameters": {
-      "MemoryId": {
-        "name": "id",
-        "in": "path",
-        "required": true,
-        "description": "MongoDB ObjectId of the memory.",
-        "schema": {
-          "type": "string",
-          "pattern": "^[a-fA-F0-9]{24}$"
-        }
-      }
-    },
     "schemas": {
       "CreateMemoryRequest": {
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "title",
-          "content"
+          "title"
         ],
         "properties": {
           "title": {
@@ -202,7 +203,7 @@
           "content": {
             "type": "string",
             "description": "Full memory content.",
-            "minLength": 1
+            "default": ""
           },
           "category": {
             "type": "string",
@@ -334,14 +335,10 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "error",
-          "message"
+          "error"
         ],
         "properties": {
           "error": {
-            "type": "string"
-          },
-          "message": {
             "type": "string"
           }
         }
