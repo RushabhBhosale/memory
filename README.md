@@ -1,30 +1,34 @@
-# Personal Memory Backend
+# Personal Memory App
 
-Express and MongoDB backend for a personal memory app.
+Next.js App Router backend and Expo React Native mobile app for saving and searching personal memories.
 
-## Setup
+## Backend Setup
 
 ```bash
 npm install
-cp .env.example .env
+cp .env.local.example .env.local
 npm run dev
 ```
 
-Set `MONGO_URI` and `MEMORY_API_KEY` in `.env`.
+Set these values in `.env.local`:
 
-## Routes
+```bash
+MONGO_URI=
+MEMORY_API_KEY=
+```
+
+The local Next.js server runs at `http://localhost:3000` by default.
+
+## Backend Routes
 
 All memory routes require the `x-api-key` header.
 
-- `POST /api/memories`
 - `GET /api/memories`
+- `POST /api/memories`
 - `GET /api/memories/search?q=term`
 - `GET /api/memories/:id`
+- `PATCH /api/memories/:id`
 - `DELETE /api/memories/:id`
-
-Health check:
-
-- `GET /health`
 
 ## Test With Curl
 
@@ -32,7 +36,7 @@ Set your API key first:
 
 ```bash
 API_KEY=replace-with-your-memory-api-key
-BASE_URL=http://localhost:5000
+BASE_URL=http://localhost:3000
 ```
 
 Create a memory:
@@ -73,11 +77,40 @@ curl "$BASE_URL/api/memories/$MEMORY_ID" \
   -H "x-api-key: $API_KEY"
 ```
 
+Update a memory:
+
+```bash
+curl -X PATCH "$BASE_URL/api/memories/$MEMORY_ID" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -d '{
+    "category": "updated",
+    "tags": ["updated", "memory"]
+  }'
+```
+
 Delete a memory:
 
 ```bash
 curl -X DELETE "$BASE_URL/api/memories/$MEMORY_ID" \
   -H "x-api-key: $API_KEY"
+```
+
+## Vercel Deployment
+
+1. Push this repository to GitHub.
+2. Import the project in Vercel.
+3. Add these environment variables in Vercel Project Settings:
+
+```bash
+MONGO_URI=
+MEMORY_API_KEY=
+```
+
+4. Deploy. Your API will be available at:
+
+```bash
+https://your-vercel-domain.vercel.app/api/memories
 ```
 
 ## Expo Mobile App
@@ -91,14 +124,14 @@ cp .env.example .env
 npm start
 ```
 
-Set these values in `mobile/.env`:
+For the deployed backend, set these values in `mobile/.env`:
 
 ```bash
-EXPO_PUBLIC_API_URL=http://localhost:5000
+EXPO_PUBLIC_API_URL=https://your-vercel-domain.vercel.app/api/memories
 EXPO_PUBLIC_MEMORY_API_KEY=replace-with-your-memory-api-key
 ```
 
-If you run the app on a physical device, replace `localhost` with your computer's LAN IP address. Android emulators often need `http://10.0.2.2:5000`.
+For local development, use your local Next.js API endpoint. Expo Go on a physical device needs your computer's LAN IP address, for example `http://192.168.1.5:3000/api/memories`. Android emulators often need `http://10.0.2.2:3000/api/memories`.
 
 Mobile scripts:
 

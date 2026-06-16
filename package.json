@@ -1,26 +1,29 @@
 {
-  "name": "personal-memory-backend",
+  "name": "personal-memory-next",
   "version": "1.0.0",
-  "description": "Node.js Express backend for a personal memory app.",
-  "main": "src/server.js",
+  "description": "Next.js App Router backend for a personal memory app.",
   "scripts": {
-    "dev": "nodemon src/server.js",
-    "start": "node src/server.js"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
   },
   "keywords": [
-    "express",
+    "nextjs",
     "mongoose",
     "memory"
   ],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.7",
-    "express": "^4.21.2",
-    "mongoose": "^8.9.5"
+    "mongoose": "^8.9.5",
+    "next": "^16.2.9",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
-    "nodemon": "^3.1.9"
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^6.0.3"
   }
 }

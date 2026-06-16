@@ -1,6 +1,16 @@
-const mongoose = require('mongoose');
+import mongoose, { Schema, type Document, type Model } from 'mongoose';
 
-const memorySchema = new mongoose.Schema(
+export type MemoryDocument = Document & {
+  title: string;
+  content: string;
+  category: string;
+  tags: string[];
+  source: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+const memorySchema = new Schema<MemoryDocument>(
   {
     title: {
       type: String,
@@ -32,11 +42,8 @@ const memorySchema = new mongoose.Schema(
   }
 );
 
-memorySchema.index({
-  title: 'text',
-  content: 'text',
-  category: 'text',
-  tags: 'text'
-});
+const Memory =
+  (mongoose.models.Memory as Model<MemoryDocument> | undefined) ??
+  mongoose.model<MemoryDocument>('Memory', memorySchema);
 
-module.exports = mongoose.model('Memory', memorySchema);
+export default Memory;
