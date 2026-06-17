@@ -11,13 +11,10 @@ export type MemoryDocument = Document & {
   capturedAt?: Date;
   kind: 'note' | 'task' | 'work_done' | 'requirement' | 'credential';
   projectId?: mongoose.Types.ObjectId;
-  attachment?: {
-    kind: 'screenshot';
-    name: string;
-    mimeType: string;
-    dataUrl: string;
-    size: number;
-  };
+  reminderAt?: Date;
+  notificationEnabled: boolean;
+  importance: number;
+  embedding?: number[] | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -73,40 +70,37 @@ const memorySchema = new Schema<MemoryDocument>(
       ref: 'Project',
       default: undefined
     },
-    attachment: {
-      type: new Schema(
-        {
-          kind: {
-            type: String,
-            enum: ['screenshot'],
-            required: true
-          },
-          name: {
-            type: String,
-            default: ''
-          },
-          mimeType: {
-            type: String,
-            default: 'application/octet-stream'
-          },
-          dataUrl: {
-            type: String,
-            required: true
-          },
-          size: {
-            type: Number,
-            required: true
-          }
-        },
-        { _id: false }
-      ),
-      default: undefined
+    reminderAt: {
+      type: Date,
+      default: undefined,
+      index: true
+    },
+    notificationEnabled: {
+      type: Boolean,
+      default: false
+    },
+    importance: {
+      type: Number,
+      min: 1,
+      max: 5,
+      default: 3,
+      index: true
+    },
+    embedding: {
+      type: [Number],
+      default: null
     }
   },
   {
     timestamps: true
   }
 );
+
+memorySchema.index({ title: 1 });
+memorySchema.index({ tags: 1 });
+memorySchema.index({ projectId: 1 });
+memorySchema.index({ createdAt: -1 });
+memorySchema.index({ title: 'text', content: 'text', tags: 'text' });
 
 const Memory =
   (mongoose.models.Memory as Model<MemoryDocument> | undefined) ??

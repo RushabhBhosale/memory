@@ -12,14 +12,6 @@ export type ExtensionSource = {
   capturedAt: string;
 };
 
-export type ExtensionAttachment = {
-  kind: 'screenshot';
-  name: string;
-  mimeType: string;
-  dataUrl: string;
-  size: number;
-};
-
 type ExtensionPayload = {
   type?: unknown;
   content?: unknown;
@@ -96,13 +88,11 @@ const makeTitle = (
   type: ExtensionSaveType,
   content: string,
   note: string,
-  source: ExtensionSource,
-  attachment?: ExtensionAttachment
+  source: ExtensionSource
 ) => {
-  const label = attachment ? 'Screenshot' : type === 'project' ? 'Project note' : type;
+  const label = type === 'project' ? 'Project note' : type;
   const rawTitle = source.title || content || note || `${label} from Chrome`;
-  const prefix = attachment ? 'Screenshot: ' : '';
-  const title = `${prefix}${rawTitle}`.replace(/\s+/g, ' ').trim();
+  const title = rawTitle.replace(/\s+/g, ' ').trim();
 
   return title.length > 90 ? `${title.slice(0, 87)}...` : title;
 };
@@ -110,13 +100,11 @@ const makeTitle = (
 const buildContent = (
   content: string,
   note: string,
-  source: ExtensionSource,
-  attachment?: ExtensionAttachment
+  source: ExtensionSource
 ) =>
   [
     content,
     note ? `Note: ${note}` : '',
-    attachment ? `Screenshot: ${attachment.name || 'visible-tab.png'}` : '',
     source.title ? `Page: ${source.title}` : '',
     source.url ? `URL: ${source.url}` : '',
     `Captured: ${source.capturedAt}`
@@ -136,10 +124,7 @@ const assertProjectExists = async (projectId: string | undefined) => {
   }
 };
 
-export const createExtensionMemory = async (
-  payload: ExtensionPayload,
-  attachment?: ExtensionAttachment
-) => {
+export const createExtensionMemory = async (payload: ExtensionPayload) => {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new ExtensionRequestError('Invalid request body');
   }
@@ -150,7 +135,7 @@ export const createExtensionMemory = async (
   const projectId = normalizeProjectId(payload.projectId);
   const source = normalizeSource(payload.source);
 
-  if (!content && !note && !source.title && !source.url && !attachment) {
+  if (!content && !note && !source.title && !source.url) {
     throw new ExtensionRequestError('Nothing to save');
   }
 
@@ -159,8 +144,8 @@ export const createExtensionMemory = async (
   const config = getTypeConfig(type);
   const capturedDate = new Date(source.capturedAt);
   const memory = await Memory.create({
-    title: makeTitle(type, content, note, source, attachment),
-    content: buildContent(content, note, source, attachment),
+    title: makeTitle(type, content, note, source),
+    content: buildContent(content, note, source),
     category: config.category,
     kind: config.kind,
     tags: ['chrome-extension', type],
@@ -168,10 +153,8 @@ export const createExtensionMemory = async (
     sourceTitle: source.title,
     sourceUrl: source.url,
     capturedAt: Number.isNaN(capturedDate.getTime()) ? new Date() : capturedDate,
-    projectId,
-    attachment
+    projectId
   });
 
   return Memory.findById(memory._id).populate('projectId', 'name description status').lean();
 };
-

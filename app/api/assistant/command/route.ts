@@ -3,6 +3,13 @@ import { NextResponse } from 'next/server';
 
 import { validateApiKey } from '@/lib/apiKey';
 import { connectDB } from '@/lib/mongodb';
+import {
+  buildCompactSearchContext,
+  rankSearchCandidates,
+  selectTopRankedResults,
+  toCompactSearchResults,
+  type SearchCandidate
+} from '@/lib/searchRanking';
 import AssistantSession from '@/models/AssistantSession';
 import Memory from '@/models/Memory';
 import Project from '@/models/Project';
@@ -25,8 +32,12 @@ type ProjectLike = {
   status?: string;
 };
 
+type LastItemType = 'memory' | 'task' | 'note' | 'meeting';
+type RawDocument = Record<string, unknown>;
+
 const DEFAULT_SESSION_KEY = 'default';
 const RECENT_LIMIT = 20;
+const SEARCH_CANDIDATE_LIMIT = 500;
 const SUMMARY_LIMIT = 8;
 const DELETE_CHOICE_LIMIT = 10;
 
@@ -78,6 +89,172 @@ const makeTitle = (value: string) => {
 
   return title.length > 80 ? `${title.slice(0, 77)}...` : title;
 };
+
+const toStringValue = (value: unknown) => (typeof value === 'string' ? value : '');
+
+const toStringArray = (value: unknown) =>
+  Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
+
+const toObjectIdString = (value: unknown) => {
+  if (!value) {
+    return undefined;
+  }
+
+  if (value instanceof mongoose.Types.ObjectId) {
+    return value.toString();
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (typeof value === 'object' && '_id' in value) {
+    const nestedId = (value as { _id?: unknown })._id;
+
+    return nestedId ? String(nestedId) : undefined;
+  }
+
+  return String(value);
+};
+
+const toDateValue = (value: unknown) => {
+  if (value instanceof Date || typeof value === 'string') {
+    return value;
+  }
+
+  return undefined;
+};
+
+const getPopulatedProject = (value: unknown) => {
+  if (
+    value &&
+    typeof value === 'object' &&
+    '_id' in value &&
+    'name' in value &&
+    typeof (value as { name?: unknown }).name === 'string'
+  ) {
+    return value as ProjectLike;
+  }
+
+  return null;
+};
+
+const inferImportance = (content: string, fallback: number) => {
+  const normalized = content.toLowerCase();
+  const criticalPattern =
+    /\b(passport|credential|credentials|password|secret|production|prod|api key|apikey|appkey|token|config|private key)\b/;
+
+  if (criticalPattern.test(normalized)) {
+    return 5;
+  }
+
+  if (/\b(random note|random thought|rough note|scratch)\b/.test(normalized)) {
+    return 1;
+  }
+
+  return fallback;
+};
+
+const timeFormatter = new Intl.DateTimeFormat(undefined, {
+  dateStyle: 'medium',
+  timeStyle: 'short'
+});
+
+const getStartOfDay = (date: Date) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+const getTomorrow = () => {
+  const tomorrow = getStartOfDay(new Date());
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  return tomorrow;
+};
+
+const getReminderDateHint = (input: string) => {
+  if (/\btomorrow\b/i.test(input)) {
+    return getTomorrow();
+  }
+
+  if (/\btoday\b/i.test(input)) {
+    return getStartOfDay(new Date());
+  }
+
+  return null;
+};
+
+const parseReminderTime = (input: string) => {
+  const meridiemMatch = input.match(/\b(?:at\s*)?(\d{1,2})(?::([0-5]\d))?\s*(am|pm)\b/i);
+
+  if (meridiemMatch) {
+    const meridiem = meridiemMatch[3].toLowerCase();
+    let hour = Number.parseInt(meridiemMatch[1], 10);
+    const minute = meridiemMatch[2] ? Number.parseInt(meridiemMatch[2], 10) : 0;
+
+    if (hour < 1 || hour > 12) {
+      return null;
+    }
+
+    if (meridiem === 'pm' && hour !== 12) {
+      hour += 12;
+    }
+
+    if (meridiem === 'am' && hour === 12) {
+      hour = 0;
+    }
+
+    return { hour, minute };
+  }
+
+  const twentyFourHourMatch = input.match(/\bat\s+([01]?\d|2[0-3]):([0-5]\d)\b/i);
+
+  if (!twentyFourHourMatch) {
+    return null;
+  }
+
+  return {
+    hour: Number.parseInt(twentyFourHourMatch[1], 10),
+    minute: Number.parseInt(twentyFourHourMatch[2], 10)
+  };
+};
+
+const buildReminderDate = (
+  input: string,
+  pendingDate?: Date | string | null
+) => {
+  const time = parseReminderTime(input);
+
+  if (!time) {
+    return null;
+  }
+
+  const explicitDate = getReminderDateHint(input);
+  const baseDate = explicitDate || (pendingDate ? new Date(pendingDate) : getStartOfDay(new Date()));
+  const reminderAt = getStartOfDay(baseDate);
+
+  reminderAt.setHours(time.hour, time.minute, 0, 0);
+
+  if (!explicitDate && !pendingDate && reminderAt.getTime() <= Date.now()) {
+    reminderAt.setDate(reminderAt.getDate() + 1);
+  }
+
+  return reminderAt;
+};
+
+const cleanReminderContent = (input: string) => {
+  const content = input
+    .replace(/^remind\s+me\s*(?:to|that|of|about)?\s*/i, '')
+    .replace(/\b(?:today|tomorrow)\b/gi, '')
+    .replace(/\b(?:at\s*)?\d{1,2}(?::[0-5]\d)?\s*(?:am|pm)\b/gi, '')
+    .replace(/\bat\s+(?:[01]?\d|2[0-3]):[0-5]\d\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return content || input.trim();
+};
+
+const formatReminderDate = (date: Date) => timeFormatter.format(date);
 
 const getSessionKey = (request: Request, body: CommandBody) => {
   const bodySessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
@@ -147,6 +324,66 @@ const setActiveProject = async (sessionKey: string, projectId: mongoose.Types.Ob
     { new: true, upsert: true }
   ).populate('activeProjectId', 'name description status');
 
+const setLastItem = async (sessionKey: string, type: LastItemType, id: unknown) => {
+  const itemId = toObjectIdString(id);
+
+  if (!itemId || !mongoose.Types.ObjectId.isValid(itemId)) {
+    return null;
+  }
+
+  return AssistantSession.findOneAndUpdate(
+    { sessionKey },
+    {
+      sessionKey,
+      lastItemId: new mongoose.Types.ObjectId(itemId),
+      lastItemType: type
+    },
+    { new: true, upsert: true }
+  );
+};
+
+const setPendingReminder = async (
+  sessionKey: string,
+  content: string,
+  reminderDate: Date | null
+) => {
+  const update =
+    reminderDate === null
+      ? {
+          $set: {
+            sessionKey,
+            pendingReminderContent: content
+          },
+          $unset: {
+            pendingReminderDate: ''
+          }
+        }
+      : {
+          $set: {
+            sessionKey,
+            pendingReminderContent: content,
+            pendingReminderDate: reminderDate
+          }
+        };
+
+  return AssistantSession.findOneAndUpdate({ sessionKey }, update, {
+    new: true,
+    upsert: true
+  });
+};
+
+const clearPendingReminder = async (sessionKey: string) =>
+  AssistantSession.findOneAndUpdate(
+    { sessionKey },
+    {
+      $unset: {
+        pendingReminderContent: '',
+        pendingReminderDate: ''
+      }
+    },
+    { new: true }
+  );
+
 const getActiveProject = async (sessionKey: string) => {
   const session = await getSession(sessionKey);
   const activeProject = session.activeProjectId;
@@ -176,7 +413,24 @@ const createStandaloneMemory = async (content: string) => {
     content,
     category: 'general',
     tags: [],
-    source: 'assistant'
+    source: 'assistant',
+    importance: inferImportance(content, 3)
+  });
+
+  return memory.toObject();
+};
+
+const createReminderMemory = async (content: string, reminderAt: Date) => {
+  const memory = await Memory.create({
+    title: makeTitle(`Reminder: ${content}`),
+    content,
+    category: 'reminder',
+    tags: ['reminder'],
+    source: 'assistant',
+    kind: 'note',
+    reminderAt,
+    notificationEnabled: true,
+    importance: 4
   });
 
   return memory.toObject();
@@ -187,7 +441,8 @@ const createProjectTask = async (project: ProjectLike, description: string) => {
     projectId: project._id,
     title: makeTitle(description),
     description,
-    source: 'assistant'
+    source: 'assistant',
+    importance: 3
   });
 
   return task.toObject();
@@ -199,7 +454,8 @@ const createProjectNote = async (project: ProjectLike, content: string) => {
     title: makeTitle(content),
     content,
     kind: 'note',
-    source: 'assistant'
+    source: 'assistant',
+    importance: inferImportance(content, 3)
   });
 
   return note.toObject();
@@ -215,7 +471,8 @@ const createTypedProjectNote = async (
     title: makeTitle(content),
     content,
     kind,
-    source: 'assistant'
+    source: 'assistant',
+    importance: inferImportance(content, kind === 'credential' ? 5 : 3)
   });
 
   return note.toObject();
@@ -226,7 +483,8 @@ const createProjectMeeting = async (project: ProjectLike, details: string) => {
     projectId: project._id,
     title: makeTitle(details),
     details,
-    source: 'assistant'
+    source: 'assistant',
+    importance: 4
   });
 
   return meeting.toObject();
@@ -270,48 +528,149 @@ const getProjectSummary = async (project: ProjectLike) => {
   };
 };
 
-const searchGrouped = async (query: string) => {
+const toProjectCandidate = (project: RawDocument): SearchCandidate => ({
+  id: String(project._id),
+  type: 'project',
+  title: toStringValue(project.name),
+  content: toStringValue(project.description),
+  tags: toStringArray(project.tags),
+  projectName: toStringValue(project.name),
+  createdAt: toDateValue(project.createdAt)
+});
+
+const toProjectItemCandidate = (
+  doc: RawDocument,
+  type: 'task' | 'note' | 'meeting',
+  contentField: 'description' | 'content' | 'details'
+): SearchCandidate => {
+  const project = getPopulatedProject(doc.projectId);
+
+  return {
+    id: String(doc._id),
+    type,
+    title: toStringValue(doc.title),
+    content: toStringValue(doc[contentField]),
+    tags: toStringArray(doc.tags),
+    projectId: toObjectIdString(doc.projectId),
+    projectName: project?.name,
+    importance: typeof doc.importance === 'number' ? doc.importance : undefined,
+    createdAt: toDateValue(doc.createdAt)
+  };
+};
+
+const toMemoryCandidate = (memory: RawDocument): SearchCandidate => {
+  const project = getPopulatedProject(memory.projectId);
+
+  return {
+    id: String(memory._id),
+    type: 'memory',
+    title: toStringValue(memory.title),
+    content: toStringValue(memory.content),
+    tags: toStringArray(memory.tags),
+    projectId: toObjectIdString(memory.projectId),
+    projectName: project?.name,
+    importance: typeof memory.importance === 'number' ? memory.importance : undefined,
+    createdAt: toDateValue(memory.createdAt)
+  };
+};
+
+const searchRanked = async (query: string, activeProject: ProjectLike | null) => {
   const projectQuery = buildTextQuery(query, ['name', 'description', 'tags']);
   const taskQuery = buildTextQuery(query, ['title', 'description', 'status', 'tags']);
   const noteQuery = buildTextQuery(query, ['title', 'content', 'kind', 'tags']);
   const meetingQuery = buildTextQuery(query, ['title', 'details', 'tags']);
-  const memoryQuery = buildTextQuery(query, ['title', 'content', 'category', 'tags', 'source']);
-
-  const [projects, tasks, notes, meetings, memories] = await Promise.all([
-    Project.find(projectQuery).sort({ updatedAt: -1 }).limit(RECENT_LIMIT).lean(),
-    ProjectTask.find(taskQuery)
-      .sort({ updatedAt: -1 })
-      .limit(RECENT_LIMIT)
-      .populate('projectId', 'name description status')
-      .lean(),
-    ProjectNote.find(noteQuery)
-      .sort({ updatedAt: -1 })
-      .limit(RECENT_LIMIT)
-      .populate('projectId', 'name description status')
-      .lean(),
-    ProjectMeeting.find(meetingQuery)
-      .sort({ updatedAt: -1 })
-      .limit(RECENT_LIMIT)
-      .populate('projectId', 'name description status')
-      .lean(),
-    Memory.find(memoryQuery).sort({ updatedAt: -1 }).limit(RECENT_LIMIT).lean()
+  const memoryQuery = buildTextQuery(query, [
+    'title',
+    'content',
+    'category',
+    'tags',
+    'source',
+    'sourceTitle',
+    'sourceUrl'
   ]);
 
-  return {
+  const [
     projects,
     tasks,
     notes,
     meetings,
-    memories
+    memories,
+    projectCount,
+    taskCount,
+    noteCount,
+    meetingCount,
+    memoryCount
+  ] = (await Promise.all([
+    Project.find(projectQuery).sort({ updatedAt: -1 }).limit(SEARCH_CANDIDATE_LIMIT).lean(),
+    ProjectTask.find(taskQuery)
+      .sort({ updatedAt: -1 })
+      .limit(SEARCH_CANDIDATE_LIMIT)
+      .populate('projectId', 'name description status')
+      .lean(),
+    ProjectNote.find(noteQuery)
+      .sort({ updatedAt: -1 })
+      .limit(SEARCH_CANDIDATE_LIMIT)
+      .populate('projectId', 'name description status')
+      .lean(),
+    ProjectMeeting.find(meetingQuery)
+      .sort({ updatedAt: -1 })
+      .limit(SEARCH_CANDIDATE_LIMIT)
+      .populate('projectId', 'name description status')
+      .lean(),
+    Memory.find(memoryQuery)
+      .sort({ updatedAt: -1 })
+      .limit(SEARCH_CANDIDATE_LIMIT)
+      .populate('projectId', 'name description status')
+      .lean(),
+    Project.countDocuments(projectQuery),
+    ProjectTask.countDocuments(taskQuery),
+    ProjectNote.countDocuments(noteQuery),
+    ProjectMeeting.countDocuments(meetingQuery),
+    Memory.countDocuments(memoryQuery)
+  ])) as [
+    RawDocument[],
+    RawDocument[],
+    RawDocument[],
+    RawDocument[],
+    RawDocument[],
+    number,
+    number,
+    number,
+    number,
+    number
+  ];
+
+  const candidates: SearchCandidate[] = [
+    ...projects.map(toProjectCandidate),
+    ...tasks.map((task) => toProjectItemCandidate(task, 'task', 'description')),
+    ...notes.map((note) => toProjectItemCandidate(note, 'note', 'content')),
+    ...meetings.map((meeting) => toProjectItemCandidate(meeting, 'meeting', 'details')),
+    ...memories.map(toMemoryCandidate)
+  ];
+  const totalMatches = projectCount + taskCount + noteCount + meetingCount + memoryCount;
+  const activeProjectId = toObjectIdString(activeProject?._id) || null;
+  const rankedResults = rankSearchCandidates(candidates, query, activeProjectId);
+  const topResults = selectTopRankedResults(rankedResults, totalMatches);
+
+  return {
+    query,
+    totalMatches,
+    returnedCount: topResults.length,
+    context: buildCompactSearchContext(query, topResults),
+    results: toCompactSearchResults(topResults)
   };
 };
 
-const countGroupedResults = (results: Awaited<ReturnType<typeof searchGrouped>>) =>
-  results.projects.length +
-  results.tasks.length +
-  results.notes.length +
-  results.meetings.length +
-  results.memories.length;
+const handleRankedSearch = async (sessionKey: string, query: string) => {
+  const activeProject = await getActiveProject(sessionKey);
+  const search = await searchRanked(query, activeProject);
+
+  return NextResponse.json({
+    message: `Found ${search.totalMatches} result(s) for "${query}". Retrieved ${search.returnedCount} top result(s).`,
+    activeProject: getProjectDisplay(activeProject),
+    data: search
+  });
+};
 
 const searchTasksForDelete = async (query: string, projectId?: unknown) => {
   const baseQuery = buildTextQuery(query, ['title', 'description', 'status', 'tags']);
@@ -415,6 +774,129 @@ const handleDeleteMemory = async (query: string) => {
   });
 };
 
+const updateImportanceForLastItem = async (sessionKey: string, importance: number) => {
+  const session = await getSession(sessionKey);
+  const lastItemType = session.lastItemType as LastItemType | undefined;
+  const lastItemId = toObjectIdString(session.lastItemId);
+
+  if (!lastItemType || !lastItemId) {
+    return NextResponse.json({
+      message: 'Save or create an item first, then use @importance 1-5.',
+      needsSelection: true
+    });
+  }
+
+  let updatedItem: RawDocument | null = null;
+
+  if (lastItemType === 'memory') {
+    updatedItem = (await Memory.findByIdAndUpdate(
+      lastItemId,
+      { importance },
+      { new: true, runValidators: true }
+    ).lean()) as RawDocument | null;
+  }
+
+  if (lastItemType === 'task') {
+    updatedItem = (await ProjectTask.findByIdAndUpdate(
+      lastItemId,
+      { importance },
+      { new: true, runValidators: true }
+    ).lean()) as RawDocument | null;
+  }
+
+  if (lastItemType === 'note') {
+    updatedItem = (await ProjectNote.findByIdAndUpdate(
+      lastItemId,
+      { importance },
+      { new: true, runValidators: true }
+    ).lean()) as RawDocument | null;
+  }
+
+  if (lastItemType === 'meeting') {
+    updatedItem = (await ProjectMeeting.findByIdAndUpdate(
+      lastItemId,
+      { importance },
+      { new: true, runValidators: true }
+    ).lean()) as RawDocument | null;
+  }
+
+  if (!updatedItem) {
+    return NextResponse.json({
+      message: 'The last saved item could not be found.',
+      data: null
+    });
+  }
+
+  const label = `${lastItemType[0].toUpperCase()}${lastItemType.slice(1)}`;
+  const title = toStringValue(updatedItem.title) || String(updatedItem._id);
+
+  return NextResponse.json({
+    message: `Importance set to ${importance} for ${label}: ${title}`,
+    data: updatedItem
+  });
+};
+
+const saveReminder = async (sessionKey: string, content: string, reminderAt: Date) => {
+  const memory = await createReminderMemory(content, reminderAt);
+  await setLastItem(sessionKey, 'memory', memory._id);
+  await clearPendingReminder(sessionKey);
+
+  return NextResponse.json({
+    message: `Reminder saved for ${formatReminderDate(reminderAt)}`,
+    data: memory
+  });
+};
+
+const askForReminderTime = async (
+  sessionKey: string,
+  content: string,
+  reminderDate: Date | null
+) => {
+  await setPendingReminder(sessionKey, content, reminderDate);
+
+  const dateText = reminderDate ? ` on ${reminderDate.toDateString()}` : '';
+
+  return NextResponse.json({
+    message: `What time${dateText} should I remind you?`,
+    needsReminderTime: true,
+    data: {
+      content,
+      reminderDate: reminderDate?.toISOString() || null
+    }
+  });
+};
+
+const handleReminderRequest = async (sessionKey: string, input: string) => {
+  const content = cleanReminderContent(input);
+  const reminderAt = buildReminderDate(input);
+
+  if (reminderAt) {
+    return saveReminder(sessionKey, content, reminderAt);
+  }
+
+  return askForReminderTime(sessionKey, content, getReminderDateHint(input));
+};
+
+const handlePendingReminderTime = async (sessionKey: string, input: string) => {
+  const session = await getSession(sessionKey);
+  const pendingContent =
+    typeof session.pendingReminderContent === 'string'
+      ? session.pendingReminderContent.trim()
+      : '';
+
+  if (!pendingContent || !parseReminderTime(input)) {
+    return null;
+  }
+
+  const reminderAt = buildReminderDate(input, session.pendingReminderDate);
+
+  if (!reminderAt) {
+    return null;
+  }
+
+  return saveReminder(sessionKey, pendingContent, reminderAt);
+};
+
 const getProjectFromNaturalTaskQuestion = async (input: string) => {
   const match = input.match(/\btasks?\s+(?:in|for)\s+(.+)$/i);
 
@@ -443,6 +925,59 @@ const getProjectFromNaturalMeetingQuestion = async (input: string) => {
   }
 
   return findProjectByName(match[1]);
+};
+
+const isSimpleListRequest = (input: string, singularName: 'task' | 'note' | 'meeting') =>
+  new RegExp(`^(?:show\\s+|list\\s+|get\\s+|any\\s+)?${singularName}s?\\??$`, 'i').test(
+    input.trim()
+  );
+
+const isQuestionLikeInput = (input: string) => {
+  const normalized = input.trim().toLowerCase();
+
+  return (
+    normalized.endsWith('?') ||
+    /^(?:any|are|can|check|did|do|does|find|get|give|how|is|list|search|show|tell|what|when|where|which|who|why)\b/.test(
+      normalized
+    )
+  );
+};
+
+const isWorkLogStatement = (input: string) => {
+  if (isQuestionLikeInput(input)) {
+    return false;
+  }
+
+  return (
+    /^(?:i\s+)?(?:worked on|working on|fixed|resolved|completed|finished|implemented|added|updated|changed|debugged|investigated|handled|started|did)\b/i.test(
+      input
+    ) ||
+    /\b(?:this|that)\s+(?:task|issue|bug|fix)\b/i.test(input) ||
+    /\b(?:task|issue|bug|fix|work|requirement|change|update)\b/i.test(input)
+  );
+};
+
+const saveNaturalWorkLog = async (sessionKey: string, content: string) => {
+  const activeProject = await getActiveProject(sessionKey);
+
+  if (activeProject) {
+    const note = await createTypedProjectNote(activeProject, content, 'work_done');
+    await setLastItem(sessionKey, 'note', note._id);
+
+    return NextResponse.json({
+      message: `Work entry added to ${activeProject.name}`,
+      activeProject: getProjectDisplay(activeProject),
+      data: note
+    });
+  }
+
+  const memory = await createStandaloneMemory(content);
+  await setLastItem(sessionKey, 'memory', memory._id);
+
+  return NextResponse.json({
+    message: 'Memory saved',
+    data: memory
+  });
 };
 
 const handleProjectSelection = async (sessionKey: string, name: string) => {
@@ -477,6 +1012,7 @@ const handleProjectItemCommand = async (
 
   if (type === 'task') {
     const task = await createProjectTask(activeProject, content);
+    await setLastItem(sessionKey, 'task', task._id);
 
     return NextResponse.json({
       message: `Task added to ${activeProject.name}`,
@@ -487,6 +1023,7 @@ const handleProjectItemCommand = async (
 
   if (type === 'note') {
     const note = await createProjectNote(activeProject, content);
+    await setLastItem(sessionKey, 'note', note._id);
 
     return NextResponse.json({
       message: `Note added to ${activeProject.name}`,
@@ -498,6 +1035,7 @@ const handleProjectItemCommand = async (
   if (type === 'requirement' || type === 'credential' || type === 'work_done') {
     const note = await createTypedProjectNote(activeProject, content, type);
     const label = type === 'work_done' ? 'Work entry' : `${type[0].toUpperCase()}${type.slice(1)}`;
+    await setLastItem(sessionKey, 'note', note._id);
 
     return NextResponse.json({
       message: `${label} added to ${activeProject.name}`,
@@ -507,6 +1045,7 @@ const handleProjectItemCommand = async (
   }
 
   const meeting = await createProjectMeeting(activeProject, content);
+  await setLastItem(sessionKey, 'meeting', meeting._id);
 
   return NextResponse.json({
     message: `Meeting added to ${activeProject.name}`,
@@ -546,10 +1085,21 @@ const handleNaturalLanguage = async (sessionKey: string, input: string) => {
     return handleProjectSelection(sessionKey, projectSwitch[1]);
   }
 
+  const completedPendingReminder = await handlePendingReminderTime(sessionKey, input);
+
+  if (completedPendingReminder) {
+    return completedPendingReminder;
+  }
+
+  if (/^remind\s+me\b/i.test(input)) {
+    return handleReminderRequest(sessionKey, input);
+  }
+
   const memoryMatch = input.match(/^(?:remember this|save this|note this|store this)\s*:?\s+([\s\S]+)$/i);
 
   if (memoryMatch) {
     const memory = await createStandaloneMemory(memoryMatch[1].trim());
+    await setLastItem(sessionKey, 'memory', memory._id);
 
     return NextResponse.json({
       message: 'Memory saved',
@@ -557,11 +1107,26 @@ const handleNaturalLanguage = async (sessionKey: string, input: string) => {
     });
   }
 
+  const explicitSearch = input.match(/^find\s+(.+)$/i) || input.match(/^what do i know about\s+(.+)$/i);
+
+  if (explicitSearch) {
+    return handleRankedSearch(sessionKey, explicitSearch[1].trim());
+  }
+
+  if (isWorkLogStatement(input)) {
+    return saveNaturalWorkLog(sessionKey, input);
+  }
+
   if (/\btasks?\b/i.test(input)) {
     const project = await getProjectFromNaturalTaskQuestion(input);
-    const activeProject = project || (await getActiveProject(sessionKey));
 
-    if (activeProject) {
+    if (project || isSimpleListRequest(input, 'task')) {
+      const activeProject = project || (await getActiveProject(sessionKey));
+
+      if (!activeProject) {
+        return askForProject();
+      }
+
       const tasks = await listProjectTasks(activeProject._id);
 
       return NextResponse.json({
@@ -574,9 +1139,14 @@ const handleNaturalLanguage = async (sessionKey: string, input: string) => {
 
   if (/\bnotes?\b/i.test(input)) {
     const project = await getProjectFromNaturalNoteQuestion(input);
-    const activeProject = project || (await getActiveProject(sessionKey));
 
-    if (activeProject) {
+    if (project || isSimpleListRequest(input, 'note')) {
+      const activeProject = project || (await getActiveProject(sessionKey));
+
+      if (!activeProject) {
+        return askForProject();
+      }
+
       const notes = await listProjectNotes(activeProject._id);
 
       return NextResponse.json({
@@ -589,9 +1159,14 @@ const handleNaturalLanguage = async (sessionKey: string, input: string) => {
 
   if (/\bmeetings?\b/i.test(input)) {
     const project = await getProjectFromNaturalMeetingQuestion(input);
-    const activeProject = project || (await getActiveProject(sessionKey));
 
-    if (activeProject) {
+    if (project || isSimpleListRequest(input, 'meeting')) {
+      const activeProject = project || (await getActiveProject(sessionKey));
+
+      if (!activeProject) {
+        return askForProject();
+      }
+
       const meetings = await listProjectMeetings(activeProject._id);
 
       return NextResponse.json({
@@ -602,14 +1177,7 @@ const handleNaturalLanguage = async (sessionKey: string, input: string) => {
     }
   }
 
-  const naturalSearch = input.match(/^find\s+(.+)$/i) || input.match(/^what do i know about\s+(.+)$/i);
-  const query = naturalSearch ? naturalSearch[1].trim() : input;
-  const results = await searchGrouped(query);
-
-  return NextResponse.json({
-    message: `Found ${countGroupedResults(results)} result(s) for "${query}"`,
-    data: results
-  });
+  return handleRankedSearch(sessionKey, input);
 };
 
 const handleCommand = async (sessionKey: string, input: string) => {
@@ -657,6 +1225,27 @@ const handleCommand = async (sessionKey: string, input: string) => {
     case 'meeting':
       return handleProjectItemCommand(sessionKey, 'meeting', content);
 
+    case 'reminder': {
+      if (!content) {
+        return NextResponse.json({ error: 'Reminder content is required' }, { status: 400 });
+      }
+
+      return handleReminderRequest(sessionKey, `remind me ${content}`);
+    }
+
+    case 'importance': {
+      const importance = Number.parseInt(content, 10);
+
+      if (!Number.isInteger(importance) || importance < 1 || importance > 5) {
+        return NextResponse.json(
+          { error: 'Importance must be a number from 1 to 5' },
+          { status: 400 }
+        );
+      }
+
+      return updateImportanceForLastItem(sessionKey, importance);
+    }
+
     case 'summary': {
       const activeProject = await getActiveProject(sessionKey);
 
@@ -688,6 +1277,7 @@ const handleCommand = async (sessionKey: string, input: string) => {
       }
 
       const memory = await createStandaloneMemory(content);
+      await setLastItem(sessionKey, 'memory', memory._id);
 
       return NextResponse.json({
         message: 'Memory saved',
@@ -700,12 +1290,7 @@ const handleCommand = async (sessionKey: string, input: string) => {
         return NextResponse.json({ error: 'Search query is required' }, { status: 400 });
       }
 
-      const results = await searchGrouped(content);
-
-      return NextResponse.json({
-        message: `Found ${countGroupedResults(results)} result(s) for "${content}"`,
-        data: results
-      });
+      return handleRankedSearch(sessionKey, content);
     }
 
     case 'projects': {

@@ -11,7 +11,6 @@ const typeSelect = document.getElementById('typeSelect');
 const projectSelect = document.getElementById('projectSelect');
 const noteInput = document.getElementById('noteInput');
 const savePageButton = document.getElementById('savePageButton');
-const captureButton = document.getElementById('captureButton');
 const statusText = document.getElementById('status');
 
 const getDefaultBackendUrl = () =>
@@ -33,7 +32,6 @@ const setStatus = (message, tone = '') => {
 
 const setBusy = (busy) => {
   savePageButton.disabled = busy;
-  captureButton.disabled = busy;
   loginButton.disabled = busy;
 };
 
@@ -56,6 +54,31 @@ const getActiveTab = async () => {
   return tab;
 };
 
+const parseApiResponse = async (response) => {
+  const contentType = response.headers.get('content-type') || '';
+  const text = await response.text();
+
+  if (!text) {
+    return {};
+  }
+
+  if (!contentType.includes('application/json')) {
+    if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
+      throw new Error(
+        `Backend returned an HTML page for ${response.url}. The extension API route may not be deployed yet.`
+      );
+    }
+
+    throw new Error(`Backend returned non-JSON response from ${response.url}.`);
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error('Backend returned invalid JSON.');
+  }
+};
+
 const apiRequest = async (path, options = {}) => {
   const { token, backendUrl } = await getAuthConfig();
 
@@ -71,32 +94,7 @@ const apiRequest = async (path, options = {}) => {
       ...(options.headers || {})
     }
   });
-  const text = await response.text();
-  const body = text ? JSON.parse(text) : {};
-
-  if (!response.ok) {
-    throw new Error(body.error || body.message || `Request failed with status ${response.status}`);
-  }
-
-  return body;
-};
-
-const apiFormRequest = async (path, formData) => {
-  const { token, backendUrl } = await getAuthConfig();
-
-  if (!token) {
-    throw new Error('Login to Memory Assistant first.');
-  }
-
-  const response = await fetch(`${backendUrl}${path}`, {
-    method: 'POST',
-    headers: {
-      'x-api-key': token
-    },
-    body: formData
-  });
-  const text = await response.text();
-  const body = text ? JSON.parse(text) : {};
+  const body = await parseApiResponse(response);
 
   if (!response.ok) {
     throw new Error(body.error || body.message || `Request failed with status ${response.status}`);
@@ -176,58 +174,6 @@ const savePage = async () => {
   }
 };
 
-const dataUrlToBlob = async (dataUrl) => {
-  const response = await fetch(dataUrl);
-
-  return response.blob();
-};
-
-const captureVisibleTab = async (windowId) =>
-  new Promise((resolve, reject) => {
-    chrome.tabs.captureVisibleTab(windowId, { format: 'png' }, (dataUrl) => {
-      const message = chrome.runtime.lastError?.message;
-
-      if (message || !dataUrl) {
-        reject(new Error(message || 'Screenshot capture failed.'));
-        return;
-      }
-
-      resolve(dataUrl);
-    });
-  });
-
-const captureScreenshot = async () => {
-  try {
-    setBusy(true);
-    setStatus('Capturing screenshot...');
-    const tab = await getActiveTab();
-    const dataUrl = await captureVisibleTab(tab.windowId);
-    const blob = await dataUrlToBlob(dataUrl);
-    const formData = new FormData();
-    const source = buildSource(tab);
-
-    formData.append('image', blob, 'visible-tab.png');
-    formData.append('type', typeSelect.value);
-    formData.append('note', noteInput.value.trim());
-    formData.append('projectId', projectSelect.value || '');
-    formData.append('sourceTitle', source.title);
-    formData.append('sourceUrl', source.url);
-    formData.append('capturedAt', source.capturedAt);
-
-    await apiFormRequest('/api/extension/screenshots', formData);
-    noteInput.value = '';
-    setStatus('Screenshot saved to Memory Assistant.', 'success');
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unable to capture screenshot.';
-    setStatus(
-      message.includes('permission') ? 'Chrome could not capture this tab. Try a normal webpage.' : message,
-      'error'
-    );
-  } finally {
-    setBusy(false);
-  }
-};
-
 loginButton.addEventListener('click', async () => {
   const token = tokenInput.value.trim();
   const backendUrl = backendUrlInput.value.trim().replace(/\/$/, '') || getDefaultBackendUrl();
@@ -251,7 +197,5 @@ logoutButton.addEventListener('click', async () => {
 });
 
 savePageButton.addEventListener('click', savePage);
-captureButton.addEventListener('click', captureScreenshot);
 
 renderAuthState();
-

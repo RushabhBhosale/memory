@@ -7,6 +7,8 @@ export type ProjectNoteDocument = Document & {
   kind: 'note' | 'requirement' | 'credential' | 'work_done';
   tags: string[];
   source: string;
+  importance: number;
+  embedding?: number[] | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -44,6 +46,17 @@ const projectNoteSchema = new Schema<ProjectNoteDocument>(
       type: String,
       default: 'assistant',
       trim: true
+    },
+    importance: {
+      type: Number,
+      min: 1,
+      max: 5,
+      default: 3,
+      index: true
+    },
+    embedding: {
+      type: [Number],
+      default: null
     }
   },
   {
@@ -51,7 +64,10 @@ const projectNoteSchema = new Schema<ProjectNoteDocument>(
   }
 );
 
-projectNoteSchema.index({ title: 1, content: 1 });
+projectNoteSchema.index({ title: 1 });
+projectNoteSchema.index({ tags: 1 });
+projectNoteSchema.index({ createdAt: -1 });
+projectNoteSchema.index({ title: 'text', content: 'text', tags: 'text' });
 
 const ProjectNote =
   (mongoose.models.ProjectNote as Model<ProjectNoteDocument> | undefined) ??

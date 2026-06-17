@@ -87,8 +87,17 @@ const apiRequest = async (path, options = {}) => {
       ...(options.headers || {})
     }
   });
+  const contentType = response.headers.get('content-type') || '';
   const text = await response.text();
-  const body = text ? JSON.parse(text) : {};
+  let body = {};
+
+  if (text && contentType.includes('application/json')) {
+    body = JSON.parse(text);
+  } else if (text && text.trim().startsWith('<')) {
+    throw new Error('Extension API route is not available yet. Redeploy the backend.');
+  } else if (text) {
+    throw new Error('Backend returned a non-JSON response.');
+  }
 
   if (!response.ok) {
     throw new Error(body.error || body.message || `Request failed with status ${response.status}`);
@@ -145,4 +154,3 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     );
   }
 });
-

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Personal Memory API",
-    "description": "Private memory and project API. Prefer runAssistantCommand for GPT use; it handles commands, active project context, tasks, notes, meetings, memories, search, summaries, and delete.",
+    "description": "Private memory and project API. Prefer runAssistantCommand for GPT use; it handles commands, active project context, tasks, notes, meetings, memories, ranked search context, summaries, and delete.",
     "version": "1.0.0"
   },
   "servers": [
@@ -20,7 +20,7 @@
       "post": {
         "operationId": "runAssistantCommand",
         "summary": "Run assistant command",
-        "description": "Run one command or natural language request. Handles active project, tasks, notes, meetings, memories, search, and delete.",
+        "description": "Run one command or natural language request. Handles projects, tasks, notes, meetings, memories, ranked search context, importance, and delete.",
         "requestBody": {
           "required": true,
           "content": {
@@ -417,12 +417,15 @@
         "properties": {
           "input": {
             "type": "string",
-            "description": "User command or natural language request.",
+            "description": "User command or natural language request. Work-log statements save under the active project, or as general memory without one.",
             "examples": [
               "@project HRMS",
               "@task Implement semantic search",
+              "@importance 5",
+              "@reminder Call the client tomorrow at 4pm",
               "@memory My passport expires in 2032",
               "@find jwt",
+              "worked on this issue",
               "work on hrms"
             ],
             "minLength": 1
@@ -515,6 +518,16 @@
             "type": "string",
             "description": "Where this memory came from.",
             "default": "manual"
+          },
+          "reminderAt": {
+            "type": "string",
+            "description": "Optional reminder notification time.",
+            "format": "date-time"
+          },
+          "notificationEnabled": {
+            "type": "boolean",
+            "description": "Whether mobile should schedule a notification for reminderAt.",
+            "default": false
           }
         }
       },
@@ -578,6 +591,14 @@
           "source": {
             "type": "string",
             "default": "manual"
+          },
+          "reminderAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "notificationEnabled": {
+            "type": "boolean",
+            "default": false
           },
           "createdAt": {
             "type": "string",

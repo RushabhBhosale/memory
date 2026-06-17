@@ -36,7 +36,6 @@ All API routes require the `x-api-key` header.
 - `GET /api/projects/:id/memories`
 - `GET /api/extension/projects`
 - `POST /api/extension/memories`
-- `POST /api/extension/screenshots`
 
 Memories can optionally be attached to a project with `projectId` and typed with `kind`: `note`, `task`, `work_done`, `requirement`, or `credential`.
 
@@ -54,6 +53,7 @@ The assistant endpoint accepts command-style input and natural language:
 - `@credential Staging appKey must match config file` creates a project credential note.
 - `@work Finished employee cache integration` creates a project work-done note.
 - `@meeting Client discussion Friday 3PM` creates a project meeting.
+- `@reminder Call the client tomorrow at 4pm` saves a reminder with a notification time.
 - `@summary` returns project details, pending tasks, completed tasks, recent meetings, and recent notes.
 - `@tasks`, `@notes`, and `@meetings` list items for the active project.
 - `@memory My passport expires in 2032` saves a standalone memory.
@@ -67,6 +67,9 @@ Natural language examples also work:
 - `switch to activex`
 - `open natiks`
 - `remember this: Japan trip budget is 2 lakh`
+- `worked on this issue` saves under the active project, or as a general memory if no project is active.
+- `remind me of the meeting at 4pm` saves a reminder for 4PM.
+- `remind me I have to go to the doctor tomorrow` asks what time tomorrow before saving.
 - `what do I know about jwt`
 - `any tasks in hrms`
 
@@ -228,20 +231,6 @@ curl -X POST "$BASE_URL/api/extension/memories" \
   }'
 ```
 
-Upload a screenshot from the Chrome extension:
-
-```bash
-curl -X POST "$BASE_URL/api/extension/screenshots" \
-  -H "x-api-key: $API_KEY" \
-  -F "image=@/path/to/screenshot.png" \
-  -F "type=note" \
-  -F "note=Optional screenshot note" \
-  -F "projectId=" \
-  -F "sourceTitle=Example Page" \
-  -F "sourceUrl=https://example.com" \
-  -F "capturedAt=2026-06-17T10:00:00.000Z"
-```
-
 Get a memory by id:
 
 ```bash
@@ -302,6 +291,10 @@ For any memory, project, task, meeting, note, search, summary, or delete request
 
 Do not say "I'll check" before using the action. Call runAssistantCommand first, then answer using its message and data.
 
+For search questions, answer from data.context/results. Do not ask for clarification before searching.
+
+Use @importance 1-5 after saving an item when the user says it is important or critical.
+
 Use the same x-session-id value across messages so the active project remains selected.
 ```
 
@@ -341,7 +334,6 @@ It can:
 
 - Save selected text from any webpage with the right-click menu.
 - Save the current page from the popup.
-- Capture the visible tab screenshot from the popup.
 - Save as `Note`, `Task`, `Project`, or `Reminder`.
 - Attach the saved item to a project, or save with `No project`.
 
@@ -365,4 +357,4 @@ Load it in Chrome:
 5. Open the extension popup.
 6. Enter the backend URL and your `MEMORY_API_KEY`.
 
-The API key is stored in `chrome.storage.local` under the extension's private storage. The extension only sends page content after an explicit user action: right-click save, Save Page, or Capture Screenshot.
+The API key is stored in `chrome.storage.local` under the extension's private storage. The extension only sends page content after an explicit user action: right-click save or Save Page.

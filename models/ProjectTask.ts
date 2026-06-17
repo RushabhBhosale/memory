@@ -9,6 +9,8 @@ export type ProjectTaskDocument = Document & {
   status: ProjectTaskStatus;
   tags: string[];
   source: string;
+  importance: number;
+  embedding?: number[] | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -46,6 +48,17 @@ const projectTaskSchema = new Schema<ProjectTaskDocument>(
       type: String,
       default: 'assistant',
       trim: true
+    },
+    importance: {
+      type: Number,
+      min: 1,
+      max: 5,
+      default: 3,
+      index: true
+    },
+    embedding: {
+      type: [Number],
+      default: null
     }
   },
   {
@@ -53,7 +66,10 @@ const projectTaskSchema = new Schema<ProjectTaskDocument>(
   }
 );
 
-projectTaskSchema.index({ title: 1, description: 1 });
+projectTaskSchema.index({ title: 1 });
+projectTaskSchema.index({ tags: 1 });
+projectTaskSchema.index({ createdAt: -1 });
+projectTaskSchema.index({ title: 'text', description: 'text', tags: 'text' });
 
 const ProjectTask =
   (mongoose.models.ProjectTask as Model<ProjectTaskDocument> | undefined) ??

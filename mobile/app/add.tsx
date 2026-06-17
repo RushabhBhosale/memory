@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -10,6 +11,9 @@ import {
   TextInput,
   View
 } from 'react-native';
+import DateTimePicker, {
+  type DateTimePickerEvent
+} from '@react-native-community/datetimepicker';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -19,9 +23,11 @@ import {
   type MemoryKind,
   type Project
 } from '../services/api';
+import { scheduleMemoryReminder } from '../services/notifications';
 import { colors, subtleShadow } from '../styles/theme';
 
 type SaveMode = {
+  id: 'personal' | 'task' | 'reminder' | 'project';
   label: string;
   helper: string;
   kind: MemoryKind;
@@ -31,6 +37,7 @@ type SaveMode = {
 
 const saveModes: SaveMode[] = [
   {
+    id: 'personal',
     label: 'Personal',
     helper: 'Memory or note',
     kind: 'note',
@@ -38,6 +45,7 @@ const saveModes: SaveMode[] = [
     color: colors.personalTag
   },
   {
+    id: 'task',
     label: 'Work',
     helper: 'Task or work item',
     kind: 'task',
@@ -45,13 +53,15 @@ const saveModes: SaveMode[] = [
     color: colors.workTag
   },
   {
+    id: 'reminder',
     label: 'Reminder',
-    helper: 'Important detail',
-    kind: 'credential',
+    helper: 'Notify me later',
+    kind: 'note',
     category: 'reminder',
     color: colors.reminderTag
   },
   {
+    id: 'project',
     label: 'Project',
     helper: 'Requirement or context',
     kind: 'requirement',
@@ -68,19 +78,67 @@ const parseTags = (value: string) =>
     .map((tag) => tag.trim())
     .filter(Boolean);
 
+const getParamValue = (value?: string | string[]) => (Array.isArray(value) ? value[0] : value);
+
+const getModeById = (id?: string) => saveModes.find((mode) => mode.id === id) || saveModes[0];
+
+const shouldShowExtraFields = (modeId?: string, projectId?: string) =>
+  Boolean(projectId || modeId === 'task' || modeId === 'project');
+
+const reminderDateFormatter = new Intl.DateTimeFormat(undefined, {
+  dateStyle: 'medium'
+});
+
+const reminderTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  timeStyle: 'short'
+});
+
+const getDefaultReminderAt = () => {
+  const date = new Date();
+  date.setHours(date.getHours() + 1, 0, 0, 0);
+
+  return date;
+};
+
+const mergeDatePart = (current: Date, nextDate: Date) =>
+  new Date(
+    nextDate.getFullYear(),
+    nextDate.getMonth(),
+    nextDate.getDate(),
+    current.getHours(),
+    current.getMinutes(),
+    0,
+    0
+  );
+
+const mergeTimePart = (current: Date, nextTime: Date) =>
+  new Date(
+    current.getFullYear(),
+    current.getMonth(),
+    current.getDate(),
+    nextTime.getHours(),
+    nextTime.getMinutes(),
+    0,
+    0
+  );
+
 export default function AddScreen() {
-  const params = useLocalSearchParams<{ projectId?: string }>();
-  const projectIdParam = Array.isArray(params.projectId) ? params.projectId[0] : params.projectId;
+  const params = useLocalSearchParams<{ projectId?: string; mode?: string }>();
+  const projectIdParam = getParamValue(params.projectId);
+  const modeParam = getParamValue(params.mode);
+  const initialMode = getModeById(modeParam);
 
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
-  const [selectedMode, setSelectedMode] = useState<SaveMode>(saveModes[0]);
-  const [category, setCategory] = useState(saveModes[0].category);
+  const [selectedMode, setSelectedMode] = useState<SaveMode>(initialMode);
+  const [category, setCategory] = useState(initialMode.category);
   const [tags, setTags] = useState('');
+  const [reminderAt, setReminderAt] = useState(getDefaultReminderAt);
+  const [activePicker, setActivePicker] = useState<'date' | 'time' | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState(projectIdParam || '');
   const [projectsLoading, setProjectsLoading] = useState(true);
-  const [showMore, setShowMore] = useState(Boolean(projectIdParam));
+  const [showMore, setShowMore] = useState(shouldShowExtraFields(modeParam, projectIdParam));
   const [showDescription, setShowDescription] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -114,6 +172,17 @@ export default function AddScreen() {
     };
   }, [projectIdParam]);
 
+  useEffect(() => {
+    const nextMode = getModeById(modeParam);
+
+    setSelectedMode(nextMode);
+    setCategory(nextMode.category);
+
+    if (shouldShowExtraFields(modeParam, projectIdParam)) {
+      setShowMore(true);
+    }
+  }, [modeParam, projectIdParam]);
+
   const selectMode = (mode: SaveMode) => {
     setSelectedMode(mode);
     setCategory(mode.category);
@@ -142,6 +211,40 @@ export default function AddScreen() {
     router.replace('/');
   };
 
+  const setReminderDatePart = (date?: Date) => {
+    if (!date) {
+      return;
+    }
+
+    setReminderAt((current) => mergeDatePart(current, date));
+  };
+
+  const setReminderTimePart = (date?: Date) => {
+    if (!date) {
+      return;
+    }
+
+    setReminderAt((current) => mergeTimePart(current, date));
+  };
+
+  const handleAndroidPickerChange = (event: DateTimePickerEvent, date?: Date) => {
+    const picker = activePicker;
+    setActivePicker(null);
+
+    if (event.type !== 'set' || !date) {
+      return;
+    }
+
+    if (picker === 'date') {
+      setReminderDatePart(date);
+      return;
+    }
+
+    if (picker === 'time') {
+      setReminderTimePart(date);
+    }
+  };
+
   const saveMemory = async () => {
     if (!title.trim()) {
       setError('Title is required');
@@ -154,15 +257,34 @@ export default function AddScreen() {
 
       const parsedTags = parseTags(tags);
       const { savedTitle, savedContent } = prepareMemoryFields();
+      const reminderAtDate = selectedMode.id === 'reminder' ? reminderAt : null;
 
-      await createMemory({
+      if (reminderAtDate && reminderAtDate.getTime() <= Date.now()) {
+        setError('Reminder time must be in the future');
+        return;
+      }
+
+      const memory = await createMemory({
         title: savedTitle,
         content: savedContent,
         category: category.trim() || selectedMode.category,
         tags: parsedTags.length ? parsedTags : undefined,
         kind: selectedMode.kind,
-        projectId: selectedProjectId || undefined
+        projectId: selectedProjectId || undefined,
+        reminderAt: reminderAtDate?.toISOString(),
+        notificationEnabled: selectedMode.id === 'reminder'
       });
+
+      if (selectedMode.id === 'reminder') {
+        const notificationId = await scheduleMemoryReminder(memory);
+
+        if (!notificationId) {
+          Alert.alert(
+            'Reminder saved',
+            'The reminder was saved, but the phone did not schedule a notification. Check notification permission and try a development build if Expo Go blocks it.'
+          );
+        }
+      }
 
       router.replace('/');
     } catch (err) {
@@ -182,7 +304,7 @@ export default function AddScreen() {
           <View style={styles.header}>
             <View>
               <Text style={styles.eyebrow}>New memory</Text>
-              <Text style={styles.title}>Save something</Text>
+              <Text style={styles.title}>Save {selectedMode.label.toLowerCase()}</Text>
             </View>
             <Pressable disabled={saving} style={styles.closeButton} onPress={cancel}>
               <Text style={styles.closeButtonText}>Cancel</Text>
@@ -249,6 +371,69 @@ export default function AddScreen() {
                 <Text style={styles.addDescriptionText}>+ Add description</Text>
               </Pressable>
             )}
+
+            {selectedMode.id === 'reminder' ? (
+              <View style={styles.reminderBox}>
+                <Text style={styles.label}>Reminder date</Text>
+                {Platform.OS === 'ios' ? (
+                  <View style={styles.pickerInline}>
+                    <DateTimePicker
+                      accentColor={colors.primary}
+                      display="compact"
+                      minimumDate={new Date()}
+                      mode="date"
+                      onChange={(_event, date) => setReminderDatePart(date)}
+                      themeVariant="light"
+                      value={reminderAt}
+                    />
+                  </View>
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    style={styles.pickerButton}
+                    onPress={() => setActivePicker('date')}
+                  >
+                    <Text style={styles.pickerButtonText}>
+                      {reminderDateFormatter.format(reminderAt)}
+                    </Text>
+                  </Pressable>
+                )}
+
+                <Text style={styles.label}>Reminder time</Text>
+                {Platform.OS === 'ios' ? (
+                  <View style={styles.pickerInline}>
+                    <DateTimePicker
+                      accentColor={colors.primary}
+                      display="compact"
+                      mode="time"
+                      onChange={(_event, date) => setReminderTimePart(date)}
+                      themeVariant="light"
+                      value={reminderAt}
+                    />
+                  </View>
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    style={styles.pickerButton}
+                    onPress={() => setActivePicker('time')}
+                  >
+                    <Text style={styles.pickerButtonText}>
+                      {reminderTimeFormatter.format(reminderAt)}
+                    </Text>
+                  </Pressable>
+                )}
+
+                {Platform.OS !== 'ios' && activePicker ? (
+                  <DateTimePicker
+                    display={activePicker === 'date' ? 'calendar' : 'clock'}
+                    minimumDate={activePicker === 'date' ? new Date() : undefined}
+                    mode={activePicker}
+                    onChange={handleAndroidPickerChange}
+                    value={reminderAt}
+                  />
+                ) : null}
+              </View>
+            ) : null}
           </View>
 
           <Pressable style={styles.moreButton} onPress={() => setShowMore((current) => !current)}>
@@ -444,6 +629,33 @@ const styles = StyleSheet.create({
   addDescriptionText: {
     color: colors.accentPressed,
     fontWeight: '900'
+  },
+  reminderBox: {
+    marginTop: 12
+  },
+  pickerButton: {
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 13,
+    paddingVertical: 14
+  },
+  pickerButtonText: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '800'
+  },
+  pickerInline: {
+    alignItems: 'flex-start',
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    minHeight: 48,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6
   },
   moreButton: {
     alignItems: 'center',

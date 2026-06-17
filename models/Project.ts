@@ -44,6 +44,9 @@ const projectSchema = new Schema<ProjectDocument>(
 );
 
 projectSchema.index({ name: 1 });
+projectSchema.index({ tags: 1 });
+projectSchema.index({ createdAt: -1 });
+projectSchema.index({ name: 'text', description: 'text', tags: 'text' });
 
 const Project =
   (mongoose.models.Project as Model<ProjectDocument> | undefined) ??

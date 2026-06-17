@@ -24,8 +24,12 @@ const formatDateOnly = (value: string) =>
     dateStyle: 'long'
   }).format(new Date(value));
 
-const getKindLabel = (kind?: Memory['kind']) => {
-  switch (kind) {
+const getKindLabel = (memory: Memory) => {
+  if (memory.category === 'reminder') {
+    return 'Reminder';
+  }
+
+  switch (memory.kind) {
     case 'task':
       return 'Task';
     case 'work_done':
@@ -42,8 +46,12 @@ const getKindLabel = (kind?: Memory['kind']) => {
 const getProjectName = (memory: Memory) =>
   memory.projectId && typeof memory.projectId === 'object' ? memory.projectId.name : '';
 
-const getKindTone = (kind?: Memory['kind']) => {
-  switch (kind) {
+const getKindTone = (memory: Memory) => {
+  if (memory.category === 'reminder') {
+    return colors.reminderTag;
+  }
+
+  switch (memory.kind) {
     case 'task':
     case 'work_done':
       return colors.workTag;
@@ -142,7 +150,7 @@ export default function DetailScreen() {
   }
 
   const projectName = getProjectName(memory);
-  const kindTone = getKindTone(memory.kind);
+  const kindTone = getKindTone(memory);
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
@@ -152,7 +160,7 @@ export default function DetailScreen() {
 
         <View style={styles.tagRow}>
           <View style={[styles.tagPill, { backgroundColor: `${kindTone}1F` }]}>
-            <Text style={[styles.tagText, { color: kindTone }]}>{getKindLabel(memory.kind)}</Text>
+            <Text style={[styles.tagText, { color: kindTone }]}>{getKindLabel(memory)}</Text>
           </View>
           <View style={styles.tagPill}>
             <Text style={styles.tagText}>{memory.category}</Text>
@@ -177,8 +185,10 @@ export default function DetailScreen() {
         </View>
         <View style={styles.metaDivider} />
         <View style={styles.metaBlock}>
-          <Text style={styles.metaLabel}>Updated</Text>
-          <Text style={styles.metaValue}>{formatDateTime(memory.updatedAt)}</Text>
+          <Text style={styles.metaLabel}>{memory.reminderAt ? 'Reminder' : 'Updated'}</Text>
+          <Text style={styles.metaValue}>
+            {memory.reminderAt ? formatDateTime(memory.reminderAt) : formatDateTime(memory.updatedAt)}
+          </Text>
         </View>
       </View>
 

@@ -6,6 +6,8 @@ export type ProjectMeetingDocument = Document & {
   details: string;
   tags: string[];
   source: string;
+  importance: number;
+  embedding?: number[] | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -36,6 +38,17 @@ const projectMeetingSchema = new Schema<ProjectMeetingDocument>(
       type: String,
       default: 'assistant',
       trim: true
+    },
+    importance: {
+      type: Number,
+      min: 1,
+      max: 5,
+      default: 4,
+      index: true
+    },
+    embedding: {
+      type: [Number],
+      default: null
     }
   },
   {
@@ -43,7 +56,10 @@ const projectMeetingSchema = new Schema<ProjectMeetingDocument>(
   }
 );
 
-projectMeetingSchema.index({ title: 1, details: 1 });
+projectMeetingSchema.index({ title: 1 });
+projectMeetingSchema.index({ tags: 1 });
+projectMeetingSchema.index({ createdAt: -1 });
+projectMeetingSchema.index({ title: 'text', details: 'text', tags: 'text' });
 
 const ProjectMeeting =
   (mongoose.models.ProjectMeeting as Model<ProjectMeetingDocument> | undefined) ??

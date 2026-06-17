@@ -22,6 +22,8 @@ export type Memory = {
   source: string;
   kind: MemoryKind;
   projectId?: string | Project;
+  reminderAt?: string;
+  notificationEnabled?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -33,6 +35,8 @@ export type CreateMemoryInput = {
   tags?: string[];
   kind?: MemoryKind;
   projectId?: string;
+  reminderAt?: string;
+  notificationEnabled?: boolean;
 };
 
 export type CreateProjectInput = {

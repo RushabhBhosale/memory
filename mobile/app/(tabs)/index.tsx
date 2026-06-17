@@ -1,31 +1,30 @@
-import { useCallback, useMemo, useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View
-} from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from "@expo/vector-icons";
+import { useCallback, useMemo, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { router, useFocusEffect } from "expo-router";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-import { MemoryCard } from '../../components/MemoryCard';
-import { StateView } from '../../components/StateView';
-import { listMemories, listProjects, type Memory } from '../../services/api';
-import { colors, subtleShadow } from '../../styles/theme';
+import { MemoryCard } from "../../components/MemoryCard";
+import { StateView } from "../../components/StateView";
+import { listMemories, listProjects, type Memory } from "../../services/api";
+import { scheduleUpcomingMemoryReminders } from "../../services/notifications";
+import { colors, subtleShadow } from "../../styles/theme";
 
-const dayFormatter = new Intl.DateTimeFormat(undefined, { weekday: 'short' });
+type IconName = keyof typeof Ionicons.glyphMap;
+
+const dayFormatter = new Intl.DateTimeFormat(undefined, { weekday: "short" });
 const sectionDateFormatter = new Intl.DateTimeFormat(undefined, {
-  month: 'short',
-  day: 'numeric'
+  month: "short",
+  day: "numeric",
 });
 
 const getDateKey = (date: Date) =>
-  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
-    date.getDate()
-  ).padStart(2, '0')}`;
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate(),
+  ).padStart(2, "0")}`;
 
-const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+const startOfDay = (date: Date) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
 const getWeekDays = () => {
   const today = new Date();
@@ -41,7 +40,7 @@ const getWeekDays = () => {
       key: getDateKey(date),
       label: dayFormatter.format(date),
       day: date.getDate(),
-      disabled: startOfDay(date).getTime() > todayStart
+      disabled: startOfDay(date).getTime() > todayStart,
     };
   });
 };
@@ -55,51 +54,91 @@ const isToday = (value: string) => {
 
 const quickCards = [
   {
-    title: 'Add task',
-    body: 'Capture project work',
+    title: "Add task",
+    body: "Capture project work",
+    icon: "checkbox-outline",
+    mode: "task",
     tone: colors.workTag,
-    route: '/add'
   },
   {
-    title: 'Personal note',
-    body: 'Save a quick memory',
+    title: "Personal note",
+    body: "Save a quick memory",
+    icon: "document-text-outline",
+    mode: "personal",
     tone: colors.personalTag,
-    route: '/add'
   },
   {
-    title: 'Reminder',
-    body: 'Store something important',
+    title: "Reminder",
+    body: "Store something important",
+    icon: "notifications-outline",
+    mode: "reminder",
     tone: colors.reminderTag,
-    route: '/add'
+  },
+  {
+    title: "Project context",
+    body: "Requirement or detail",
+    icon: "folder-open-outline",
+    mode: "project",
+    tone: colors.projectTag,
+  },
+] as const satisfies ReadonlyArray<{
+  body: string;
+  icon: IconName;
+  mode: string;
+  title: string;
+  tone: string;
+}>;
+
+const getMemoryTone = (memory?: Memory) => {
+  if (!memory) {
+    return colors.primary;
   }
-] as const;
+
+  switch (memory.kind) {
+    case "task":
+    case "work_done":
+      return colors.workTag;
+    case "credential":
+      return colors.reminderTag;
+    case "requirement":
+      return colors.projectTag;
+    default:
+      return colors.personalTag;
+  }
+};
 
 export default function HomeScreen() {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [projectCount, setProjectCount] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [selectedDayKey, setSelectedDayKey] = useState(() => getDateKey(new Date()));
+  const [error, setError] = useState("");
+  const [selectedDayKey, setSelectedDayKey] = useState(() =>
+    getDateKey(new Date()),
+  );
   const weekDays = useMemo(() => getWeekDays(), []);
   const selectedMemories = useMemo(
-    () => memories.filter((item) => getDateKey(new Date(item.createdAt)) === selectedDayKey),
-    [memories, selectedDayKey]
+    () =>
+      memories.filter(
+        (item) => getDateKey(new Date(item.createdAt)) === selectedDayKey,
+      ),
+    [memories, selectedDayKey],
   );
 
   const loadMemories = useCallback(async () => {
     try {
       setLoading(true);
-      setError('');
+      setError("");
 
       const [nextMemories, nextProjects] = await Promise.all([
         listMemories(),
-        listProjects()
+        listProjects(),
       ]);
 
       setMemories(nextMemories);
       setProjectCount(nextProjects.length);
+      void scheduleUpcomingMemoryReminders(nextMemories);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to load memories');
+      setError(err instanceof Error ? err.message : "Unable to load memories");
     } finally {
       setLoading(false);
     }
@@ -108,12 +147,12 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       loadMemories();
-    }, [loadMemories])
+    }, [loadMemories]),
   );
 
   if (loading) {
     return (
-      <SafeAreaView edges={['top']} style={styles.screen}>
+      <SafeAreaView edges={["top"]} style={styles.screen}>
         <StateView title="Loading" detail="Syncing your notes." loading />
       </SafeAreaView>
     );
@@ -121,22 +160,31 @@ export default function HomeScreen() {
 
   if (error) {
     return (
-      <SafeAreaView edges={['top']} style={styles.screen}>
-        <StateView title={error} tone="error" actionLabel="Try again" onAction={loadMemories} />
+      <SafeAreaView edges={["top"]} style={styles.screen}>
+        <StateView
+          title={error}
+          tone="error"
+          actionLabel="Try again"
+          onAction={loadMemories}
+        />
       </SafeAreaView>
     );
   }
 
   const latestMemory = selectedMemories[0];
+  const latestTone = getMemoryTone(latestMemory);
   const todayCount = memories.filter((item) => isToday(item.createdAt)).length;
   const selectedDateTitle =
     selectedDayKey === getDateKey(new Date())
-      ? 'Today'
+      ? "Today"
       : sectionDateFormatter.format(new Date(`${selectedDayKey}T00:00:00`));
 
   return (
-    <SafeAreaView edges={['top']} style={styles.screen}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+    <SafeAreaView edges={["top"]} style={styles.screen}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.content}
+      >
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>Hi, Rushabh</Text>
@@ -157,14 +205,17 @@ export default function HomeScreen() {
                 accessibilityRole="button"
                 accessibilityState={{ disabled: day.disabled, selected }}
                 disabled={day.disabled}
-                style={[styles.dayColumn, day.disabled && styles.disabledDayColumn]}
+                style={[
+                  styles.dayColumn,
+                  day.disabled && styles.disabledDayColumn,
+                ]}
                 onPress={() => setSelectedDayKey(day.key)}
               >
                 <Text
                   style={[
                     styles.dayLabel,
                     selected && styles.selectedDayLabel,
-                    day.disabled && styles.disabledDayText
+                    day.disabled && styles.disabledDayText,
                   ]}
                 >
                   {day.label}
@@ -173,14 +224,14 @@ export default function HomeScreen() {
                   style={[
                     styles.dayBubble,
                     selected && styles.selectedDayBubble,
-                    day.disabled && styles.disabledDayBubble
+                    day.disabled && styles.disabledDayBubble,
                   ]}
                 >
                   <Text
                     style={[
                       styles.dayNumber,
                       selected && styles.selectedDayNumber,
-                      day.disabled && styles.disabledDayText
+                      day.disabled && styles.disabledDayText,
                     ]}
                   >
                     {day.day}
@@ -193,34 +244,92 @@ export default function HomeScreen() {
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>My Memory</Text>
-          <Pressable onPress={() => router.push('/search')}>
+          <Pressable onPress={() => router.push("/search")}>
             <Text style={styles.seeAll}>Search</Text>
           </Pressable>
         </View>
 
         <View style={styles.featureRow}>
-          <Pressable style={styles.featureCard} onPress={() => router.push('/add')}>
+          <Pressable
+            accessibilityLabel={
+              latestMemory
+                ? `Open ${latestMemory.title}`
+                : `Add a memory for ${selectedDateTitle}`
+            }
+            accessibilityRole="button"
+            style={styles.featureCard}
+            onPress={() => {
+              if (latestMemory) {
+                router.push({
+                  pathname: "/memories/[id]",
+                  params: { id: latestMemory._id },
+                });
+                return;
+              }
+
+              router.push("/add");
+            }}
+          >
+            <View
+              style={[styles.featureAccentBar, { backgroundColor: latestTone }]}
+            />
+            <View style={styles.featureHeader}>
+              <View
+                style={[
+                  styles.featureBadge,
+                  { backgroundColor: `${latestTone}1F` },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.featureBadgeDot,
+                    { backgroundColor: latestTone },
+                  ]}
+                />
+                <Text style={[styles.featureBadgeText, { color: latestTone }]}>
+                  {latestMemory ? "Latest log" : "Ready to save"}
+                </Text>
+              </View>
+              <Text style={styles.featureActionText}>
+                {latestMemory ? "Open" : "Add"}
+              </Text>
+            </View>
             <Text style={styles.featureTitle}>
               {latestMemory?.title || `No logs for ${selectedDateTitle}`}
             </Text>
             <Text numberOfLines={2} style={styles.featureBody}>
-              {latestMemory?.content || 'Tap plus to add a task, note, reminder, or memory.'}
+              {latestMemory?.content ||
+                "Tap plus to add a task, note, reminder, or memory."}
             </Text>
             <View style={styles.featureStats}>
-              <Text style={styles.featureStat}>{selectedMemories.length} logs</Text>
-              <Text style={styles.featureStat}>{todayCount} today</Text>
+              <Text style={styles.featureStat}>
+                {selectedMemories.length} logs today
+              </Text>
             </View>
           </Pressable>
 
-          <Pressable style={styles.sideCard} onPress={() => router.push('/projects')}>
+          <Pressable
+            accessibilityLabel="Open projects"
+            accessibilityRole="button"
+            style={styles.sideCard}
+            onPress={() => router.push("/projects")}
+          >
+            <View style={styles.sideIcon}>
+              <Ionicons
+                color={colors.projectTag}
+                name="folder-open-outline"
+                size={22}
+              />
+            </View>
             <Text style={styles.sideCardText}>Projects</Text>
             <Text style={styles.sideCardCount}>{projectCount}</Text>
+            <Text style={styles.sideCardCaption}>active</Text>
           </Pressable>
         </View>
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Quick Add</Text>
-          <Pressable onPress={() => router.push('/add')}>
+          <Pressable onPress={() => router.push("/add")}>
             <Text style={styles.seeAll}>New</Text>
           </Pressable>
         </View>
@@ -233,14 +342,25 @@ export default function HomeScreen() {
           {quickCards.map((card) => (
             <Pressable
               key={card.title}
-              style={[styles.quickCard, { backgroundColor: `${card.tone}24` }]}
-              onPress={() => router.push(card.route)}
+              accessibilityLabel={card.title}
+              accessibilityRole="button"
+              style={[styles.quickCard, { borderColor: `${card.tone}55` }]}
+              onPress={() =>
+                router.push({
+                  pathname: "/add",
+                  params: { mode: card.mode },
+                })
+              }
             >
-              <Text style={styles.quickTitle}>{card.title}</Text>
-              <Text style={styles.quickBody}>{card.body}</Text>
-              <View style={[styles.quickPill, { backgroundColor: card.tone }]}>
-                <Text style={styles.quickPillText}>Add</Text>
+              <View
+                style={[
+                  styles.quickIcon,
+                  { backgroundColor: `${card.tone}1F` },
+                ]}
+              >
+                <Ionicons color={card.tone} name={card.icon} size={17} />
               </View>
+              <Text style={styles.quickTitle}>{card.title}</Text>
             </Pressable>
           ))}
         </ScrollView>
@@ -256,8 +376,12 @@ export default function HomeScreen() {
             .map((memory) => <MemoryCard key={memory._id} memory={memory} />)
         ) : (
           <View style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>No logs for {selectedDateTitle}</Text>
-            <Text style={styles.emptyText}>Tap plus to add a task, note, reminder, or memory.</Text>
+            <Text style={styles.emptyTitle}>
+              No logs for {selectedDateTitle}
+            </Text>
+            <Text style={styles.emptyText}>
+              Tap plus to add a task, note, reminder, or memory.
+            </Text>
           </View>
         )}
       </ScrollView>
@@ -268,217 +392,268 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: colors.background
+    backgroundColor: colors.background,
   },
   content: {
     padding: 18,
-    paddingBottom: 88
+    paddingBottom: 88,
   },
   header: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 20
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 20,
   },
   greeting: {
     color: colors.text,
     fontSize: 32,
-    fontWeight: '900',
-    lineHeight: 38
+    fontWeight: "900",
+    lineHeight: 38,
   },
   subGreeting: {
     color: colors.textMuted,
     fontSize: 14,
-    fontWeight: '700',
-    marginTop: 2
+    fontWeight: "700",
+    marginTop: 2,
   },
   avatar: {
-    alignItems: 'center',
+    alignItems: "center",
     backgroundColor: colors.primary,
     borderRadius: 22,
     height: 44,
-    justifyContent: 'center',
-    width: 44
+    justifyContent: "center",
+    width: 44,
   },
   avatarText: {
     color: colors.white,
     fontSize: 20,
-    fontWeight: '900'
+    fontWeight: "900",
   },
   weekRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 24
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 24,
   },
   dayColumn: {
-    alignItems: 'center',
-    gap: 8
+    alignItems: "center",
+    gap: 8,
   },
   dayLabel: {
     color: colors.textMuted,
     fontSize: 13,
-    fontWeight: '700'
+    fontWeight: "700",
   },
   selectedDayLabel: {
-    color: colors.text
+    color: colors.text,
   },
   dayBubble: {
-    alignItems: 'center',
+    alignItems: "center",
     backgroundColor: colors.surface,
     borderRadius: 999,
     height: 42,
-    justifyContent: 'center',
+    justifyContent: "center",
     width: 42,
-    ...subtleShadow
+    ...subtleShadow,
   },
   selectedDayBubble: {
-    backgroundColor: colors.primary
+    backgroundColor: colors.primary,
   },
   disabledDayColumn: {
-    opacity: 0.45
+    opacity: 0.45,
   },
   disabledDayBubble: {
     backgroundColor: colors.backgroundSoft,
-    shadowOpacity: 0
+    shadowOpacity: 0,
   },
   dayNumber: {
     color: colors.text,
     fontSize: 16,
-    fontWeight: '800'
+    fontWeight: "800",
   },
   selectedDayNumber: {
-    color: colors.white
+    color: colors.white,
   },
   disabledDayText: {
-    color: colors.textSoft
+    color: colors.textSoft,
   },
   sectionHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 12
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 12,
   },
   sectionTitle: {
     color: colors.text,
     fontSize: 21,
-    fontWeight: '900'
+    fontWeight: "900",
   },
   seeAll: {
     color: colors.text,
     fontSize: 14,
-    fontWeight: '800'
+    fontWeight: "800",
   },
   featureRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 10,
-    marginBottom: 28
+    marginBottom: 28,
   },
   featureCard: {
-    backgroundColor: colors.primary,
-    borderRadius: 20,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 22,
+    borderWidth: 1,
     flex: 1,
     minHeight: 172,
+    overflow: "hidden",
     padding: 18,
-    ...subtleShadow
+    ...subtleShadow,
+  },
+  featureAccentBar: {
+    bottom: 0,
+    left: 0,
+    position: "absolute",
+    top: 0,
+    width: 6,
+  },
+  featureHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 14,
+    paddingLeft: 4,
+  },
+  featureBadge: {
+    alignItems: "center",
+    borderRadius: 999,
+    flexDirection: "row",
+    gap: 7,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  featureBadgeDot: {
+    borderRadius: 999,
+    height: 7,
+    width: 7,
+  },
+  featureBadgeText: {
+    fontSize: 11,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  featureActionText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "900",
   },
   featureTitle: {
     color: colors.text,
-    fontSize: 22,
-    fontWeight: '900',
-    lineHeight: 27,
-    marginBottom: 8
+    fontSize: 21,
+    fontWeight: "900",
+    lineHeight: 26,
+    marginBottom: 8,
   },
   featureBody: {
-    color: colors.text,
+    color: colors.textMuted,
     fontSize: 14,
-    lineHeight: 20
+    lineHeight: 20,
   },
   featureStats: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
-    marginTop: 'auto'
+    marginTop: "auto",
   },
   featureStat: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.backgroundSoft,
     borderRadius: 999,
     color: colors.text,
     fontSize: 12,
-    fontWeight: '800',
-    overflow: 'hidden',
+    fontWeight: "800",
+    overflow: "hidden",
     paddingHorizontal: 10,
-    paddingVertical: 6
+    paddingVertical: 6,
   },
   sideCard: {
-    alignItems: 'center',
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 20,
-    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 22,
+    borderWidth: 1,
     minHeight: 172,
-    width: 88
+    padding: 14,
+    width: 108,
+    ...subtleShadow,
+  },
+  sideIcon: {
+    alignItems: "center",
+    backgroundColor: `${colors.projectTag}1F`,
+    borderRadius: 999,
+    height: 38,
+    justifyContent: "center",
+    marginBottom: "auto",
+    width: 38,
   },
   sideCardText: {
     color: colors.text,
-    fontSize: 15,
-    fontWeight: '900',
-    transform: [{ rotate: '-90deg' }]
+    fontSize: 14,
+    fontWeight: "900",
+    marginTop: 18,
   },
   sideCardCount: {
-    bottom: 16,
     color: colors.text,
-    fontSize: 18,
-    fontWeight: '900',
-    position: 'absolute'
+    fontSize: 30,
+    fontWeight: "900",
+    lineHeight: 34,
+    marginTop: 2,
+  },
+  sideCardCaption: {
+    color: colors.textSoft,
+    fontSize: 12,
+    fontWeight: "800",
   },
   quickRow: {
-    gap: 10,
-    paddingRight: 18
+    gap: 8,
+    paddingBottom: 22,
+    paddingRight: 18,
   },
   quickCard: {
-    borderRadius: 18,
-    marginBottom: 26,
-    minHeight: 126,
-    padding: 16,
-    width: 184
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 8,
+    minHeight: 42,
+    paddingLeft: 7,
+    paddingRight: 14,
+    ...subtleShadow,
+  },
+  quickIcon: {
+    alignItems: "center",
+    borderRadius: 999,
+    height: 28,
+    justifyContent: "center",
+    width: 28,
   },
   quickTitle: {
     color: colors.text,
-    fontSize: 16,
-    fontWeight: '900',
-    marginBottom: 9
-  },
-  quickBody: {
-    color: colors.text,
     fontSize: 13,
-    lineHeight: 18
-  },
-  quickPill: {
-    alignSelf: 'flex-start',
-    borderRadius: 999,
-    marginTop: 'auto',
-    paddingHorizontal: 12,
-    paddingVertical: 6
-  },
-  quickPillText: {
-    color: colors.white,
-    fontSize: 12,
-    fontWeight: '900'
+    fontWeight: "900",
   },
   emptyCard: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
     borderRadius: 18,
     borderWidth: 1,
-    padding: 18
+    padding: 18,
   },
   emptyTitle: {
     color: colors.text,
     fontSize: 17,
-    fontWeight: '900',
-    marginBottom: 5
+    fontWeight: "900",
+    marginBottom: 5,
   },
   emptyText: {
     color: colors.textMuted,
-    lineHeight: 20
-  }
+    lineHeight: 20,
+  },
 });

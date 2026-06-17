@@ -22,7 +22,9 @@ const allowedUpdateFields = [
   'tags',
   'source',
   'kind',
-  'projectId'
+  'projectId',
+  'reminderAt',
+  'notificationEnabled'
 ] as const;
 
 const getErrorMessage = (error: unknown) =>
