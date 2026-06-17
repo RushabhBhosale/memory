@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { validateApiKey } from '@/lib/apiKey';
 import { connectDB } from '@/lib/mongodb';
 import Memory from '@/models/Memory';
+import '@/models/Project';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -65,7 +66,9 @@ type SearchableMemory = {
   title?: string;
   content?: string;
   category?: string;
+  kind?: string;
   tags?: string[];
+  projectId?: unknown;
   createdAt?: Date | string;
 };
 
@@ -97,10 +100,23 @@ const getSearchText = (memory: SearchableMemory) =>
     memory.title,
     memory.content,
     memory.category,
+    memory.kind,
+    getProjectField(memory.projectId, 'name'),
+    getProjectField(memory.projectId, 'description'),
     ...(Array.isArray(memory.tags) ? memory.tags : [])
   ]
     .filter(Boolean)
     .join(' ');
+
+const getProjectField = (project: unknown, field: 'name' | 'description') => {
+  if (!project || typeof project !== 'object' || !(field in project)) {
+    return undefined;
+  }
+
+  const value = (project as Record<string, unknown>)[field];
+
+  return typeof value === 'string' ? value : undefined;
+};
 
 const getAllowedDistance = (token: string) => {
   if (token.length <= 3) {
@@ -245,6 +261,7 @@ export async function GET(request: Request) {
     const candidates = await Memory.find()
       .sort({ createdAt: -1 })
       .limit(SEARCH_CANDIDATE_LIMIT)
+      .populate('projectId', 'name description status')
       .lean();
 
     const memories = candidates

@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { validateApiKey } from '@/lib/apiKey';
 import { connectDB } from '@/lib/mongodb';
 import Memory from '@/models/Memory';
+import '@/models/Project';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -14,7 +15,15 @@ type RouteContext = {
   }>;
 };
 
-const allowedUpdateFields = ['title', 'content', 'category', 'tags', 'source'] as const;
+const allowedUpdateFields = [
+  'title',
+  'content',
+  'category',
+  'tags',
+  'source',
+  'kind',
+  'projectId'
+] as const;
 
 const getErrorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Internal server error';
@@ -35,6 +44,18 @@ const getMemoryId = async (context: RouteContext) => {
 const validateMemoryId = (id: string) => {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return NextResponse.json({ error: 'Invalid memory id' }, { status: 400 });
+  }
+
+  return null;
+};
+
+const validateProjectId = (projectId: unknown) => {
+  if (
+    projectId !== undefined &&
+    projectId !== '' &&
+    (typeof projectId !== 'string' || !mongoose.Types.ObjectId.isValid(projectId))
+  ) {
+    return NextResponse.json({ error: 'Invalid project id' }, { status: 400 });
   }
 
   return null;
@@ -66,7 +87,9 @@ export async function GET(request: Request, context: RouteContext) {
 
     await connectDB();
 
-    const memory = await Memory.findById(id).lean();
+    const memory = await Memory.findById(id)
+      .populate('projectId', 'name description status')
+      .lean();
 
     if (!memory) {
       return NextResponse.json({ error: 'Memory not found' }, { status: 404 });
@@ -98,7 +121,9 @@ export async function DELETE(request: Request, context: RouteContext) {
 
     await connectDB();
 
-    const memory = await Memory.findByIdAndDelete(id).lean();
+    const memory = await Memory.findByIdAndDelete(id)
+      .populate('projectId', 'name description status')
+      .lean();
 
     if (!memory) {
       return NextResponse.json({ error: 'Memory not found' }, { status: 404 });
@@ -138,6 +163,11 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
 
     const updates = pickMemoryUpdates(body as Record<string, unknown>);
+    const projectIdError = validateProjectId(updates.projectId);
+
+    if (projectIdError) {
+      return projectIdError;
+    }
 
     if (!Object.keys(updates).length) {
       return NextResponse.json(
@@ -151,7 +181,9 @@ export async function PATCH(request: Request, context: RouteContext) {
     const memory = await Memory.findByIdAndUpdate(id, updates, {
       new: true,
       runValidators: true
-    }).lean();
+    })
+      .populate('projectId', 'name description status')
+      .lean();
 
     if (!memory) {
       return NextResponse.json({ error: 'Memory not found' }, { status: 404 });

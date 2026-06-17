@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import {
-  ActivityIndicator,
   FlatList,
   Pressable,
   StyleSheet,
@@ -8,10 +7,15 @@ import {
   TextInput,
   View
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MemoryCard } from '../../components/MemoryCard';
+import { ScreenHeader } from '../../components/ScreenHeader';
+import { StateView } from '../../components/StateView';
 import { searchMemories, type Memory } from '../../services/api';
-import { cardShadow, colors } from '../../styles/theme';
+import { colors, subtleShadow } from '../../styles/theme';
+
+const suggestions = ['jwt', 'interviews', 'natiks', 'passport'];
 
 export default function SearchScreen() {
   const [query, setQuery] = useState('');
@@ -20,8 +24,8 @@ export default function SearchScreen() {
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState('');
 
-  const runSearch = async () => {
-    const nextQuery = query.trim();
+  const runSearch = async (value = query) => {
+    const nextQuery = value.trim();
 
     if (!nextQuery) {
       setResults([]);
@@ -34,6 +38,7 @@ export default function SearchScreen() {
       setLoading(true);
       setError('');
       setSearched(true);
+      setQuery(nextQuery);
       setResults(await searchMemories(nextQuery));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to search memories');
@@ -50,18 +55,19 @@ export default function SearchScreen() {
   };
 
   return (
-    <View style={styles.screen}>
-      <View style={styles.header}>
-        <Text style={styles.eyebrow}>Search</Text>
-        <Text style={styles.title}>Find memory</Text>
-      </View>
+    <SafeAreaView edges={['top']} style={styles.screen}>
+      <ScreenHeader
+        eyebrow="Search"
+        title="Find"
+        subtitle="Search memories, tags, projects, and rough spellings."
+      />
 
       <View style={styles.searchPanel}>
         <TextInput
           value={query}
           onChangeText={setQuery}
-          onSubmitEditing={runSearch}
-          placeholder="Try a word, tag, or rough spelling"
+          onSubmitEditing={() => runSearch()}
+          placeholder="Search your vault"
           placeholderTextColor={colors.textSoft}
           returnKeyType="search"
           style={styles.searchInput}
@@ -71,41 +77,56 @@ export default function SearchScreen() {
             styles.searchButton,
             pressed && styles.searchButtonPressed
           ]}
-          onPress={runSearch}
+          onPress={() => runSearch()}
         >
           <Text style={styles.searchButtonText}>Go</Text>
         </Pressable>
       </View>
 
-      {query ? (
-        <Pressable onPress={clearSearch}>
-          <Text style={styles.clearText}>Clear</Text>
-        </Pressable>
-      ) : null}
+      <View style={styles.suggestionRow}>
+        {suggestions.map((item) => (
+          <Pressable key={item} style={styles.suggestionChip} onPress={() => runSearch(item)}>
+            <Text style={styles.suggestionText}>{item}</Text>
+          </Pressable>
+        ))}
+        {query ? (
+          <Pressable style={styles.clearChip} onPress={clearSearch}>
+            <Text style={styles.clearText}>Clear</Text>
+          </Pressable>
+        ) : null}
+      </View>
 
       {loading ? (
-        <View style={styles.centerState}>
-          <ActivityIndicator />
-          <Text style={styles.mutedText}>Searching...</Text>
-        </View>
+        <StateView title="Searching" detail="Checking saved context." loading />
       ) : error ? (
-        <View style={styles.centerState}>
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
+        <StateView title={error} tone="error" />
       ) : (
         <FlatList
           data={results}
           keyExtractor={(item) => item._id}
-          contentContainerStyle={results.length ? styles.list : styles.centerState}
+          contentContainerStyle={results.length ? styles.list : styles.emptyList}
+          ListHeaderComponent={
+            results.length ? (
+              <View style={styles.sectionRow}>
+                <Text style={styles.sectionTitle}>Results</Text>
+                <Text style={styles.sectionCount}>{results.length}</Text>
+              </View>
+            ) : null
+          }
           ListEmptyComponent={
-            <Text style={styles.mutedText}>
-              {searched ? 'No matching memories.' : 'Search can handle rough spellings.'}
-            </Text>
+            <StateView
+              title={searched ? 'No matches found' : 'Start with a keyword'}
+              detail={
+                searched
+                  ? 'Try a shorter phrase or a nearby word.'
+                  : 'The search handles tags, project names, and rough spellings.'
+              }
+            />
           }
           renderItem={({ item }) => <MemoryCard memory={item} />}
         />
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -113,48 +134,37 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.background,
-    paddingHorizontal: 16,
-    paddingTop: 12
-  },
-  header: {
-    marginBottom: 12
-  },
-  eyebrow: {
-    color: colors.textMuted,
-    fontSize: 11,
-    fontWeight: '800',
-    marginBottom: 2,
-    textTransform: 'uppercase'
-  },
-  title: {
-    color: colors.text,
-    fontSize: 24,
-    fontWeight: '800'
+    paddingHorizontal: 16
   },
   searchPanel: {
+    alignItems: 'center',
     backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderRadius: 8,
+    borderRadius: 14,
     borderWidth: 1,
     flexDirection: 'row',
-    gap: 8,
-    marginBottom: 10,
+    gap: 10,
+    marginBottom: 12,
     padding: 8,
-    ...cardShadow
+    ...subtleShadow
   },
   searchInput: {
     backgroundColor: colors.background,
     borderColor: colors.border,
-    borderRadius: 8,
+    borderRadius: 10,
     borderWidth: 1,
     color: colors.text,
     flex: 1,
-    paddingHorizontal: 12,
+    fontSize: 16,
+    paddingHorizontal: 14,
     paddingVertical: 11
   },
   searchButton: {
+    alignItems: 'center',
     backgroundColor: colors.accent,
-    borderRadius: 8,
+    borderRadius: 10,
+    justifyContent: 'center',
+    minWidth: 54,
     paddingHorizontal: 15,
     paddingVertical: 11
   },
@@ -162,30 +172,59 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accentPressed
   },
   searchButtonText: {
-    color: colors.surface,
-    fontWeight: '800'
+    color: colors.white,
+    fontWeight: '900'
+  },
+  suggestionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 16
+  },
+  suggestionChip: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8
+  },
+  suggestionText: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: '900'
+  },
+  clearChip: {
+    backgroundColor: colors.dangerSurface,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8
   },
   clearText: {
-    color: colors.accent,
-    fontWeight: '800',
+    color: colors.danger,
+    fontSize: 13,
+    fontWeight: '900'
+  },
+  sectionRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     marginBottom: 10
   },
+  sectionTitle: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '900'
+  },
+  sectionCount: {
+    color: colors.textSoft,
+    fontSize: 13,
+    fontWeight: '800'
+  },
   list: {
-    paddingBottom: 88
+    paddingBottom: 82
   },
-  centerState: {
-    alignItems: 'center',
-    flex: 1,
-    gap: 12,
-    justifyContent: 'center',
-    paddingBottom: 80
-  },
-  mutedText: {
-    color: colors.textMuted,
-    textAlign: 'center'
-  },
-  errorText: {
-    color: colors.danger,
-    textAlign: 'center'
+  emptyList: {
+    flexGrow: 1
   }
 });

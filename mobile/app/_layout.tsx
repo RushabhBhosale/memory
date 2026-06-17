@@ -7,9 +7,12 @@ import { colors } from '../styles/theme';
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
-      <StatusBar style="auto" />
+      <StatusBar style="dark" />
       <Stack
         screenOptions={{
+          contentStyle: {
+            backgroundColor: colors.background
+          },
           headerStyle: {
             backgroundColor: colors.background
           },
@@ -23,6 +26,7 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="add" options={{ title: 'Add Memory' }} />
         <Stack.Screen name="memories/[id]" options={{ title: 'Memory' }} />
+        <Stack.Screen name="projects/[id]" options={{ title: 'Project' }} />
       </Stack>
     </SafeAreaProvider>
   );

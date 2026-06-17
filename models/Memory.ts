@@ -6,6 +6,8 @@ export type MemoryDocument = Document & {
   category: string;
   tags: string[];
   source: string;
+  kind: 'note' | 'task' | 'work_done' | 'requirement' | 'credential';
+  projectId?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -35,6 +37,17 @@ const memorySchema = new Schema<MemoryDocument>(
       type: String,
       default: 'manual',
       trim: true
+    },
+    kind: {
+      type: String,
+      enum: ['note', 'task', 'work_done', 'requirement', 'credential'],
+      default: 'note',
+      trim: true
+    },
+    projectId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Project',
+      default: undefined
     }
   },
   {

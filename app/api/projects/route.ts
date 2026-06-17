@@ -1,10 +1,8 @@
-import mongoose from 'mongoose';
 import { NextResponse } from 'next/server';
 
 import { validateApiKey } from '@/lib/apiKey';
 import { connectDB } from '@/lib/mongodb';
-import Memory from '@/models/Memory';
-import '@/models/Project';
+import Project from '@/models/Project';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -20,18 +18,6 @@ const parseJsonBody = async (request: Request) => {
 const getErrorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Internal server error';
 
-const validateProjectId = (projectId: unknown) => {
-  if (
-    projectId !== undefined &&
-    projectId !== '' &&
-    (typeof projectId !== 'string' || !mongoose.Types.ObjectId.isValid(projectId))
-  ) {
-    return NextResponse.json({ error: 'Invalid project id' }, { status: 400 });
-  }
-
-  return null;
-};
-
 export async function GET(request: Request) {
   const authError = validateApiKey(request);
 
@@ -40,26 +26,13 @@ export async function GET(request: Request) {
   }
 
   try {
-    const { searchParams } = new URL(request.url);
-    const projectId = String(searchParams.get('projectId') || '').trim();
-    const projectIdError = validateProjectId(projectId);
-
-    if (projectIdError) {
-      return projectIdError;
-    }
-
-    const query = projectId ? { projectId } : {};
-
     await connectDB();
 
-    const memories = await Memory.find(query)
-      .sort({ createdAt: -1 })
-      .populate('projectId', 'name description status')
-      .lean();
+    const projects = await Project.find().sort({ updatedAt: -1 }).lean();
 
     return NextResponse.json({
-      count: memories.length,
-      data: memories
+      count: projects.length,
+      data: projects
     });
   } catch (error) {
     return NextResponse.json(
@@ -83,20 +56,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
 
-    const projectIdError = validateProjectId((body as Record<string, unknown>).projectId);
-
-    if (projectIdError) {
-      return projectIdError;
-    }
-
     await connectDB();
 
-    const memory = await Memory.create(body);
-    const createdMemory = await Memory.findById(memory._id)
-      .populate('projectId', 'name description status')
-      .lean();
+    const project = await Project.create(body);
 
-    return NextResponse.json({ data: createdMemory }, { status: 201 });
+    return NextResponse.json({ data: project }, { status: 201 });
   } catch (error) {
     const status = error instanceof Error && error.name === 'ValidationError' ? 400 : 500;
 

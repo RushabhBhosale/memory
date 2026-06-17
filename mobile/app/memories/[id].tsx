@@ -11,13 +11,50 @@ import {
 import { router, useLocalSearchParams } from 'expo-router';
 
 import { deleteMemory, getMemory, Memory } from '../../services/api';
-import { cardShadow, colors } from '../../styles/theme';
+import { cardShadow, colors, subtleShadow } from '../../styles/theme';
 
 const formatDateTime = (value: string) =>
   new Intl.DateTimeFormat(undefined, {
     dateStyle: 'medium',
     timeStyle: 'short'
   }).format(new Date(value));
+
+const formatDateOnly = (value: string) =>
+  new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'long'
+  }).format(new Date(value));
+
+const getKindLabel = (kind?: Memory['kind']) => {
+  switch (kind) {
+    case 'task':
+      return 'Task';
+    case 'work_done':
+      return 'Work';
+    case 'requirement':
+      return 'Project';
+    case 'credential':
+      return 'Reminder';
+    default:
+      return 'Personal';
+  }
+};
+
+const getProjectName = (memory: Memory) =>
+  memory.projectId && typeof memory.projectId === 'object' ? memory.projectId.name : '';
+
+const getKindTone = (kind?: Memory['kind']) => {
+  switch (kind) {
+    case 'task':
+    case 'work_done':
+      return colors.workTag;
+    case 'requirement':
+      return colors.projectTag;
+    case 'credential':
+      return colors.reminderTag;
+    default:
+      return colors.personalTag;
+  }
+};
 
 export default function DetailScreen() {
   const params = useLocalSearchParams<{ id: string }>();
@@ -79,7 +116,7 @@ export default function DetailScreen() {
   if (loading) {
     return (
       <View style={styles.centerState}>
-        <ActivityIndicator />
+        <ActivityIndicator color={colors.primary} />
         <Text style={styles.mutedText}>Loading memory...</Text>
       </View>
     );
@@ -104,31 +141,54 @@ export default function DetailScreen() {
     );
   }
 
+  const projectName = getProjectName(memory);
+  const kindTone = getKindTone(memory.kind);
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={styles.headerPanel}>
-        <Text style={styles.category}>{memory.category}</Text>
+        <Text style={styles.dateHero}>{formatDateOnly(memory.createdAt)}</Text>
         <Text style={styles.title}>{memory.title}</Text>
-        <Text style={styles.meta}>Source: {memory.source}</Text>
-        <Text style={styles.date}>Created {formatDateTime(memory.createdAt)}</Text>
-        <Text style={styles.date}>Updated {formatDateTime(memory.updatedAt)}</Text>
 
-        {memory.tags.length ? (
-          <View style={styles.tagRow}>
-            {memory.tags.map((tag) => (
-              <View key={tag} style={styles.tagPill}>
-                <Text style={styles.tagText}>{tag}</Text>
-              </View>
-            ))}
+        <View style={styles.tagRow}>
+          <View style={[styles.tagPill, { backgroundColor: `${kindTone}1F` }]}>
+            <Text style={[styles.tagText, { color: kindTone }]}>{getKindLabel(memory.kind)}</Text>
           </View>
-        ) : null}
+          <View style={styles.tagPill}>
+            <Text style={styles.tagText}>{memory.category}</Text>
+          </View>
+          {projectName ? (
+            <View style={[styles.tagPill, { backgroundColor: `${colors.projectTag}1F` }]}>
+              <Text style={[styles.tagText, { color: colors.projectTag }]}>{projectName}</Text>
+            </View>
+          ) : null}
+          {memory.tags.map((tag) => (
+            <View key={tag} style={styles.tagPill}>
+              <Text style={styles.tagText}>{tag}</Text>
+            </View>
+          ))}
+        </View>
       </View>
 
-      {memory.content ? (
-        <Text style={styles.body}>{memory.content}</Text>
-      ) : (
-        <Text style={styles.emptyBody}>No additional notes.</Text>
-      )}
+      <View style={styles.metaCard}>
+        <View style={styles.metaBlock}>
+          <Text style={styles.metaLabel}>Created</Text>
+          <Text style={styles.metaValue}>{formatDateTime(memory.createdAt)}</Text>
+        </View>
+        <View style={styles.metaDivider} />
+        <View style={styles.metaBlock}>
+          <Text style={styles.metaLabel}>Updated</Text>
+          <Text style={styles.metaValue}>{formatDateTime(memory.updatedAt)}</Text>
+        </View>
+      </View>
+
+      <View style={styles.bodyCard}>
+        {memory.content ? (
+          <Text style={styles.body}>{memory.content}</Text>
+        ) : (
+          <Text style={styles.emptyBody}>No additional notes.</Text>
+        )}
+      </View>
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
@@ -138,7 +198,7 @@ export default function DetailScreen() {
         onPress={confirmDelete}
       >
         {deleting ? (
-          <ActivityIndicator color="#ffffff" />
+          <ActivityIndicator color={colors.white} />
         ) : (
           <Text style={styles.deleteButtonText}>Delete memory</Text>
         )}
@@ -153,84 +213,100 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background
   },
   content: {
-    padding: 18,
-    paddingBottom: 34
+    padding: 20,
+    paddingBottom: 38
   },
   headerPanel: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: 1,
-    padding: 18,
-    ...cardShadow
+    alignItems: 'center',
+    paddingTop: 8
   },
-  category: {
-    color: colors.textMuted,
-    fontSize: 13,
+  dateHero: {
+    color: colors.accent,
+    fontSize: 15,
     fontWeight: '800',
-    marginBottom: 8,
-    textTransform: 'uppercase'
+    marginBottom: 12
   },
   title: {
     color: colors.text,
-    fontSize: 28,
-    fontWeight: '800',
-    lineHeight: 34,
-    marginBottom: 12
-  },
-  meta: {
-    color: colors.textMuted,
-    fontWeight: '600',
-    marginBottom: 6
-  },
-  date: {
-    color: colors.textSoft,
-    marginBottom: 4
+    fontSize: 32,
+    fontWeight: '900',
+    lineHeight: 38,
+    marginBottom: 16,
+    textAlign: 'center'
   },
   tagRow: {
+    alignItems: 'center',
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 14
+    gap: 8,
+    justifyContent: 'center'
   },
   tagPill: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 8,
-    paddingHorizontal: 9,
-    paddingVertical: 5
+    backgroundColor: colors.surface,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    ...subtleShadow
   },
   tagText: {
     color: colors.textMuted,
     fontSize: 12,
+    fontWeight: '800'
+  },
+  metaCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 18,
+    borderWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 24,
+    padding: 16,
+    ...subtleShadow
+  },
+  metaBlock: {
+    flex: 1
+  },
+  metaDivider: {
+    backgroundColor: colors.border,
+    marginHorizontal: 12,
+    width: 1
+  },
+  metaLabel: {
+    color: colors.textSoft,
+    fontSize: 11,
+    fontWeight: '900',
+    marginBottom: 4,
+    textTransform: 'uppercase'
+  },
+  metaValue: {
+    color: colors.textMuted,
+    fontSize: 12,
     fontWeight: '700'
   },
-  body: {
+  bodyCard: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderRadius: 8,
+    borderRadius: 22,
     borderWidth: 1,
-    color: colors.text,
-    fontSize: 16,
-    lineHeight: 24,
     marginTop: 18,
-    padding: 16,
+    padding: 18,
     ...cardShadow
   },
+  body: {
+    color: colors.text,
+    fontSize: 16,
+    lineHeight: 25
+  },
   emptyBody: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: 1,
     color: colors.textSoft,
     fontSize: 15,
-    lineHeight: 22,
-    marginTop: 18,
-    padding: 16
+    lineHeight: 22
   },
   deleteButton: {
     alignItems: 'center',
     backgroundColor: colors.danger,
-    borderRadius: 8,
+    borderRadius: 999,
     marginTop: 24,
     padding: 14
   },
@@ -238,18 +314,18 @@ const styles = StyleSheet.create({
     opacity: 0.7
   },
   deleteButtonText: {
-    color: '#ffffff',
-    fontWeight: '700'
+    color: colors.white,
+    fontWeight: '800'
   },
   secondaryButton: {
     backgroundColor: colors.surfaceMuted,
-    borderRadius: 8,
+    borderRadius: 999,
     paddingHorizontal: 14,
     paddingVertical: 10
   },
   secondaryButtonText: {
     color: colors.text,
-    fontWeight: '600'
+    fontWeight: '700'
   },
   centerState: {
     alignItems: 'center',

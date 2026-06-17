@@ -21,14 +21,51 @@ The local Next.js server runs at `http://localhost:3000` by default.
 
 ## Backend Routes
 
-All memory routes require the `x-api-key` header.
+All API routes require the `x-api-key` header.
 
+- `POST /api/assistant/command`
 - `GET /api/memories`
 - `POST /api/memories`
 - `GET /api/memories/search?q=term`
 - `GET /api/memories/:id`
 - `PATCH /api/memories/:id`
 - `DELETE /api/memories/:id`
+- `GET /api/projects`
+- `POST /api/projects`
+- `GET /api/projects/:id`
+- `GET /api/projects/:id/memories`
+
+Memories can optionally be attached to a project with `projectId` and typed with `kind`: `note`, `task`, `work_done`, `requirement`, or `credential`.
+
+Credential entries are stored like normal memory text in the current version. Do not store real passwords, tokens, or production secrets until encryption is added.
+
+## Assistant Commands
+
+The assistant endpoint accepts command-style input and natural language:
+
+- `@project HRMS` or `@switch HRMS` sets the active project.
+- `@current` returns the active project.
+- `@task Implement semantic search` creates a pending task under the active project.
+- `@note Cache employee data for 5 minutes` creates a project note.
+- `@requirement JWT token must refresh before expiry` creates a project requirement.
+- `@credential Staging appKey must match config file` creates a project credential note.
+- `@work Finished employee cache integration` creates a project work-done note.
+- `@meeting Client discussion Friday 3PM` creates a project meeting.
+- `@summary` returns project details, pending tasks, completed tasks, recent meetings, and recent notes.
+- `@tasks`, `@notes`, and `@meetings` list items for the active project.
+- `@memory My passport expires in 2032` saves a standalone memory.
+- `@find jwt` searches projects, tasks, meetings, notes, and memories.
+- `@projects` and `@memories` list projects or recent standalone memories.
+- `@delete-task jwt` and `@delete-memory passport` search first, then delete if exactly one item matches.
+
+Natural language examples also work:
+
+- `work on hrms`
+- `switch to activex`
+- `open natiks`
+- `remember this: Japan trip budget is 2 lakh`
+- `what do I know about jwt`
+- `any tasks in hrms`
 
 ## Test With Curl
 
@@ -37,6 +74,54 @@ Set your API key first:
 ```bash
 API_KEY=replace-with-your-memory-api-key
 BASE_URL=http://localhost:3000
+```
+
+Run an assistant command:
+
+```bash
+curl -X POST "$BASE_URL/api/assistant/command" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -H "x-session-id: default" \
+  -d '{
+    "input": "@project HRMS"
+  }'
+```
+
+Create a task in the active project:
+
+```bash
+curl -X POST "$BASE_URL/api/assistant/command" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -H "x-session-id: default" \
+  -d '{
+    "input": "@task Implement semantic search"
+  }'
+```
+
+Save a standalone memory:
+
+```bash
+curl -X POST "$BASE_URL/api/assistant/command" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -H "x-session-id: default" \
+  -d '{
+    "input": "@memory My passport expires in 2032"
+  }'
+```
+
+Search everything:
+
+```bash
+curl -X POST "$BASE_URL/api/assistant/command" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -H "x-session-id: default" \
+  -d '{
+    "input": "@find jwt"
+  }'
 ```
 
 Create a memory:
@@ -49,8 +134,46 @@ curl -X POST "$BASE_URL/api/memories" \
     "title": "First memory",
     "content": "This is a test memory from curl.",
     "category": "personal",
+    "kind": "note",
     "tags": ["test", "curl"],
     "source": "manual"
+  }'
+```
+
+Create a project:
+
+```bash
+curl -X POST "$BASE_URL/api/projects" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -d '{
+    "name": "Natiks",
+    "description": "Project notes, tasks, requirements, and work log"
+  }'
+```
+
+List projects:
+
+```bash
+curl "$BASE_URL/api/projects" \
+  -H "x-api-key: $API_KEY"
+```
+
+Save a project task or requirement:
+
+```bash
+PROJECT_ID=replace-with-project-id
+
+curl -X POST "$BASE_URL/api/memories" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -d '{
+    "title": "Set up JWT auth",
+    "content": "Add login token validation and refresh flow.",
+    "category": "work",
+    "kind": "requirement",
+    "projectId": "'$PROJECT_ID'",
+    "tags": ["jwt", "auth"]
   }'
 ```
 
@@ -65,6 +188,13 @@ Search memories:
 
 ```bash
 curl "$BASE_URL/api/memories/search?q=curl" \
+  -H "x-api-key: $API_KEY"
+```
+
+List memories for one project:
+
+```bash
+curl "$BASE_URL/api/projects/$PROJECT_ID/memories" \
   -H "x-api-key: $API_KEY"
 ```
 
@@ -117,6 +247,18 @@ Privacy policy page:
 
 ```bash
 https://your-vercel-domain.vercel.app/privacy
+```
+
+## Custom GPT Action Notes
+
+Use `openapi.json` as the Action schema. In the Custom GPT instructions, tell the GPT:
+
+```text
+For any memory, project, task, meeting, note, search, summary, or delete request, call runAssistantCommand with the user's exact message in input.
+
+Do not say "I'll check" before using the action. Call runAssistantCommand first, then answer using its message and data.
+
+Use the same x-session-id value across messages so the active project remains selected.
 ```
 
 ## Expo Mobile App
