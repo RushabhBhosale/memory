@@ -34,6 +34,9 @@ All API routes require the `x-api-key` header.
 - `POST /api/projects`
 - `GET /api/projects/:id`
 - `GET /api/projects/:id/memories`
+- `GET /api/extension/projects`
+- `POST /api/extension/memories`
+- `POST /api/extension/screenshots`
 
 Memories can optionally be attached to a project with `projectId` and typed with `kind`: `note`, `task`, `work_done`, `requirement`, or `credential`.
 
@@ -198,6 +201,47 @@ curl "$BASE_URL/api/projects/$PROJECT_ID/memories" \
   -H "x-api-key: $API_KEY"
 ```
 
+List projects for the Chrome extension:
+
+```bash
+curl "$BASE_URL/api/extension/projects" \
+  -H "x-api-key: $API_KEY"
+```
+
+Save selected text or a webpage from the Chrome extension:
+
+```bash
+curl -X POST "$BASE_URL/api/extension/memories" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -d '{
+    "type": "note",
+    "content": "Selected text from a webpage",
+    "note": "Optional user note",
+    "projectId": null,
+    "source": {
+      "type": "chrome_extension",
+      "title": "Example Page",
+      "url": "https://example.com",
+      "capturedAt": "2026-06-17T10:00:00.000Z"
+    }
+  }'
+```
+
+Upload a screenshot from the Chrome extension:
+
+```bash
+curl -X POST "$BASE_URL/api/extension/screenshots" \
+  -H "x-api-key: $API_KEY" \
+  -F "image=@/path/to/screenshot.png" \
+  -F "type=note" \
+  -F "note=Optional screenshot note" \
+  -F "projectId=" \
+  -F "sourceTitle=Example Page" \
+  -F "sourceUrl=https://example.com" \
+  -F "capturedAt=2026-06-17T10:00:00.000Z"
+```
+
 Get a memory by id:
 
 ```bash
@@ -288,3 +332,37 @@ Mobile scripts:
 - `npm run android`
 - `npm run web`
 - `npm run typecheck`
+
+## Chrome Extension
+
+The Chrome extension lives in `apps/chrome-extension`.
+
+It can:
+
+- Save selected text from any webpage with the right-click menu.
+- Save the current page from the popup.
+- Capture the visible tab screenshot from the popup.
+- Save as `Note`, `Task`, `Project`, or `Reminder`.
+- Attach the saved item to a project, or save with `No project`.
+
+Backend URL config:
+
+```js
+// apps/chrome-extension/config.js
+globalThis.MEMORY_ASSISTANT_CONFIG = {
+  BACKEND_URL: 'https://memory-green-kappa.vercel.app'
+};
+```
+
+For local backend testing, change `BACKEND_URL` to `http://localhost:3000`. The manifest already allows the deployed URL, `localhost:3000`, and `localhost:5000`.
+
+Load it in Chrome:
+
+1. Open `chrome://extensions`.
+2. Enable Developer mode.
+3. Click Load unpacked.
+4. Select `apps/chrome-extension`.
+5. Open the extension popup.
+6. Enter the backend URL and your `MEMORY_API_KEY`.
+
+The API key is stored in `chrome.storage.local` under the extension's private storage. The extension only sends page content after an explicit user action: right-click save, Save Page, or Capture Screenshot.

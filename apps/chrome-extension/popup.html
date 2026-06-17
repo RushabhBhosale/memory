@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Memory Assistant</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="header">
+        <div>
+          <p class="eyebrow">Memory Assistant</p>
+          <h1>Quick Save</h1>
+        </div>
+        <button id="logoutButton" class="ghost-button hidden" type="button">Logout</button>
+      </section>
+
+      <section id="loginView" class="card">
+        <h2>Login to Memory Assistant</h2>
+        <p class="muted">Enter your backend URL and API key once. The key is stored in Chrome local extension storage.</p>
+        <label>
+          Backend URL
+          <input id="backendUrlInput" type="url" autocomplete="off">
+        </label>
+        <label>
+          API key
+          <input id="tokenInput" type="password" autocomplete="off" placeholder="x-api-key">
+        </label>
+        <button id="loginButton" class="primary-button" type="button">Save Login</button>
+      </section>
+
+      <section id="appView" class="hidden">
+        <div class="card stack">
+          <label>
+            Save as
+            <select id="typeSelect">
+              <option value="note">Note</option>
+              <option value="task">Task</option>
+              <option value="project">Project</option>
+              <option value="reminder">Reminder</option>
+            </select>
+          </label>
+
+          <label>
+            Project
+            <select id="projectSelect">
+              <option value="">No project</option>
+            </select>
+          </label>
+
+          <label>
+            Optional note
+            <textarea id="noteInput" rows="4" placeholder="Add context before saving..."></textarea>
+          </label>
+        </div>
+
+        <div class="actions">
+          <button id="savePageButton" class="primary-button" type="button">Save Page</button>
+          <button id="captureButton" class="secondary-button" type="button">Capture Screenshot</button>
+        </div>
+      </section>
+
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </main>
+
+    <script src="config.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
+

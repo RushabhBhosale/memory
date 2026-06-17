@@ -1,0 +1,181 @@
+:root {
+  color-scheme: light;
+  --background: #F9F8F4;
+  --primary: #F4B63D;
+  --primary-pressed: #D99D25;
+  --text: #202124;
+  --muted: #686A64;
+  --card: #FFFFFF;
+  --border: #E8E5E3;
+  --danger: #E66A5C;
+  --success: #8BA888;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--background);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  margin: 0;
+  min-width: 340px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.shell {
+  padding: 18px;
+  width: 360px;
+}
+
+.header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.eyebrow {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  margin: 0 0 2px;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 28px;
+  line-height: 32px;
+}
+
+h2 {
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: 0 12px 24px rgba(32, 33, 36, 0.06);
+  padding: 14px;
+}
+
+.stack {
+  display: grid;
+  gap: 12px;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 18px;
+  margin-bottom: 14px;
+}
+
+label {
+  color: var(--text);
+  display: grid;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+
+input,
+select,
+textarea {
+  background: #F9F8F4;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  color: var(--text);
+  outline: none;
+  padding: 11px 12px;
+  width: 100%;
+}
+
+textarea {
+  line-height: 19px;
+  resize: vertical;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(244, 182, 61, 0.24);
+}
+
+.actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.primary-button,
+.secondary-button,
+.ghost-button {
+  border: 0;
+  border-radius: 16px;
+  cursor: pointer;
+  font-weight: 900;
+  min-height: 44px;
+  padding: 11px 14px;
+}
+
+.primary-button {
+  background: var(--primary);
+  color: var(--text);
+}
+
+.primary-button:hover {
+  background: var(--primary-pressed);
+}
+
+.secondary-button {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.ghost-button {
+  background: transparent;
+  color: var(--muted);
+  min-height: 36px;
+  padding: 8px 10px;
+}
+
+.status {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 18px;
+  margin-top: 12px;
+  min-height: 18px;
+}
+
+.status.error {
+  color: var(--danger);
+}
+
+.status.success {
+  color: var(--success);
+}
+
+.hidden {
+  display: none;
+}
+
