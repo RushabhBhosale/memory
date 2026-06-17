@@ -21,17 +21,6 @@
         "operationId": "runAssistantCommand",
         "summary": "Run assistant command",
         "description": "Run one command or natural language request. Handles active project, tasks, notes, meetings, memories, search, and delete.",
-        "parameters": [
-          {
-            "name": "x-session-id",
-            "in": "header",
-            "required": false,
-            "description": "Optional session key for active project context.",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "required": true,
           "content": {
