@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 
@@ -70,6 +71,32 @@ const getKindTone = (memory: ActivityItem | Memory) => {
   }
 };
 
+const getKindIcon = (memory: ActivityItem | Memory) => {
+  switch (getActivityType(memory)) {
+    case 'task':
+      return 'checkbox-outline';
+    case 'meeting':
+      return 'people-outline';
+    case 'note':
+      return 'document-text-outline';
+    default:
+      break;
+  }
+
+  switch (memory.kind) {
+    case 'task':
+      return 'checkbox-outline';
+    case 'work_done':
+      return 'briefcase-outline';
+    case 'requirement':
+      return 'folder-open-outline';
+    case 'credential':
+      return 'key-outline';
+    default:
+      return 'sparkles-outline';
+  }
+};
+
 const getCategoryTone = (memory: ActivityItem | Memory, projectName: string) => {
   const category = memory.category.toLowerCase();
 
@@ -107,6 +134,7 @@ export function MemoryCard({ memory }: MemoryCardProps) {
   const kindTone = getKindTone(memory);
   const categoryTone = getCategoryTone(memory, projectName);
   const activityType = getActivityType(memory);
+  const kindIcon = getKindIcon(memory);
 
   return (
     <Pressable
@@ -127,7 +155,9 @@ export function MemoryCard({ memory }: MemoryCardProps) {
       }}
     >
       <View style={styles.mainRow}>
-        <View style={[styles.marker, { backgroundColor: kindTone }]} />
+        <View style={[styles.iconWrap, { backgroundColor: getToneSurface(kindTone) }]}>
+          <Ionicons color={kindTone} name={kindIcon} size={18} />
+        </View>
         <View style={styles.copy}>
           <Text numberOfLines={1} style={styles.title}>
             {memory.title}
@@ -164,10 +194,10 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderRadius: 18,
+    borderRadius: 12,
     borderWidth: 1,
     marginBottom: 10,
-    padding: 12,
+    padding: 13,
     ...subtleShadow
   },
   cardPressed: {
@@ -179,20 +209,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10
   },
-  marker: {
-    borderRadius: 999,
+  iconWrap: {
+    alignItems: 'center',
+    borderRadius: 9,
     height: 38,
+    justifyContent: 'center',
     marginTop: 1,
-    width: 5
+    width: 38
   },
   copy: {
     flex: 1
   },
   title: {
     color: colors.text,
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '900',
-    lineHeight: 20,
+    lineHeight: 19,
     marginBottom: 3
   },
   content: {
@@ -211,7 +243,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 6,
     marginTop: 10,
-    paddingLeft: 15
+    paddingLeft: 48
   },
   tagPill: {
     backgroundColor: colors.backgroundSoft,

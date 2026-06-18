@@ -4,7 +4,7 @@ import { getFallbackTitle } from '@/lib/titleFallback';
 import Memory from '@/models/Memory';
 import Project from '@/models/Project';
 
-export type ExtensionSaveType = 'note' | 'task' | 'project' | 'reminder';
+export type ExtensionSaveType = 'memory' | 'log' | 'note' | 'task' | 'project' | 'reminder';
 
 export type ExtensionSource = {
   type: 'chrome_extension';
@@ -37,7 +37,14 @@ export class ExtensionRequestError extends Error {
 export const getErrorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Internal server error';
 
-const SAVE_TYPES = new Set<ExtensionSaveType>(['note', 'task', 'project', 'reminder']);
+const SAVE_TYPES = new Set<ExtensionSaveType>([
+  'memory',
+  'log',
+  'note',
+  'task',
+  'project',
+  'reminder'
+]);
 
 const getString = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
 
@@ -49,6 +56,10 @@ const normalizeType = (value: unknown): ExtensionSaveType => {
 
 const getTypeConfig = (type: ExtensionSaveType): { category: string; kind: MemoryKind } => {
   switch (type) {
+    case 'memory':
+      return { category: 'general', kind: 'note' };
+    case 'log':
+      return { category: 'log', kind: 'work_done' };
     case 'task':
       return { category: 'work', kind: 'task' };
     case 'project':
@@ -138,7 +149,14 @@ export const createExtensionMemory = async (payload: ExtensionPayload) => {
     [content, note, source.title].filter(Boolean).join('\n\n') ||
     source.url ||
     `${type === 'project' ? 'Project note' : type} from Chrome`;
-  const fallbackType = type === 'task' ? 'task' : type === 'reminder' ? 'reminder' : 'note';
+  const fallbackType =
+    type === 'task'
+      ? 'task'
+      : type === 'reminder'
+        ? 'reminder'
+        : type === 'log'
+          ? 'log'
+          : 'note';
   const memory = await Memory.create({
     title: title || getFallbackTitle(titleSource, fallbackType),
     content: memoryContent,

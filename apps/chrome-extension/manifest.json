@@ -11,6 +11,7 @@
     "tabs"
   ],
   "host_permissions": [
+    "<all_urls>",
     "https://memory-green-kappa.vercel.app/*",
     "http://localhost:3000/*",
     "http://localhost:5000/*"
@@ -21,5 +22,14 @@
   "action": {
     "default_popup": "popup.html",
     "default_title": "Memory Assistant"
+  },
+  "commands": {
+    "open-quick-save": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+M",
+        "mac": "Command+Shift+M"
+      },
+      "description": "Open quick save modal"
+    }
   }
 }

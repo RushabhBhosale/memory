@@ -189,6 +189,18 @@ export const getActivityItem = async (type: ActivityType, id: string) => {
   return response.data;
 };
 
+export const deleteActivityItem = async (type: ActivityType, id: string) => {
+  const { activityUrl } = getApiConfig();
+
+  await request<{ message: string; data: ActivityItem }>(
+    activityUrl,
+    `/${encodeURIComponent(type)}/${encodeURIComponent(id)}`,
+    {
+      method: 'DELETE'
+    }
+  );
+};
+
 export const searchMemories = async (query: string) => {
   const { memoriesUrl } = getApiConfig();
   const response = await request<ListResponse>(

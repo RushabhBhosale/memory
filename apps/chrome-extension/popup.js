@@ -10,6 +10,7 @@ const loginButton = document.getElementById('loginButton');
 const typeSelect = document.getElementById('typeSelect');
 const projectSelect = document.getElementById('projectSelect');
 const noteInput = document.getElementById('noteInput');
+const openModalButton = document.getElementById('openModalButton');
 const savePageButton = document.getElementById('savePageButton');
 const statusText = document.getElementById('status');
 
@@ -31,6 +32,7 @@ const setStatus = (message, tone = '') => {
 };
 
 const setBusy = (busy) => {
+  openModalButton.disabled = busy;
   savePageButton.disabled = busy;
   loginButton.disabled = busy;
 };
@@ -44,14 +46,30 @@ const getAuthConfig = async () => {
   };
 };
 
-const getActiveTab = async () => {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+const isInjectableTab = (tab) =>
+  Boolean(
+    tab?.id &&
+      tab.url &&
+      /^(https?:|file:)/i.test(tab.url)
+  );
 
-  if (!tab?.id) {
-    throw new Error('No active tab found.');
+const getActiveTab = async () => {
+  const queries = [
+    { active: true, currentWindow: true },
+    { active: true, lastFocusedWindow: true },
+    { active: true, windowType: 'normal' }
+  ];
+
+  for (const query of queries) {
+    const tabs = await chrome.tabs.query(query);
+    const injectableTab = tabs.find(isInjectableTab);
+
+    if (injectableTab) {
+      return injectableTab;
+    }
   }
 
-  return tab;
+  throw new Error('No active website tab found. Click a normal webpage and try again.');
 };
 
 const parseApiResponse = async (response) => {
@@ -174,6 +192,33 @@ const savePage = async () => {
   }
 };
 
+const openQuickSaveModal = async () => {
+  try {
+    setBusy(true);
+    setStatus('Opening modal...');
+
+    chrome.runtime.sendMessage({ type: 'MEMORY_ASSISTANT_OPEN_MODAL' }, (response) => {
+      setBusy(false);
+
+      if (chrome.runtime.lastError) {
+        setStatus(chrome.runtime.lastError.message || 'Unable to open modal.', 'error');
+        return;
+      }
+
+      if (!response?.ok) {
+        setStatus(response?.error || 'Unable to open modal.', 'error');
+        return;
+      }
+
+      setStatus('Modal opened on the current page.', 'success');
+      window.close();
+    });
+  } catch (error) {
+    setBusy(false);
+    setStatus(error instanceof Error ? error.message : 'Unable to open modal.', 'error');
+  }
+};
+
 loginButton.addEventListener('click', async () => {
   const token = tokenInput.value.trim();
   const backendUrl = backendUrlInput.value.trim().replace(/\/$/, '') || getDefaultBackendUrl();
@@ -197,5 +242,6 @@ logoutButton.addEventListener('click', async () => {
 });
 
 savePageButton.addEventListener('click', savePage);
+openModalButton.addEventListener('click', openQuickSaveModal);
 
 renderAuthState();

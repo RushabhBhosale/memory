@@ -227,6 +227,41 @@ const updateActivityItem = async (
   }
 };
 
+const deleteActivityItem = async (type: ActivityType, id: string) => {
+  switch (type) {
+    case 'memory': {
+      const memory = await Memory.findByIdAndDelete(id)
+        .populate('projectId', 'name description status')
+        .lean();
+
+      return memory ? toMemoryActivity(memory) : null;
+    }
+    case 'task': {
+      const task = await ProjectTask.findByIdAndDelete(id)
+        .populate('projectId', 'name description status')
+        .lean();
+
+      return task ? toTaskActivity(task) : null;
+    }
+    case 'note': {
+      const note = await ProjectNote.findByIdAndDelete(id)
+        .populate('projectId', 'name description status')
+        .lean();
+
+      return note ? toNoteActivity(note) : null;
+    }
+    case 'meeting': {
+      const meeting = await ProjectMeeting.findByIdAndDelete(id)
+        .populate('projectId', 'name description status')
+        .lean();
+
+      return meeting ? toMeetingActivity(meeting) : null;
+    }
+    default:
+      return null;
+  }
+};
+
 export async function GET(request: Request, context: RouteContext) {
   const authError = validateApiKey(request);
 
@@ -307,6 +342,41 @@ export async function PATCH(request: Request, context: RouteContext) {
     return NextResponse.json(
       { error: getErrorMessage(error) },
       { status }
+    );
+  }
+}
+
+export async function DELETE(request: Request, context: RouteContext) {
+  const authError = validateApiKey(request);
+
+  if (authError) {
+    return authError;
+  }
+
+  try {
+    const { id, type } = await getParams(context);
+    const paramsError = validateActivityParams(type, id);
+
+    if (paramsError) {
+      return paramsError;
+    }
+
+    await connectDB();
+
+    const data = await deleteActivityItem(type as ActivityType, id);
+
+    if (!data) {
+      return NextResponse.json({ error: 'Activity not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({
+      message: 'Activity deleted',
+      data
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { error: getErrorMessage(error) },
+      { status: 500 }
     );
   }
 }

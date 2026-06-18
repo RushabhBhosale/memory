@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,6 +11,7 @@ import {
 import { router, useLocalSearchParams } from 'expo-router';
 
 import {
+  deleteActivityItem,
   getActivityItem,
   type ActivityItem,
   type ActivityType
@@ -78,6 +80,7 @@ export default function ActivityDetailScreen() {
   const type = getParam(params.type) as ActivityType;
 
   const [item, setItem] = useState<ActivityItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -102,6 +105,34 @@ export default function ActivityDetailScreen() {
   useEffect(() => {
     loadItem();
   }, [loadItem]);
+
+  const confirmDelete = () => {
+    if (!item || !id || !type) {
+      return;
+    }
+
+    const label = getActivityLabel(item).toLowerCase();
+
+    Alert.alert(`Delete ${label}?`, 'This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            setDeleting(true);
+            setError('');
+            await deleteActivityItem(type, id);
+            router.replace('/');
+          } catch (err) {
+            setError(err instanceof Error ? err.message : `Unable to delete ${label}`);
+          } finally {
+            setDeleting(false);
+          }
+        }
+      }
+    ]);
+  };
 
   if (loading) {
     return (
@@ -205,6 +236,18 @@ export default function ActivityDetailScreen() {
           <Text style={styles.primaryButtonText}>Open project</Text>
         </Pressable>
       ) : null}
+
+      <Pressable
+        disabled={deleting}
+        style={[styles.deleteButton, deleting && styles.disabledButton]}
+        onPress={confirmDelete}
+      >
+        {deleting ? (
+          <ActivityIndicator color={colors.danger} />
+        ) : (
+          <Text style={styles.deleteButtonText}>Delete {getActivityLabel(item).toLowerCase()}</Text>
+        )}
+      </Pressable>
     </ScrollView>
   );
 }
@@ -327,6 +370,22 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 15,
     fontWeight: '900'
+  },
+  deleteButton: {
+    alignItems: 'center',
+    borderColor: colors.danger,
+    borderRadius: 999,
+    borderWidth: 1,
+    marginTop: 12,
+    padding: 15
+  },
+  deleteButtonText: {
+    color: colors.danger,
+    fontSize: 15,
+    fontWeight: '900'
+  },
+  disabledButton: {
+    opacity: 0.6
   },
   secondaryButton: {
     backgroundColor: colors.surfaceMuted,

@@ -1,49 +1,49 @@
 export const colors = {
-  primary: '#F4B63D',
-  secondary: '#8BA888',
-  background: '#F9F8F4',
-  backgroundSoft: '#F0EEE7',
+  primary: '#2F6F63',
+  secondary: '#5E7CE2',
+  background: '#F4F6F1',
+  backgroundSoft: '#E9EDE6',
   surface: '#FFFFFF',
-  surfaceRaised: '#FFFFFF',
-  surfaceMuted: '#EEE9DF',
-  border: '#E5E0D5',
-  borderStrong: '#D5CCBE',
-  text: '#202124',
-  textMuted: '#5F625B',
-  textSoft: '#8D9088',
-  accent: '#F4B63D',
-  accentPressed: '#D99D25',
-  accentSurface: '#FFF1C9',
-  success: '#8BA888',
-  successSurface: '#E9F0E4',
-  danger: '#E66A5C',
-  dangerSurface: '#FBE3DF',
-  workTag: '#4F7CFF',
-  personalTag: '#8BA888',
-  reminderTag: '#E66A5C',
-  projectTag: '#B58AF2',
-  black: '#202124',
+  surfaceRaised: '#FCFDFB',
+  surfaceMuted: '#EEF2EA',
+  border: '#DDE4D9',
+  borderStrong: '#C8D2C4',
+  text: '#17201E',
+  textMuted: '#56625E',
+  textSoft: '#8A9691',
+  accent: '#D7A741',
+  accentPressed: '#B98B2B',
+  accentSurface: '#F8EDCF',
+  success: '#2F6F63',
+  successSurface: '#DDECE6',
+  danger: '#D85C4A',
+  dangerSurface: '#F8DEDA',
+  workTag: '#3F6FE5',
+  personalTag: '#2F8B73',
+  reminderTag: '#D85C4A',
+  projectTag: '#8B63D9',
+  black: '#17201E',
   white: '#FFFFFF'
 };
 
 export const cardShadow = {
-  shadowColor: '#000000',
+  shadowColor: '#1D2B26',
   shadowOffset: {
     width: 0,
     height: 14
   },
-  shadowOpacity: 0.07,
-  shadowRadius: 16,
+  shadowOpacity: 0.08,
+  shadowRadius: 18,
   elevation: 2
 };
 
 export const subtleShadow = {
-  shadowColor: '#000000',
+  shadowColor: '#1D2B26',
   shadowOffset: {
     width: 0,
     height: 8
   },
-  shadowOpacity: 0.05,
-  shadowRadius: 10,
+  shadowOpacity: 0.055,
+  shadowRadius: 12,
   elevation: 1
 };
