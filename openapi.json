@@ -397,6 +397,68 @@
           }
         }
       }
+    },
+    "/api/activity/{type}/{id}": {
+      "patch": {
+        "operationId": "updateActivityItem",
+        "summary": "Update a saved activity item",
+        "description": "Update a memory, task, note, or meeting by id. Use this to rename or correct titles instead of creating a new log.",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "path",
+            "required": true,
+            "description": "Saved item type returned by activity or search results.",
+            "schema": {
+              "$ref": "#/components/schemas/ActivityType"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "MongoDB ObjectId of the item to update.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-fA-F0-9]{24}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateActivityRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Activity item updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivityResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -419,6 +481,136 @@
           "meeting",
           "reminder"
         ]
+      },
+      "ActivityType": {
+        "type": "string",
+        "enum": [
+          "memory",
+          "task",
+          "note",
+          "meeting"
+        ]
+      },
+      "UpdateActivityRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "New title to store exactly as provided.",
+            "minLength": 1
+          },
+          "content": {
+            "type": "string",
+            "description": "Updated content. For tasks this updates description; for meetings this updates details."
+          },
+          "category": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "importance": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "status": {
+            "type": "string",
+            "description": "Task status when updating a task.",
+            "enum": [
+              "pending",
+              "completed"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "description": "Memory or note kind.",
+            "enum": [
+              "note",
+              "task",
+              "work_done",
+              "requirement",
+              "credential"
+            ]
+          },
+          "reminderAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "notificationEnabled": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string"
+          }
+        }
+      },
+      "ActivityItem": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "_id",
+          "type",
+          "title",
+          "content",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "_id": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/ActivityType"
+          },
+          "title": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "importance": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ActivityResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ActivityItem"
+          }
+        }
       },
       "AssistantCommandRequest": {
         "type": "object",
