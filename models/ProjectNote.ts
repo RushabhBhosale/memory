@@ -4,6 +4,7 @@ export type ProjectNoteDocument = Document & {
   projectId: mongoose.Types.ObjectId;
   title: string;
   content: string;
+  category: string;
   kind: 'note' | 'requirement' | 'credential' | 'work_done';
   tags: string[];
   source: string;
@@ -29,6 +30,11 @@ const projectNoteSchema = new Schema<ProjectNoteDocument>(
     content: {
       type: String,
       required: [true, 'Note content is required'],
+      trim: true
+    },
+    category: {
+      type: String,
+      default: 'project',
       trim: true
     },
     kind: {
@@ -65,6 +71,7 @@ const projectNoteSchema = new Schema<ProjectNoteDocument>(
 );
 
 projectNoteSchema.index({ title: 1 });
+projectNoteSchema.index({ category: 1 });
 projectNoteSchema.index({ tags: 1 });
 projectNoteSchema.index({ createdAt: -1 });
 projectNoteSchema.index({ title: 'text', content: 'text', tags: 'text' });

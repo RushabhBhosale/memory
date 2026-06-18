@@ -13,7 +13,7 @@ import { MemoryCard } from '../../components/MemoryCard';
 import {
   getProject,
   listProjectMemories,
-  type Memory,
+  type ActivityItem,
   type Project
 } from '../../services/api';
 import { cardShadow, colors } from '../../styles/theme';
@@ -29,7 +29,7 @@ export default function ProjectDetailScreen() {
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
 
   const [project, setProject] = useState<Project | null>(null);
-  const [memories, setMemories] = useState<Memory[]>([]);
+  const [memories, setMemories] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -118,7 +118,9 @@ export default function ProjectDetailScreen() {
 
       <Text style={styles.sectionTitle}>Saved work</Text>
       {memories.length ? (
-        memories.map((memory) => <MemoryCard key={memory._id} memory={memory} />)
+        memories.map((memory) => (
+          <MemoryCard key={`${memory.type}-${memory._id}`} memory={memory} />
+        ))
       ) : (
         <Text style={styles.emptyText}>No entries for this project yet.</Text>
       )}

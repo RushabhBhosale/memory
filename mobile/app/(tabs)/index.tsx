@@ -6,7 +6,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { MemoryCard } from "../../components/MemoryCard";
 import { StateView } from "../../components/StateView";
-import { listMemories, listProjects, type Memory } from "../../services/api";
+import {
+  listActivity,
+  listMemories,
+  listProjects,
+  type ActivityItem,
+} from "../../services/api";
 import { scheduleUpcomingMemoryReminders } from "../../services/notifications";
 import { colors, subtleShadow } from "../../styles/theme";
 
@@ -43,13 +48,6 @@ const getWeekDays = () => {
       disabled: startOfDay(date).getTime() > todayStart,
     };
   });
-};
-
-const isToday = (value: string) => {
-  const date = new Date(value);
-  const today = new Date();
-
-  return date.toDateString() === today.toDateString();
 };
 
 const quickCards = [
@@ -89,12 +87,23 @@ const quickCards = [
   tone: string;
 }>;
 
-const getMemoryTone = (memory?: Memory) => {
-  if (!memory) {
+const getActivityTone = (item?: ActivityItem) => {
+  if (!item) {
     return colors.primary;
   }
 
-  switch (memory.kind) {
+  switch (item.type) {
+    case "task":
+      return colors.workTag;
+    case "meeting":
+      return colors.reminderTag;
+    case "note":
+      return colors.projectTag;
+    default:
+      break;
+  }
+
+  switch (item.kind) {
     case "task":
     case "work_done":
       return colors.workTag;
@@ -108,7 +117,7 @@ const getMemoryTone = (memory?: Memory) => {
 };
 
 export default function HomeScreen() {
-  const [memories, setMemories] = useState<Memory[]>([]);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [projectCount, setProjectCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -116,12 +125,12 @@ export default function HomeScreen() {
     getDateKey(new Date()),
   );
   const weekDays = useMemo(() => getWeekDays(), []);
-  const selectedMemories = useMemo(
+  const selectedLogs = useMemo(
     () =>
-      memories.filter(
+      activity.filter(
         (item) => getDateKey(new Date(item.createdAt)) === selectedDayKey,
       ),
-    [memories, selectedDayKey],
+    [activity, selectedDayKey],
   );
 
   const loadMemories = useCallback(async () => {
@@ -129,12 +138,13 @@ export default function HomeScreen() {
       setLoading(true);
       setError("");
 
-      const [nextMemories, nextProjects] = await Promise.all([
+      const [nextActivity, nextMemories, nextProjects] = await Promise.all([
+        listActivity({ limit: 300 }),
         listMemories(),
         listProjects(),
       ]);
 
-      setMemories(nextMemories);
+      setActivity(nextActivity);
       setProjectCount(nextProjects.length);
       void scheduleUpcomingMemoryReminders(nextMemories);
     } catch (err) {
@@ -171,9 +181,8 @@ export default function HomeScreen() {
     );
   }
 
-  const latestMemory = selectedMemories[0];
-  const latestTone = getMemoryTone(latestMemory);
-  const todayCount = memories.filter((item) => isToday(item.createdAt)).length;
+  const latestLog = selectedLogs[0];
+  const latestTone = getActivityTone(latestLog);
   const selectedDateTitle =
     selectedDayKey === getDateKey(new Date())
       ? "Today"
@@ -252,18 +261,34 @@ export default function HomeScreen() {
         <View style={styles.featureRow}>
           <Pressable
             accessibilityLabel={
-              latestMemory
-                ? `Open ${latestMemory.title}`
+              latestLog
+                ? `Open ${latestLog.title}`
                 : `Add a memory for ${selectedDateTitle}`
             }
             accessibilityRole="button"
             style={styles.featureCard}
             onPress={() => {
-              if (latestMemory) {
-                router.push({
-                  pathname: "/memories/[id]",
-                  params: { id: latestMemory._id },
-                });
+              if (latestLog) {
+                if (latestLog.type === "memory") {
+                  router.push({
+                    pathname: "/memories/[id]",
+                    params: { id: latestLog._id },
+                  });
+                  return;
+                }
+
+                const projectId =
+                  typeof latestLog.projectId === "object"
+                    ? latestLog.projectId._id
+                    : latestLog.projectId;
+
+                if (projectId) {
+                  router.push({
+                    pathname: "/projects/[id]",
+                    params: { id: projectId },
+                  });
+                }
+
                 return;
               }
 
@@ -287,23 +312,23 @@ export default function HomeScreen() {
                   ]}
                 />
                 <Text style={[styles.featureBadgeText, { color: latestTone }]}>
-                  {latestMemory ? "Latest log" : "Ready to save"}
+                  {latestLog ? "Latest log" : "Ready to save"}
                 </Text>
               </View>
               <Text style={styles.featureActionText}>
-                {latestMemory ? "Open" : "Add"}
+                {latestLog ? "Open" : "Add"}
               </Text>
             </View>
             <Text style={styles.featureTitle}>
-              {latestMemory?.title || `No logs for ${selectedDateTitle}`}
+              {latestLog?.title || `No logs for ${selectedDateTitle}`}
             </Text>
             <Text numberOfLines={2} style={styles.featureBody}>
-              {latestMemory?.content ||
+              {latestLog?.content ||
                 "Tap plus to add a task, note, reminder, or memory."}
             </Text>
             <View style={styles.featureStats}>
               <Text style={styles.featureStat}>
-                {selectedMemories.length} logs today
+                {selectedLogs.length} logs today
               </Text>
             </View>
           </Pressable>
@@ -367,13 +392,13 @@ export default function HomeScreen() {
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>{selectedDateTitle} Logs</Text>
-          <Text style={styles.seeAll}>{selectedMemories.length}</Text>
+          <Text style={styles.seeAll}>{selectedLogs.length}</Text>
         </View>
 
-        {selectedMemories.length ? (
-          selectedMemories
+        {selectedLogs.length ? (
+          selectedLogs
             .slice(0, 12)
-            .map((memory) => <MemoryCard key={memory._id} memory={memory} />)
+            .map((memory) => <MemoryCard key={`${memory.type}-${memory._id}`} memory={memory} />)
         ) : (
           <View style={styles.emptyCard}>
             <Text style={styles.emptyTitle}>

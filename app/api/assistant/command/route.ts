@@ -10,6 +10,7 @@ import {
   toCompactSearchResults,
   type SearchCandidate
 } from '@/lib/searchRanking';
+import { getFallbackTitle } from '@/lib/titleFallback';
 import AssistantSession from '@/models/AssistantSession';
 import Memory from '@/models/Memory';
 import Project from '@/models/Project';
@@ -21,8 +22,19 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 type CommandBody = {
+  category?: unknown;
+  content?: unknown;
   input?: unknown;
+  importance?: unknown;
+  item?: unknown;
+  metadata?: unknown;
+  projectId?: unknown;
+  reminderAt?: unknown;
+  save?: unknown;
   sessionId?: unknown;
+  tags?: unknown;
+  title?: unknown;
+  type?: unknown;
 };
 
 type ProjectLike = {
@@ -34,12 +46,32 @@ type ProjectLike = {
 
 type LastItemType = 'memory' | 'task' | 'note' | 'meeting';
 type RawDocument = Record<string, unknown>;
+type SaveItemType = 'memory' | 'log' | 'task' | 'note' | 'meeting' | 'reminder';
+
+type SaveMetadata = {
+  category?: string;
+  content?: string;
+  importance?: number;
+  projectId?: string;
+  reminderAt?: string;
+  tags?: string[];
+  title?: string;
+  type?: SaveItemType;
+};
 
 const DEFAULT_SESSION_KEY = 'default';
 const RECENT_LIMIT = 20;
 const SEARCH_CANDIDATE_LIMIT = 500;
 const SUMMARY_LIMIT = 8;
 const DELETE_CHOICE_LIMIT = 10;
+const SAVE_ITEM_TYPES = new Set<SaveItemType>([
+  'memory',
+  'log',
+  'task',
+  'note',
+  'meeting',
+  'reminder'
+]);
 
 const STOP_WORDS = new Set([
   'a',
@@ -84,11 +116,7 @@ const normalizeWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim()
 const normalizeName = (value: string) =>
   normalizeWhitespace(value.replace(/[.!?]+$/g, ''));
 
-const makeTitle = (value: string) => {
-  const title = normalizeWhitespace(value);
-
-  return title.length > 80 ? `${title.slice(0, 77)}...` : title;
-};
+const toTrimmedString = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
 
 const toStringValue = (value: unknown) => (typeof value === 'string' ? value : '');
 
@@ -96,6 +124,115 @@ const toStringArray = (value: unknown) =>
   Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string')
     : [];
+
+const toCleanStringArray = (value: unknown) =>
+  Array.isArray(value)
+    ? value
+        .map((item) => toTrimmedString(item))
+        .filter(Boolean)
+    : undefined;
+
+const normalizeSaveType = (value: unknown): SaveItemType | undefined => {
+  const type = toTrimmedString(value).toLowerCase().replace(/_/g, '-');
+
+  if (type === 'work' || type === 'work-done') {
+    return 'log';
+  }
+
+  return SAVE_ITEM_TYPES.has(type as SaveItemType) ? (type as SaveItemType) : undefined;
+};
+
+const normalizeImportance = (value: unknown, fallback: number) => {
+  const importance =
+    typeof value === 'number' ? value : Number.parseInt(toTrimmedString(value), 10);
+
+  return Number.isInteger(importance) && importance >= 1 && importance <= 5
+    ? importance
+    : fallback;
+};
+
+const getObjectValue = (value: unknown) =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+
+const getStructuredSaveSource = (body: CommandBody) =>
+  getObjectValue(body.item) ||
+  getObjectValue(body.metadata) ||
+  getObjectValue(body.save) ||
+  (body as Record<string, unknown>);
+
+const getSaveTypeFromInput = (input: string): SaveItemType | undefined => {
+  const commandMatch = input.match(/^@([a-z-]+)(?:\s+[\s\S]*)?$/i);
+
+  if (!commandMatch) {
+    return undefined;
+  }
+
+  switch (commandMatch[1].toLowerCase()) {
+    case 'memory':
+      return 'memory';
+    case 'log':
+    case 'work':
+    case 'work-done':
+      return 'log';
+    case 'task':
+      return 'task';
+    case 'note':
+    case 'requirement':
+    case 'credential':
+      return 'note';
+    case 'meeting':
+      return 'meeting';
+    case 'reminder':
+      return 'reminder';
+    default:
+      return undefined;
+  }
+};
+
+const extractSaveMetadata = (body: CommandBody, input: string): SaveMetadata | null => {
+  const source = getStructuredSaveSource(body);
+  const providedType = normalizeSaveType(source.type);
+  const type = providedType || getSaveTypeFromInput(input);
+  const title = toTrimmedString(source.title);
+  const content = toTrimmedString(source.content);
+  const category = toTrimmedString(source.category);
+  const projectId = toTrimmedString(source.projectId);
+  const reminderAt = toTrimmedString(source.reminderAt);
+  const tags = toCleanStringArray(source.tags);
+  const importance =
+    source.importance === undefined
+      ? undefined
+      : normalizeImportance(source.importance, Number.NaN);
+  const hasMetadata =
+    Boolean(providedType) ||
+    Boolean(title) ||
+    Boolean(content) ||
+    Boolean(category) ||
+    Boolean(projectId) ||
+    Boolean(reminderAt) ||
+    Boolean(tags?.length) ||
+    importance !== undefined;
+
+  if (!hasMetadata) {
+    return null;
+  }
+
+  return {
+    ...(type ? { type } : {}),
+    ...(title ? { title } : {}),
+    ...(content ? { content } : {}),
+    ...(category ? { category } : {}),
+    ...(projectId ? { projectId } : {}),
+    ...(reminderAt ? { reminderAt } : {}),
+    ...(tags ? { tags } : {}),
+    ...(Number.isInteger(importance) ? { importance } : {})
+  };
+};
+
+const getSaveTitle = (metadata: SaveMetadata | undefined, content: string, type: SaveItemType) =>
+  metadata?.title || getFallbackTitle(content, type);
 
 const toObjectIdString = (value: unknown) => {
   if (!value) {
@@ -407,55 +544,78 @@ const askForProject = async () => {
   });
 };
 
-const createStandaloneMemory = async (content: string) => {
+const createStandaloneMemory = async (
+  content: string,
+  metadata?: SaveMetadata,
+  type: SaveItemType = metadata?.type || 'memory'
+) => {
   const memory = await Memory.create({
-    title: makeTitle(content),
+    title: getSaveTitle(metadata, content, type),
     content,
-    category: 'general',
-    tags: [],
+    category: metadata?.category || (type === 'log' ? 'log' : 'general'),
+    tags: metadata?.tags || [],
     source: 'assistant',
-    importance: inferImportance(content, 3)
+    kind: type === 'log' ? 'work_done' : type === 'task' ? 'task' : 'note',
+    projectId: metadata?.projectId,
+    importance: normalizeImportance(metadata?.importance, inferImportance(content, 3))
   });
 
   return memory.toObject();
 };
 
-const createReminderMemory = async (content: string, reminderAt: Date) => {
+const createReminderMemory = async (
+  content: string,
+  reminderAt: Date,
+  metadata?: SaveMetadata
+) => {
   const memory = await Memory.create({
-    title: makeTitle(`Reminder: ${content}`),
+    title: getSaveTitle(metadata, content, 'reminder'),
     content,
-    category: 'reminder',
-    tags: ['reminder'],
+    category: metadata?.category || 'reminder',
+    tags: metadata?.tags || ['reminder'],
     source: 'assistant',
     kind: 'note',
     reminderAt,
     notificationEnabled: true,
-    importance: 4
+    projectId: metadata?.projectId,
+    importance: normalizeImportance(metadata?.importance, 4)
   });
 
   return memory.toObject();
 };
 
-const createProjectTask = async (project: ProjectLike, description: string) => {
+const createProjectTask = async (
+  project: ProjectLike,
+  description: string,
+  metadata?: SaveMetadata
+) => {
   const task = await ProjectTask.create({
     projectId: project._id,
-    title: makeTitle(description),
+    title: getSaveTitle(metadata, description, 'task'),
     description,
+    category: metadata?.category || 'project',
+    tags: metadata?.tags || [],
     source: 'assistant',
-    importance: 3
+    importance: normalizeImportance(metadata?.importance, 3)
   });
 
   return task.toObject();
 };
 
-const createProjectNote = async (project: ProjectLike, content: string) => {
+const createProjectNote = async (
+  project: ProjectLike,
+  content: string,
+  metadata?: SaveMetadata
+) => {
   const note = await ProjectNote.create({
     projectId: project._id,
-    title: makeTitle(content),
+    title: getSaveTitle(metadata, content, 'note'),
     content,
+    category: metadata?.category || 'project',
     kind: 'note',
+    tags: metadata?.tags || [],
     source: 'assistant',
-    importance: inferImportance(content, 3)
+    importance: normalizeImportance(metadata?.importance, inferImportance(content, 3))
   });
 
   return note.toObject();
@@ -464,27 +624,39 @@ const createProjectNote = async (project: ProjectLike, content: string) => {
 const createTypedProjectNote = async (
   project: ProjectLike,
   content: string,
-  kind: 'requirement' | 'credential' | 'work_done'
+  kind: 'requirement' | 'credential' | 'work_done',
+  metadata?: SaveMetadata
 ) => {
   const note = await ProjectNote.create({
     projectId: project._id,
-    title: makeTitle(content),
+    title: getSaveTitle(metadata, content, kind === 'work_done' ? 'log' : 'note'),
     content,
+    category: metadata?.category || kind,
     kind,
+    tags: metadata?.tags || [],
     source: 'assistant',
-    importance: inferImportance(content, kind === 'credential' ? 5 : 3)
+    importance: normalizeImportance(
+      metadata?.importance,
+      inferImportance(content, kind === 'credential' ? 5 : 3)
+    )
   });
 
   return note.toObject();
 };
 
-const createProjectMeeting = async (project: ProjectLike, details: string) => {
+const createProjectMeeting = async (
+  project: ProjectLike,
+  details: string,
+  metadata?: SaveMetadata
+) => {
   const meeting = await ProjectMeeting.create({
     projectId: project._id,
-    title: makeTitle(details),
+    title: getSaveTitle(metadata, details, 'meeting'),
     details,
+    category: metadata?.category || 'meeting',
+    tags: metadata?.tags || [],
     source: 'assistant',
-    importance: 4
+    importance: normalizeImportance(metadata?.importance, 4)
   });
 
   return meeting.toObject();
@@ -576,9 +748,9 @@ const toMemoryCandidate = (memory: RawDocument): SearchCandidate => {
 
 const searchRanked = async (query: string, activeProject: ProjectLike | null) => {
   const projectQuery = buildTextQuery(query, ['name', 'description', 'tags']);
-  const taskQuery = buildTextQuery(query, ['title', 'description', 'status', 'tags']);
-  const noteQuery = buildTextQuery(query, ['title', 'content', 'kind', 'tags']);
-  const meetingQuery = buildTextQuery(query, ['title', 'details', 'tags']);
+  const taskQuery = buildTextQuery(query, ['title', 'description', 'category', 'status', 'tags']);
+  const noteQuery = buildTextQuery(query, ['title', 'content', 'category', 'kind', 'tags']);
+  const meetingQuery = buildTextQuery(query, ['title', 'details', 'category', 'tags']);
   const memoryQuery = buildTextQuery(query, [
     'title',
     'content',
@@ -673,7 +845,7 @@ const handleRankedSearch = async (sessionKey: string, query: string) => {
 };
 
 const searchTasksForDelete = async (query: string, projectId?: unknown) => {
-  const baseQuery = buildTextQuery(query, ['title', 'description', 'status', 'tags']);
+  const baseQuery = buildTextQuery(query, ['title', 'description', 'category', 'status', 'tags']);
   const scopedQuery = projectId ? { $and: [{ projectId }, baseQuery] } : baseQuery;
 
   return ProjectTask.find(scopedQuery)
@@ -836,8 +1008,13 @@ const updateImportanceForLastItem = async (sessionKey: string, importance: numbe
   });
 };
 
-const saveReminder = async (sessionKey: string, content: string, reminderAt: Date) => {
-  const memory = await createReminderMemory(content, reminderAt);
+const saveReminder = async (
+  sessionKey: string,
+  content: string,
+  reminderAt: Date,
+  metadata?: SaveMetadata
+) => {
+  const memory = await createReminderMemory(content, reminderAt, metadata);
   await setLastItem(sessionKey, 'memory', memory._id);
   await clearPendingReminder(sessionKey);
 
@@ -957,25 +1134,29 @@ const isWorkLogStatement = (input: string) => {
   );
 };
 
-const saveNaturalWorkLog = async (sessionKey: string, content: string) => {
+const saveNaturalWorkLog = async (
+  sessionKey: string,
+  content: string,
+  metadata?: SaveMetadata
+) => {
   const activeProject = await getActiveProject(sessionKey);
 
   if (activeProject) {
-    const note = await createTypedProjectNote(activeProject, content, 'work_done');
+    const note = await createTypedProjectNote(activeProject, content, 'work_done', metadata);
     await setLastItem(sessionKey, 'note', note._id);
 
     return NextResponse.json({
-      message: `Work entry added to ${activeProject.name}`,
+      message: `Log added to ${activeProject.name}`,
       activeProject: getProjectDisplay(activeProject),
       data: note
     });
   }
 
-  const memory = await createStandaloneMemory(content);
+  const memory = await createStandaloneMemory(content, metadata, 'log');
   await setLastItem(sessionKey, 'memory', memory._id);
 
   return NextResponse.json({
-    message: 'Memory saved',
+    message: 'Log saved',
     data: memory
   });
 };
@@ -995,10 +1176,170 @@ const handleProjectSelection = async (sessionKey: string, name: string) => {
   });
 };
 
+const getCommandContent = (input: string) => {
+  const commandMatch = input.match(/^@[a-z-]+(?:\s+([\s\S]*))?$/i);
+
+  return normalizeWhitespace(commandMatch ? commandMatch[1] || '' : input);
+};
+
+const getProjectForStructuredSave = async (
+  sessionKey: string,
+  metadata: SaveMetadata
+): Promise<{ error?: NextResponse; project: ProjectLike | null }> => {
+  if (!metadata.projectId) {
+    return {
+      project: await getActiveProject(sessionKey)
+    };
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(metadata.projectId)) {
+    return {
+      project: null,
+      error: NextResponse.json({ error: 'Invalid project id' }, { status: 400 })
+    };
+  }
+
+  const project = await Project.findById(metadata.projectId).lean();
+
+  if (!project) {
+    return {
+      project: null,
+      error: NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    };
+  }
+
+  return {
+    project: project as unknown as ProjectLike
+  };
+};
+
+const handleStructuredSave = async (
+  sessionKey: string,
+  input: string,
+  metadata: SaveMetadata
+) => {
+  const type = metadata.type || getSaveTypeFromInput(input);
+  const content = metadata.content || getCommandContent(input);
+
+  if (!type) {
+    return null;
+  }
+
+  if (!content) {
+    return NextResponse.json({ error: `${type} content is required` }, { status: 400 });
+  }
+
+  if (type === 'memory') {
+    if (metadata.projectId) {
+      const projectResult = await getProjectForStructuredSave(sessionKey, metadata);
+
+      if (projectResult.error) {
+        return projectResult.error;
+      }
+    }
+
+    const memory = await createStandaloneMemory(content, metadata, 'memory');
+    await setLastItem(sessionKey, 'memory', memory._id);
+
+    return NextResponse.json({
+      message: 'Memory saved',
+      data: memory
+    });
+  }
+
+  if (type === 'reminder') {
+    if (metadata.projectId) {
+      const projectResult = await getProjectForStructuredSave(sessionKey, metadata);
+
+      if (projectResult.error) {
+        return projectResult.error;
+      }
+    }
+
+    const reminderAt = metadata.reminderAt
+      ? new Date(metadata.reminderAt)
+      : buildReminderDate(input);
+
+    if (reminderAt && !Number.isNaN(reminderAt.getTime())) {
+      return saveReminder(sessionKey, content, reminderAt, metadata);
+    }
+
+    return askForReminderTime(sessionKey, content, getReminderDateHint(input));
+  }
+
+  const projectResult = await getProjectForStructuredSave(sessionKey, metadata);
+
+  if (projectResult.error) {
+    return projectResult.error;
+  }
+
+  if (type === 'log') {
+    if (projectResult.project) {
+      const note = await createTypedProjectNote(
+        projectResult.project,
+        content,
+        'work_done',
+        metadata
+      );
+      await setLastItem(sessionKey, 'note', note._id);
+
+      return NextResponse.json({
+        message: `Log added to ${projectResult.project.name}`,
+        activeProject: getProjectDisplay(projectResult.project),
+        data: note
+      });
+    }
+
+    const memory = await createStandaloneMemory(content, metadata, 'log');
+    await setLastItem(sessionKey, 'memory', memory._id);
+
+    return NextResponse.json({
+      message: 'Log saved',
+      data: memory
+    });
+  }
+
+  if (!projectResult.project) {
+    return askForProject();
+  }
+
+  if (type === 'task') {
+    const task = await createProjectTask(projectResult.project, content, metadata);
+    await setLastItem(sessionKey, 'task', task._id);
+
+    return NextResponse.json({
+      message: `Task added to ${projectResult.project.name}`,
+      activeProject: getProjectDisplay(projectResult.project),
+      data: task
+    });
+  }
+
+  if (type === 'note') {
+    const note = await createProjectNote(projectResult.project, content, metadata);
+    await setLastItem(sessionKey, 'note', note._id);
+
+    return NextResponse.json({
+      message: `Note added to ${projectResult.project.name}`,
+      activeProject: getProjectDisplay(projectResult.project),
+      data: note
+    });
+  }
+
+  const meeting = await createProjectMeeting(projectResult.project, content, metadata);
+  await setLastItem(sessionKey, 'meeting', meeting._id);
+
+  return NextResponse.json({
+    message: `Meeting added to ${projectResult.project.name}`,
+    activeProject: getProjectDisplay(projectResult.project),
+    data: meeting
+  });
+};
+
 const handleProjectItemCommand = async (
   sessionKey: string,
   type: 'task' | 'note' | 'meeting' | 'requirement' | 'credential' | 'work_done',
-  content: string
+  content: string,
+  metadata?: SaveMetadata
 ) => {
   if (!content) {
     return NextResponse.json({ error: `${type} content is required` }, { status: 400 });
@@ -1011,7 +1352,7 @@ const handleProjectItemCommand = async (
   }
 
   if (type === 'task') {
-    const task = await createProjectTask(activeProject, content);
+    const task = await createProjectTask(activeProject, content, metadata);
     await setLastItem(sessionKey, 'task', task._id);
 
     return NextResponse.json({
@@ -1022,7 +1363,7 @@ const handleProjectItemCommand = async (
   }
 
   if (type === 'note') {
-    const note = await createProjectNote(activeProject, content);
+    const note = await createProjectNote(activeProject, content, metadata);
     await setLastItem(sessionKey, 'note', note._id);
 
     return NextResponse.json({
@@ -1033,7 +1374,7 @@ const handleProjectItemCommand = async (
   }
 
   if (type === 'requirement' || type === 'credential' || type === 'work_done') {
-    const note = await createTypedProjectNote(activeProject, content, type);
+    const note = await createTypedProjectNote(activeProject, content, type, metadata);
     const label = type === 'work_done' ? 'Work entry' : `${type[0].toUpperCase()}${type.slice(1)}`;
     await setLastItem(sessionKey, 'note', note._id);
 
@@ -1044,7 +1385,7 @@ const handleProjectItemCommand = async (
     });
   }
 
-  const meeting = await createProjectMeeting(activeProject, content);
+  const meeting = await createProjectMeeting(activeProject, content, metadata);
   await setLastItem(sessionKey, 'meeting', meeting._id);
 
   return NextResponse.json({
@@ -1180,7 +1521,19 @@ const handleNaturalLanguage = async (sessionKey: string, input: string) => {
   return handleRankedSearch(sessionKey, input);
 };
 
-const handleCommand = async (sessionKey: string, input: string) => {
+const handleCommand = async (
+  sessionKey: string,
+  input: string,
+  metadata?: SaveMetadata | null
+) => {
+  if (metadata) {
+    const structuredResponse = await handleStructuredSave(sessionKey, input, metadata);
+
+    if (structuredResponse) {
+      return structuredResponse;
+    }
+  }
+
   const commandMatch = input.match(/^@([a-z-]+)(?:\s+([\s\S]*))?$/i);
 
   if (!commandMatch) {
@@ -1221,6 +1574,11 @@ const handleCommand = async (sessionKey: string, input: string) => {
     case 'work':
     case 'work-done':
       return handleProjectItemCommand(sessionKey, 'work_done', content);
+
+    case 'log':
+      return content
+        ? saveNaturalWorkLog(sessionKey, content)
+        : NextResponse.json({ error: 'log content is required' }, { status: 400 });
 
     case 'meeting':
       return handleProjectItemCommand(sessionKey, 'meeting', content);
@@ -1348,8 +1706,9 @@ export async function POST(request: Request) {
     await connectDB();
 
     const sessionKey = getSessionKey(request, body);
+    const metadata = extractSaveMetadata(body, input);
 
-    return handleCommand(sessionKey, input);
+    return handleCommand(sessionKey, input, metadata);
   } catch (error) {
     const status = error instanceof Error && error.name === 'ValidationError' ? 400 : 500;
 

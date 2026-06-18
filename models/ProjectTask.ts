@@ -6,6 +6,7 @@ export type ProjectTaskDocument = Document & {
   projectId: mongoose.Types.ObjectId;
   title: string;
   description: string;
+  category: string;
   status: ProjectTaskStatus;
   tags: string[];
   source: string;
@@ -31,6 +32,11 @@ const projectTaskSchema = new Schema<ProjectTaskDocument>(
     description: {
       type: String,
       default: '',
+      trim: true
+    },
+    category: {
+      type: String,
+      default: 'project',
       trim: true
     },
     status: {
@@ -67,6 +73,7 @@ const projectTaskSchema = new Schema<ProjectTaskDocument>(
 );
 
 projectTaskSchema.index({ title: 1 });
+projectTaskSchema.index({ category: 1 });
 projectTaskSchema.index({ tags: 1 });
 projectTaskSchema.index({ createdAt: -1 });
 projectTaskSchema.index({ title: 'text', description: 'text', tags: 'text' });

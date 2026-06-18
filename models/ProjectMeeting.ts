@@ -4,6 +4,7 @@ export type ProjectMeetingDocument = Document & {
   projectId: mongoose.Types.ObjectId;
   title: string;
   details: string;
+  category: string;
   tags: string[];
   source: string;
   importance: number;
@@ -28,6 +29,11 @@ const projectMeetingSchema = new Schema<ProjectMeetingDocument>(
     details: {
       type: String,
       required: [true, 'Meeting details are required'],
+      trim: true
+    },
+    category: {
+      type: String,
+      default: 'meeting',
       trim: true
     },
     tags: {
@@ -57,6 +63,7 @@ const projectMeetingSchema = new Schema<ProjectMeetingDocument>(
 );
 
 projectMeetingSchema.index({ title: 1 });
+projectMeetingSchema.index({ category: 1 });
 projectMeetingSchema.index({ tags: 1 });
 projectMeetingSchema.index({ createdAt: -1 });
 projectMeetingSchema.index({ title: 'text', details: 'text', tags: 'text' });

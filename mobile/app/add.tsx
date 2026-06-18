@@ -70,8 +70,6 @@ const saveModes: SaveMode[] = [
   }
 ];
 
-const TITLE_LIMIT = 72;
-
 const parseTags = (value: string) =>
   value
     .split(',')
@@ -192,19 +190,10 @@ export default function AddScreen() {
     const trimmedTitle = title.trim();
     const trimmedContent = content.trim();
 
-    if (trimmedTitle.length <= TITLE_LIMIT) {
-      return {
-        savedTitle: trimmedTitle,
-        savedContent: trimmedContent || undefined
-      };
-    }
-
-    const savedTitle = `${trimmedTitle.slice(0, TITLE_LIMIT - 1).trim()}...`;
-    const savedContent = trimmedContent
-      ? `Full title: ${trimmedTitle}\n\n${trimmedContent}`
-      : `Full title: ${trimmedTitle}`;
-
-    return { savedTitle, savedContent };
+    return {
+      savedTitle: trimmedTitle,
+      savedContent: trimmedContent || undefined
+    };
   };
 
   const cancel = () => {

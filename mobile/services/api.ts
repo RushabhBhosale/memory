@@ -2,6 +2,9 @@ export type MemoryKind = 'note' | 'task' | 'work_done' | 'requirement' | 'creden
 
 export type ProjectStatus = 'active' | 'paused' | 'completed' | 'archived';
 
+export type ActivityType = 'memory' | 'task' | 'note' | 'meeting';
+export type SaveItemType = 'memory' | 'log' | 'task' | 'note' | 'meeting' | 'reminder';
+
 export type Project = {
   _id: string;
   name: string;
@@ -24,19 +27,28 @@ export type Memory = {
   projectId?: string | Project;
   reminderAt?: string;
   notificationEnabled?: boolean;
+  importance?: number;
   createdAt: string;
   updatedAt: string;
 };
 
+export type ActivityItem = Memory & {
+  projectName?: string;
+  status?: string;
+  type: ActivityType;
+};
+
 export type CreateMemoryInput = {
-  title: string;
+  title?: string;
   content?: string;
   category?: string;
+  type?: SaveItemType;
   tags?: string[];
   kind?: MemoryKind;
   projectId?: string;
   reminderAt?: string;
   notificationEnabled?: boolean;
+  importance?: number;
 };
 
 export type CreateProjectInput = {
@@ -48,6 +60,15 @@ export type CreateProjectInput = {
 type ListResponse = {
   count: number;
   data: Memory[];
+};
+
+type ActivityListResponse = {
+  count: number;
+  data: ActivityItem[];
+};
+
+type SingleActivityResponse = {
+  data: ActivityItem;
 };
 
 type SingleResponse = {
@@ -66,7 +87,7 @@ type SingleProjectResponse = {
 type ProjectMemoriesResponse = {
   count: number;
   project: Project;
-  data: Memory[];
+  data: ActivityItem[];
 };
 
 const getApiRoot = (value: string) => {
@@ -99,6 +120,7 @@ const getApiConfig = () => {
 
   return {
     apiKey,
+    activityUrl: `${apiRoot}/api/activity`,
     memoriesUrl: `${apiRoot}/api/memories`,
     projectsUrl: `${apiRoot}/api/projects`
   };
@@ -132,6 +154,38 @@ const request = async <T>(
 export const listMemories = async () => {
   const { memoriesUrl } = getApiConfig();
   const response = await request<ListResponse>(memoriesUrl, '');
+  return response.data;
+};
+
+export const listActivity = async (params?: { from?: string; limit?: number; to?: string }) => {
+  const { activityUrl } = getApiConfig();
+  const searchParams = new URLSearchParams();
+
+  if (params?.from) {
+    searchParams.set('from', params.from);
+  }
+
+  if (params?.to) {
+    searchParams.set('to', params.to);
+  }
+
+  if (params?.limit) {
+    searchParams.set('limit', String(params.limit));
+  }
+
+  const query = searchParams.toString();
+  const response = await request<ActivityListResponse>(activityUrl, query ? `?${query}` : '');
+
+  return response.data;
+};
+
+export const getActivityItem = async (type: ActivityType, id: string) => {
+  const { activityUrl } = getApiConfig();
+  const response = await request<SingleActivityResponse>(
+    activityUrl,
+    `/${encodeURIComponent(type)}/${encodeURIComponent(id)}`
+  );
+
   return response.data;
 };
 

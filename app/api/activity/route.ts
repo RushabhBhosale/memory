@@ -1,4 +1,3 @@
-import mongoose from 'mongoose';
 import { NextResponse } from 'next/server';
 
 import {
@@ -11,7 +10,7 @@ import {
 import { validateApiKey } from '@/lib/apiKey';
 import { connectDB } from '@/lib/mongodb';
 import Memory from '@/models/Memory';
-import Project from '@/models/Project';
+import '@/models/Project';
 import ProjectMeeting from '@/models/ProjectMeeting';
 import ProjectNote from '@/models/ProjectNote';
 import ProjectTask from '@/models/ProjectTask';
@@ -19,29 +18,45 @@ import ProjectTask from '@/models/ProjectTask';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-type RouteContext = {
-  params: Promise<{
-    id: string;
-  }>;
-};
+const DEFAULT_LIMIT = 200;
+const MAX_LIMIT = 500;
 
 const getErrorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Internal server error';
 
-const getProjectId = async (context: RouteContext) => {
-  const { id } = await context.params;
-  return id;
-};
-
-const validateProjectId = (id: string) => {
-  if (!mongoose.Types.ObjectId.isValid(id)) {
-    return NextResponse.json({ error: 'Invalid project id' }, { status: 400 });
+const getDateParam = (value: string | null) => {
+  if (!value) {
+    return null;
   }
 
-  return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 };
 
-export async function GET(request: Request, context: RouteContext) {
+const getLimitParam = (value: string | null) => {
+  const parsed = Number.parseInt(value || '', 10);
+
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return DEFAULT_LIMIT;
+  }
+
+  return Math.min(parsed, MAX_LIMIT);
+};
+
+const getCreatedAtQuery = (from: Date | null, to: Date | null) => {
+  if (!from && !to) {
+    return {};
+  }
+
+  return {
+    createdAt: {
+      ...(from ? { $gte: from } : {}),
+      ...(to ? { $lte: to } : {})
+    }
+  };
+};
+
+export async function GET(request: Request) {
   const authError = validateApiKey(request);
 
   if (authError) {
@@ -49,36 +64,33 @@ export async function GET(request: Request, context: RouteContext) {
   }
 
   try {
-    const id = await getProjectId(context);
-    const idError = validateProjectId(id);
-
-    if (idError) {
-      return idError;
-    }
+    const { searchParams } = new URL(request.url);
+    const from = getDateParam(searchParams.get('from'));
+    const to = getDateParam(searchParams.get('to'));
+    const limit = getLimitParam(searchParams.get('limit'));
+    const query = getCreatedAtQuery(from, to);
 
     await connectDB();
 
-    const project = await Project.findById(id).lean();
-
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
-    }
-
     const [memories, tasks, notes, meetings] = await Promise.all([
-      Memory.find({ projectId: id })
+      Memory.find(query)
         .sort({ createdAt: -1 })
+        .limit(limit)
         .populate('projectId', 'name description status')
         .lean(),
-      ProjectTask.find({ projectId: id })
+      ProjectTask.find(query)
         .sort({ createdAt: -1 })
+        .limit(limit)
         .populate('projectId', 'name description status')
         .lean(),
-      ProjectNote.find({ projectId: id })
+      ProjectNote.find(query)
         .sort({ createdAt: -1 })
+        .limit(limit)
         .populate('projectId', 'name description status')
         .lean(),
-      ProjectMeeting.find({ projectId: id })
+      ProjectMeeting.find(query)
         .sort({ createdAt: -1 })
+        .limit(limit)
         .populate('projectId', 'name description status')
         .lean()
     ]);
@@ -88,11 +100,10 @@ export async function GET(request: Request, context: RouteContext) {
       ...tasks.map(toTaskActivity),
       ...notes.map(toNoteActivity),
       ...meetings.map(toMeetingActivity)
-    ]);
+    ]).slice(0, limit);
 
     return NextResponse.json({
       count: data.length,
-      project,
       data
     });
   } catch (error) {

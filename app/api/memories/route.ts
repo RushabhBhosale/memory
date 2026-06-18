@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 
 import { validateApiKey } from '@/lib/apiKey';
 import { connectDB } from '@/lib/mongodb';
+import { getFallbackTitle } from '@/lib/titleFallback';
 import Memory from '@/models/Memory';
 import '@/models/Project';
 
@@ -19,6 +20,46 @@ const parseJsonBody = async (request: Request) => {
 
 const getErrorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Internal server error';
+
+const getString = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+
+const normalizeType = (value: unknown) => {
+  const type = getString(value).toLowerCase().replace(/_/g, '-');
+
+  if (['memory', 'log', 'task', 'note', 'meeting', 'reminder'].includes(type)) {
+    return type as 'memory' | 'log' | 'task' | 'note' | 'meeting' | 'reminder';
+  }
+
+  return undefined;
+};
+
+const buildCreatePayload = (body: Record<string, unknown>) => {
+  const content = getString(body.content);
+  const incomingTitle = getString(body.title);
+  const sourceTitle = getString(body.sourceTitle);
+  const sourceUrl = getString(body.sourceUrl);
+  const type = normalizeType(body.type);
+  const titleSource = content || sourceTitle || sourceUrl;
+
+  if (!incomingTitle && !titleSource) {
+    return null;
+  }
+
+  return {
+    ...body,
+    title: incomingTitle || getFallbackTitle(titleSource, type || 'memory'),
+    content,
+    category:
+      getString(body.category) ||
+      (type === 'log' ? 'log' : type === 'reminder' ? 'reminder' : undefined),
+    kind:
+      type === 'log'
+        ? 'work_done'
+        : type === 'task'
+          ? 'task'
+          : getString(body.kind) || 'note'
+  };
+};
 
 const validateProjectId = (projectId: unknown) => {
   if (
@@ -83,15 +124,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
 
-    const projectIdError = validateProjectId((body as Record<string, unknown>).projectId);
+    const bodyRecord = body as Record<string, unknown>;
+    const projectIdError = validateProjectId(bodyRecord.projectId);
 
     if (projectIdError) {
       return projectIdError;
     }
 
+    const createPayload = buildCreatePayload(bodyRecord);
+
+    if (!createPayload) {
+      return NextResponse.json({ error: 'Memory title or content is required' }, { status: 400 });
+    }
+
     await connectDB();
 
-    const memory = await Memory.create(body);
+    const memory = await Memory.create(createPayload);
     const createdMemory = await Memory.findById(memory._id)
       .populate('projectId', 'name description status')
       .lean();

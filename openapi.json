@@ -408,6 +408,18 @@
       }
     },
     "schemas": {
+      "AssistantSaveType": {
+        "type": "string",
+        "description": "Saved item type. Logs are stored as work-log entries.",
+        "enum": [
+          "memory",
+          "log",
+          "task",
+          "note",
+          "meeting",
+          "reminder"
+        ]
+      },
       "AssistantCommandRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -417,10 +429,11 @@
         "properties": {
           "input": {
             "type": "string",
-            "description": "User command or natural language request. Work-log statements save under the active project, or as general memory without one.",
+            "description": "User command or natural language request. For save/create commands, also send assistant-generated structured metadata in the fields below.",
             "examples": [
               "@project HRMS",
               "@task Implement semantic search",
+              "@log Ritesh asked on whatsapp to make an activex sdk...",
               "@importance 5",
               "@reminder Call the client tomorrow at 4pm",
               "@memory My passport expires in 2032",
@@ -429,6 +442,61 @@
               "work on hrms"
             ],
             "minLength": 1
+          },
+          "type": {
+            "$ref": "#/components/schemas/AssistantSaveType"
+          },
+          "title": {
+            "type": "string",
+            "description": "Assistant-generated concise title for save/create commands. If present, the backend saves this exact title instead of generating one.",
+            "examples": [
+              "ActiveX SDK Distribution Limitation"
+            ]
+          },
+          "content": {
+            "type": "string",
+            "description": "Full content to save. For save/create commands, send the user's complete original content here."
+          },
+          "category": {
+            "type": "string",
+            "description": "Assistant-generated category to save with the item.",
+            "examples": [
+              "projects"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "description": "Assistant-generated searchable tags.",
+            "items": {
+              "type": "string"
+            },
+            "examples": [
+              [
+                "activex",
+                "sdk",
+                "lefu",
+                "secret-key"
+              ]
+            ]
+          },
+          "importance": {
+            "type": "integer",
+            "description": "Assistant-generated importance from 1 to 5.",
+            "minimum": 1,
+            "maximum": 5,
+            "examples": [
+              4
+            ]
+          },
+          "projectId": {
+            "type": "string",
+            "description": "Optional project id to attach the saved item to.",
+            "pattern": "^[a-fA-F0-9]{24}$"
+          },
+          "reminderAt": {
+            "type": "string",
+            "description": "Optional reminder notification time for reminder saves.",
+            "format": "date-time"
           },
           "sessionId": {
             "type": "string",
@@ -470,13 +538,13 @@
       "CreateMemoryRequest": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "title"
-        ],
         "properties": {
+          "type": {
+            "$ref": "#/components/schemas/AssistantSaveType"
+          },
           "title": {
             "type": "string",
-            "description": "Short title for the memory.",
+            "description": "Assistant-generated title. If present, the backend saves it as-is. If missing, the backend uses a simple fallback title.",
             "minLength": 1
           },
           "content": {
@@ -528,6 +596,13 @@
             "type": "boolean",
             "description": "Whether mobile should schedule a notification for reminderAt.",
             "default": false
+          },
+          "importance": {
+            "type": "integer",
+            "description": "Importance from 1 to 5.",
+            "minimum": 1,
+            "maximum": 5,
+            "default": 3
           }
         }
       },
@@ -599,6 +674,12 @@
           "notificationEnabled": {
             "type": "boolean",
             "default": false
+          },
+          "importance": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "default": 3
           },
           "createdAt": {
             "type": "string",

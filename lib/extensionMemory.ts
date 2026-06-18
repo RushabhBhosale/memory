@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 
+import { getFallbackTitle } from '@/lib/titleFallback';
 import Memory from '@/models/Memory';
 import Project from '@/models/Project';
 
@@ -18,6 +19,7 @@ type ExtensionPayload = {
   note?: unknown;
   projectId?: unknown;
   source?: unknown;
+  title?: unknown;
 };
 
 type MemoryKind = 'note' | 'task' | 'work_done' | 'requirement' | 'credential';
@@ -84,19 +86,6 @@ const normalizeProjectId = (value: unknown) => {
   return projectId;
 };
 
-const makeTitle = (
-  type: ExtensionSaveType,
-  content: string,
-  note: string,
-  source: ExtensionSource
-) => {
-  const label = type === 'project' ? 'Project note' : type;
-  const rawTitle = source.title || content || note || `${label} from Chrome`;
-  const title = rawTitle.replace(/\s+/g, ' ').trim();
-
-  return title.length > 90 ? `${title.slice(0, 87)}...` : title;
-};
-
 const buildContent = (
   content: string,
   note: string,
@@ -130,6 +119,7 @@ export const createExtensionMemory = async (payload: ExtensionPayload) => {
   }
 
   const type = normalizeType(payload.type);
+  const title = getString(payload.title);
   const content = getString(payload.content);
   const note = getString(payload.note);
   const projectId = normalizeProjectId(payload.projectId);
@@ -143,9 +133,15 @@ export const createExtensionMemory = async (payload: ExtensionPayload) => {
 
   const config = getTypeConfig(type);
   const capturedDate = new Date(source.capturedAt);
+  const memoryContent = buildContent(content, note, source);
+  const titleSource =
+    [content, note, source.title].filter(Boolean).join('\n\n') ||
+    source.url ||
+    `${type === 'project' ? 'Project note' : type} from Chrome`;
+  const fallbackType = type === 'task' ? 'task' : type === 'reminder' ? 'reminder' : 'note';
   const memory = await Memory.create({
-    title: makeTitle(type, content, note, source),
-    content: buildContent(content, note, source),
+    title: title || getFallbackTitle(titleSource, fallbackType),
+    content: memoryContent,
     category: config.category,
     kind: config.kind,
     tags: ['chrome-extension', type],

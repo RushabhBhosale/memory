@@ -1,16 +1,30 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 
-import type { Memory } from '../services/api';
+import type { ActivityItem, ActivityType, Memory } from '../services/api';
 import { colors, subtleShadow } from '../styles/theme';
 import { formatDate } from '../utils/memoryDates';
 
 type MemoryCardProps = {
-  memory: Memory;
+  memory: ActivityItem | Memory;
 };
 
-const getKindLabel = (kind?: Memory['kind']) => {
-  switch (kind) {
+const getActivityType = (memory: ActivityItem | Memory): ActivityType =>
+  'type' in memory ? memory.type : 'memory';
+
+const getKindLabel = (memory: ActivityItem | Memory) => {
+  switch (getActivityType(memory)) {
+    case 'task':
+      return 'Task';
+    case 'meeting':
+      return 'Meeting';
+    case 'note':
+      return 'Note';
+    default:
+      break;
+  }
+
+  switch (memory.kind) {
     case 'task':
       return 'Task';
     case 'work_done':
@@ -24,11 +38,26 @@ const getKindLabel = (kind?: Memory['kind']) => {
   }
 };
 
-const getProjectName = (memory: Memory) =>
-  memory.projectId && typeof memory.projectId === 'object' ? memory.projectId.name : '';
+const getProjectName = (memory: ActivityItem | Memory) =>
+  'projectName' in memory && memory.projectName
+    ? memory.projectName
+    : memory.projectId && typeof memory.projectId === 'object'
+      ? memory.projectId.name
+      : '';
 
-const getKindTone = (kind?: Memory['kind']) => {
-  switch (kind) {
+const getKindTone = (memory: ActivityItem | Memory) => {
+  switch (getActivityType(memory)) {
+    case 'task':
+      return colors.workTag;
+    case 'meeting':
+      return colors.reminderTag;
+    case 'note':
+      return colors.projectTag;
+    default:
+      break;
+  }
+
+  switch (memory.kind) {
     case 'task':
     case 'work_done':
       return colors.workTag;
@@ -41,7 +70,7 @@ const getKindTone = (kind?: Memory['kind']) => {
   }
 };
 
-const getCategoryTone = (memory: Memory, projectName: string) => {
+const getCategoryTone = (memory: ActivityItem | Memory, projectName: string) => {
   const category = memory.category.toLowerCase();
 
   if (projectName) {
@@ -63,7 +92,7 @@ const getCategoryTone = (memory: Memory, projectName: string) => {
   return colors.personalTag;
 };
 
-const getCategoryLabel = (memory: Memory, projectName: string) => {
+const getCategoryLabel = (memory: ActivityItem | Memory, projectName: string) => {
   if (projectName) {
     return projectName;
   }
@@ -75,18 +104,27 @@ const getToneSurface = (tone: string) => `${tone}1F`;
 
 export function MemoryCard({ memory }: MemoryCardProps) {
   const projectName = getProjectName(memory);
-  const kindTone = getKindTone(memory.kind);
+  const kindTone = getKindTone(memory);
   const categoryTone = getCategoryTone(memory, projectName);
+  const activityType = getActivityType(memory);
 
   return (
     <Pressable
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
-      onPress={() =>
+      onPress={() => {
+        if (activityType === 'memory') {
+          router.push({
+            pathname: '/memories/[id]',
+            params: { id: memory._id }
+          });
+          return;
+        }
+
         router.push({
-          pathname: '/memories/[id]',
-          params: { id: memory._id }
-        })
-      }
+          pathname: '/activity/[type]/[id]',
+          params: { id: memory._id, type: activityType }
+        });
+      }}
     >
       <View style={styles.mainRow}>
         <View style={[styles.marker, { backgroundColor: kindTone }]} />
@@ -105,7 +143,7 @@ export function MemoryCard({ memory }: MemoryCardProps) {
 
       <View style={styles.tagRow}>
         <View style={[styles.tagPill, { backgroundColor: getToneSurface(kindTone) }]}>
-          <Text style={[styles.tagText, { color: kindTone }]}>{getKindLabel(memory.kind)}</Text>
+          <Text style={[styles.tagText, { color: kindTone }]}>{getKindLabel(memory)}</Text>
         </View>
         <View style={[styles.tagPill, { backgroundColor: getToneSurface(categoryTone) }]}>
           <Text style={[styles.tagText, { color: categoryTone }]}>
