@@ -30,6 +30,13 @@
         "mac": "Command+Shift+M"
       },
       "description": "Open quick save modal"
+    },
+    "open-simple-memory": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Comma",
+        "mac": "Command+Shift+Comma"
+      },
+      "description": "Open simple memory modal"
     }
   }
 }

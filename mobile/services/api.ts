@@ -210,6 +210,15 @@ export const searchMemories = async (query: string) => {
   return response.data;
 };
 
+export const searchActivity = async (query: string) => {
+  const { activityUrl } = getApiConfig();
+  const response = await request<ActivityListResponse>(
+    activityUrl,
+    `/search?q=${encodeURIComponent(query)}`
+  );
+  return response.data;
+};
+
 export const getMemory = async (id: string) => {
   const { memoriesUrl } = getApiConfig();
   const response = await request<SingleResponse>(memoriesUrl, `/${id}`);

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MemoryCard } from '../../components/MemoryCard';
@@ -125,6 +125,7 @@ export default function HomeScreen() {
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [projectCount, setProjectCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [selectedDayKey, setSelectedDayKey] = useState(() => getDateKey(new Date()));
   const weekDays = useMemo(() => getWeekDays(), []);
@@ -137,9 +138,13 @@ export default function HomeScreen() {
   const latestLog = activity[0];
   const latestTone = getActivityTone(latestLog);
 
-  const loadMemories = useCallback(async () => {
+  const loadMemories = useCallback(async (options?: { refreshing?: boolean }) => {
     try {
-      setLoading(true);
+      if (options?.refreshing) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
       setError('');
 
       const [nextActivity, nextMemories, nextProjects] = await Promise.all([
@@ -155,6 +160,7 @@ export default function HomeScreen() {
       setError(err instanceof Error ? err.message : 'Unable to load memories');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
@@ -195,6 +201,14 @@ export default function HomeScreen() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+            onRefresh={() => loadMemories({ refreshing: true })}
+          />
+        }
       >
         <View style={styles.header}>
           <View>

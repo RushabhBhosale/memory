@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   FlatList,
   Pressable,
+  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
@@ -28,18 +29,24 @@ export default function ProjectsScreen() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const loadProjects = useCallback(async () => {
+  const loadProjects = useCallback(async (options?: { refreshing?: boolean }) => {
     try {
-      setLoading(true);
+      if (options?.refreshing) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
       setError('');
       setProjects(await listProjects());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load projects');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
@@ -121,6 +128,14 @@ export default function ProjectsScreen() {
           data={projects}
           keyExtractor={(item) => item._id}
           contentContainerStyle={projects.length ? styles.list : styles.centerState}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
+              onRefresh={() => loadProjects({ refreshing: true })}
+            />
+          }
           ListEmptyComponent={<Text style={styles.mutedText}>No projects yet.</Text>}
           renderItem={({ item }) => (
             <Pressable

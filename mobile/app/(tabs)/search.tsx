@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   FlatList,
   Pressable,
+  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
@@ -12,19 +13,20 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MemoryCard } from '../../components/MemoryCard';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { StateView } from '../../components/StateView';
-import { searchMemories, type Memory } from '../../services/api';
+import { searchActivity, type ActivityItem } from '../../services/api';
 import { colors, subtleShadow } from '../../styles/theme';
 
-const suggestions = ['jwt', 'interviews', 'natiks', 'passport'];
+const suggestions = ['sdk', 'secret key', 'activex', 'android build'];
 
 export default function SearchScreen() {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<Memory[]>([]);
+  const [results, setResults] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState('');
 
-  const runSearch = async (value = query) => {
+  const runSearch = async (value = query, options?: { refreshing?: boolean }) => {
     const nextQuery = value.trim();
 
     if (!nextQuery) {
@@ -35,15 +37,26 @@ export default function SearchScreen() {
     }
 
     try {
-      setLoading(true);
+      if (options?.refreshing) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
       setError('');
       setSearched(true);
       setQuery(nextQuery);
-      setResults(await searchMemories(nextQuery));
+      setResults(await searchActivity(nextQuery));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to search memories');
+      setError(err instanceof Error ? err.message : 'Unable to search activity');
     } finally {
       setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const refreshSearch = () => {
+    if (searched && query.trim()) {
+      runSearch(query, { refreshing: true });
     }
   };
 
@@ -105,6 +118,14 @@ export default function SearchScreen() {
           data={results}
           keyExtractor={(item) => item._id}
           contentContainerStyle={results.length ? styles.list : styles.emptyList}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
+              onRefresh={refreshSearch}
+            />
+          }
           ListHeaderComponent={
             results.length ? (
               <View style={styles.sectionRow}>

@@ -441,6 +441,243 @@ const openQuickSaveModal = async (tab) => {
   }
 };
 
+const openSimpleMemoryModal = async (tab) => {
+  if (!tab?.id) {
+    await showBadge('ERR', '#E66A5C');
+    return;
+  }
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      args: [
+        {
+          title: tab.title || '',
+          url: tab.url || ''
+        }
+      ],
+      func: (pageSource) => {
+        const MODAL_ID = 'memory-assistant-simple-memory-root';
+        const existing = document.getElementById(MODAL_ID);
+
+        if (existing) {
+          existing.remove();
+          return;
+        }
+
+        const selectedText = window.getSelection?.().toString().trim() || '';
+        const root = document.createElement('div');
+        root.id = MODAL_ID;
+        root.innerHTML = `
+          <div class="ma-simple-backdrop" data-close="true"></div>
+          <section class="ma-simple-modal" role="dialog" aria-modal="true" aria-label="Add memory">
+            <div class="ma-simple-header">
+              <h2>Add Memory</h2>
+              <button class="ma-simple-close" data-close="true" type="button" aria-label="Close">x</button>
+            </div>
+            <textarea id="ma-simple-content" rows="7" placeholder="Type a memory..."></textarea>
+            <div class="ma-simple-actions">
+              <button id="ma-simple-save" class="ma-simple-primary" type="button">Save Memory</button>
+              <button class="ma-simple-secondary" data-close="true" type="button">Cancel</button>
+            </div>
+            <p id="ma-simple-status" class="ma-simple-status" role="status"></p>
+          </section>
+        `;
+
+        const style = document.createElement('style');
+        style.textContent = `
+          #${MODAL_ID}, #${MODAL_ID} * { box-sizing: border-box; }
+          #${MODAL_ID} {
+            color: #17201e;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            position: fixed;
+            z-index: 2147483647;
+          }
+          #${MODAL_ID} .ma-simple-backdrop {
+            background: rgba(23, 32, 30, 0.24);
+            inset: 0;
+            position: fixed;
+          }
+          #${MODAL_ID} .ma-simple-modal {
+            background: #fff;
+            border: 1px solid #dde4d9;
+            border-radius: 14px;
+            box-shadow: 0 22px 54px rgba(23, 32, 30, 0.24);
+            display: grid;
+            gap: 12px;
+            max-height: min(520px, calc(100vh - 32px));
+            overflow: auto;
+            padding: 16px;
+            position: fixed;
+            right: 18px;
+            top: 18px;
+            width: min(380px, calc(100vw - 36px));
+          }
+          #${MODAL_ID} .ma-simple-header {
+            align-items: center;
+            display: flex;
+            justify-content: space-between;
+          }
+          #${MODAL_ID} h2 {
+            color: #17201e;
+            font-size: 20px;
+            font-weight: 900;
+            line-height: 24px;
+            margin: 0;
+          }
+          #${MODAL_ID} textarea {
+            background: #f4f6f1;
+            border: 1px solid #dde4d9;
+            border-radius: 10px;
+            color: #17201e;
+            font: 600 14px/20px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            min-height: 150px;
+            outline: none;
+            padding: 12px;
+            resize: vertical;
+            width: 100%;
+          }
+          #${MODAL_ID} textarea:focus {
+            border-color: #2f6f63;
+            box-shadow: 0 0 0 3px rgba(47, 111, 99, 0.18);
+          }
+          #${MODAL_ID} .ma-simple-actions {
+            display: flex;
+            gap: 9px;
+          }
+          #${MODAL_ID} button {
+            border: 0;
+            border-radius: 10px;
+            cursor: pointer;
+            font: inherit;
+            font-weight: 900;
+            min-height: 40px;
+            padding: 9px 12px;
+          }
+          #${MODAL_ID} button:disabled {
+            cursor: default;
+            opacity: 0.62;
+          }
+          #${MODAL_ID} .ma-simple-primary {
+            background: #2f6f63;
+            color: #fff;
+            flex: 1;
+          }
+          #${MODAL_ID} .ma-simple-secondary {
+            background: #e9ede6;
+            color: #17201e;
+          }
+          #${MODAL_ID} .ma-simple-close {
+            background: transparent;
+            color: #56625e;
+            font-size: 22px;
+            min-height: 32px;
+            padding: 0 6px;
+          }
+          #${MODAL_ID} .ma-simple-status {
+            color: #56625e;
+            font-size: 12px;
+            font-weight: 800;
+            line-height: 17px;
+            margin: 0;
+            min-height: 17px;
+          }
+          #${MODAL_ID} .ma-simple-status.ma-error { color: #d85c4a; }
+          #${MODAL_ID} .ma-simple-status.ma-success { color: #2f6f63; }
+        `;
+        root.appendChild(style);
+        document.documentElement.appendChild(root);
+
+        const contentInput = root.querySelector('#ma-simple-content');
+        const saveButton = root.querySelector('#ma-simple-save');
+        const status = root.querySelector('#ma-simple-status');
+
+        contentInput.value = selectedText;
+        contentInput.focus();
+
+        const setStatus = (message, tone = '') => {
+          status.textContent = message;
+          status.className = `ma-simple-status ${tone ? `ma-${tone}` : ''}`.trim();
+        };
+
+        const close = () => root.remove();
+
+        root.addEventListener('click', (event) => {
+          if (event.target?.dataset?.close === 'true') {
+            close();
+          }
+        });
+
+        root.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape') {
+            close();
+          }
+
+          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+            saveButton.click();
+          }
+        });
+
+        saveButton.addEventListener('click', () => {
+          const content = contentInput.value.trim();
+
+          if (!content) {
+            setStatus('Type a memory before saving.', 'error');
+            contentInput.focus();
+            return;
+          }
+
+          saveButton.disabled = true;
+          setStatus('Saving...');
+
+          chrome.runtime.sendMessage(
+            {
+              type: 'MEMORY_ASSISTANT_QUICK_SAVE',
+              payload: {
+                type: 'memory',
+                content,
+                note: '',
+                projectId: null,
+                source: {
+                  type: 'chrome_extension',
+                  title: pageSource.title,
+                  url: pageSource.url,
+                  capturedAt: new Date().toISOString()
+                }
+              }
+            },
+            (response) => {
+              saveButton.disabled = false;
+
+              if (chrome.runtime.lastError) {
+                setStatus(chrome.runtime.lastError.message || 'Extension connection failed.', 'error');
+                return;
+              }
+
+              if (!response?.ok) {
+                setStatus(response?.error || 'Unable to save memory.', 'error');
+                return;
+              }
+
+              setStatus('Memory saved.', 'success');
+              setTimeout(close, 650);
+            }
+          );
+        });
+      }
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error && /Cannot access|Cannot access contents|chrome:\/\//i.test(error.message)
+        ? 'Chrome blocked this page. Try a normal website tab, not a browser/system page.'
+        : error instanceof Error
+          ? error.message
+          : 'Unable to open memory box.';
+
+    await showPageToast(tab.id, message, 'error');
+  }
+};
+
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
@@ -491,12 +728,15 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 });
 
 chrome.commands.onCommand.addListener(async (command) => {
-  if (command !== 'open-quick-save') {
-    return;
-  }
-
   try {
-    await openQuickSaveModal(await getActiveTab());
+    if (command === 'open-quick-save') {
+      await openQuickSaveModal(await getActiveTab());
+      return;
+    }
+
+    if (command === 'open-simple-memory') {
+      await openSimpleMemoryModal(await getActiveTab());
+    }
   } catch (error) {
     console.error(error);
     await showBadge('ERR', '#E66A5C');
