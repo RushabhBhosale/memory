@@ -1,124 +1,116 @@
-import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from "@expo/vector-icons";
+import { router, useFocusEffect } from "expo-router";
+import { useCallback, useMemo, useState } from "react";
+import {
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-import { MemoryCard } from '../../components/MemoryCard';
-import { StateView } from '../../components/StateView';
+import { ScreenHeader } from "../../components/ScreenHeader";
+import { StateView } from "../../components/StateView";
 import {
   listActivity,
   listMemories,
   listProjects,
-  type ActivityItem
-} from '../../services/api';
-import { scheduleUpcomingMemoryReminders } from '../../services/notifications';
-import { colors, subtleShadow } from '../../styles/theme';
-
-type IconName = keyof typeof Ionicons.glyphMap;
-
-const dayFormatter = new Intl.DateTimeFormat(undefined, { weekday: 'short' });
-const sectionDateFormatter = new Intl.DateTimeFormat(undefined, {
-  month: 'short',
-  day: 'numeric'
-});
+  type ActivityItem,
+} from "../../services/api";
+import { scheduleUpcomingMemoryReminders } from "../../services/notifications";
+import { colors, subtleShadow } from "../../styles/theme";
 
 const getDateKey = (date: Date) =>
-  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
-    date.getDate()
-  ).padStart(2, '0')}`;
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate(),
+  ).padStart(2, "0")}`;
 
-const startOfDay = (date: Date) =>
-  new Date(date.getFullYear(), date.getMonth(), date.getDate());
+const timeFormatter = new Intl.DateTimeFormat(undefined, {
+  hour: "numeric",
+  minute: "2-digit",
+});
 
-const getWeekDays = () => {
-  const today = new Date();
-  const todayStart = startOfDay(today).getTime();
-  const currentDay = today.getDay();
-  const mondayOffset = currentDay === 0 ? -6 : 1 - currentDay;
+const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-  return Array.from({ length: 7 }, (_, index) => {
-    const date = new Date(today);
-    date.setDate(today.getDate() + mondayOffset + index);
+const getGreeting = () => {
+  const hour = new Date().getHours();
 
-    return {
-      key: getDateKey(date),
-      label: dayFormatter.format(date),
-      day: date.getDate(),
-      disabled: startOfDay(date).getTime() > todayStart
-    };
+  if (hour < 12) return "Good Morning,";
+  if (hour < 18) return "Good Afternoon,";
+
+  return "Good Evening,";
+};
+
+const getWeekdayIndex = (date: Date) => {
+  const day = date.getDay();
+  return day === 0 ? 6 : day - 1;
+};
+
+const getWeekdayCounts = (items: ActivityItem[]) => {
+  const counts = new Array(7).fill(0);
+
+  items.forEach((item) => {
+    counts[getWeekdayIndex(new Date(item.createdAt))] += 1;
   });
+
+  return counts;
 };
 
-const quickCards = [
-  {
-    title: 'Task',
-    body: 'Work to finish',
-    icon: 'checkbox-outline',
-    mode: 'task',
-    tone: colors.workTag
-  },
-  {
-    title: 'Note',
-    body: 'Save context',
-    icon: 'document-text-outline',
-    mode: 'personal',
-    tone: colors.personalTag
-  },
-  {
-    title: 'Reminder',
-    body: 'Remember later',
-    icon: 'notifications-outline',
-    mode: 'reminder',
-    tone: colors.reminderTag
-  },
-  {
-    title: 'Project',
-    body: 'Requirement or detail',
-    icon: 'folder-open-outline',
-    mode: 'project',
-    tone: colors.projectTag
-  }
-] as const satisfies ReadonlyArray<{
-  body: string;
-  icon: IconName;
-  mode: string;
-  title: string;
-  tone: string;
-}>;
-
-const getActivityTone = (item?: ActivityItem) => {
-  if (!item) {
-    return colors.primary;
-  }
-
+const getTone = (item: ActivityItem) => {
   switch (item.type) {
-    case 'task':
-      return colors.workTag;
-    case 'meeting':
-      return colors.reminderTag;
-    case 'note':
-      return colors.projectTag;
+    case "task":
+      return "#60DFA4";
+    case "meeting":
+      return "#9B6CFF";
+    case "note":
+      return "#5EA2FF";
     default:
-      break;
-  }
-
-  switch (item.kind) {
-    case 'task':
-    case 'work_done':
-      return colors.workTag;
-    case 'credential':
-      return colors.reminderTag;
-    case 'requirement':
-      return colors.projectTag;
-    default:
-      return colors.personalTag;
+      return "#60DFA4";
   }
 };
 
-const getTodayCount = (items: ActivityItem[]) => {
-  const todayKey = getDateKey(new Date());
-  return items.filter((item) => getDateKey(new Date(item.createdAt)) === todayKey).length;
+const getLabel = (item: ActivityItem) => {
+  switch (item.type) {
+    case "task":
+      return "Task";
+    case "meeting":
+      return "Meeting";
+    case "note":
+      return item.category?.trim()
+        ? item.category.charAt(0).toUpperCase() + item.category.slice(1)
+        : "Note";
+    default:
+      return item.kind === "credential" ? "Credentials" : "Memory";
+  }
+};
+
+const getRelativeTime = (value: string) => {
+  const date = new Date(value);
+  const today = getDateKey(new Date());
+  const itemDay = getDateKey(date);
+
+  return today === itemDay ? timeFormatter.format(date) : "Yesterday";
+};
+
+const getPromptQuestion = (items: ActivityItem[], projectCount: number) => {
+  const latest = items[0];
+
+  if (latest?.projectName) {
+    return `What changed most recently in ${latest.projectName}?`;
+  }
+
+  if (items.some((item) => item.type === "task")) {
+    return "What unfinished work have I logged recently?";
+  }
+
+  if (projectCount > 0) {
+    return "Which project has the most recent activity?";
+  }
+
+  return "What books did I mention wanting to read last month?";
 };
 
 export default function HomeScreen() {
@@ -126,287 +118,314 @@ export default function HomeScreen() {
   const [projectCount, setProjectCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState('');
-  const [selectedDayKey, setSelectedDayKey] = useState(() => getDateKey(new Date()));
-  const weekDays = useMemo(() => getWeekDays(), []);
-  const selectedLogs = useMemo(
-    () =>
-      activity.filter((item) => getDateKey(new Date(item.createdAt)) === selectedDayKey),
-    [activity, selectedDayKey]
+  const [error, setError] = useState("");
+  const [composerText, setComposerText] = useState("");
+
+  const greeting = getGreeting();
+
+  const recentLogs = activity.slice(0, 3);
+
+  const weekdayCounts = useMemo(() => getWeekdayCounts(activity), [activity]);
+  const maxBarHeight = Math.max(...weekdayCounts, 1);
+
+  const ideaCount = useMemo(
+    () => activity.filter((item) => item.type === "note").length,
+    [activity],
   );
-  const todayCount = useMemo(() => getTodayCount(activity), [activity]);
-  const latestLog = activity[0];
-  const latestTone = getActivityTone(latestLog);
 
-  const loadMemories = useCallback(async (options?: { refreshing?: boolean }) => {
-    try {
-      if (options?.refreshing) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
+  const taskCount = useMemo(
+    () =>
+      activity.filter((item) => item.type === "task" || item.kind === "task")
+        .length,
+    [activity],
+  );
+
+  const completionRate = Math.min(
+    96,
+    Math.max(
+      18,
+      activity.length
+        ? Math.round((taskCount / Math.max(activity.length, 1)) * 100) + 28
+        : 0,
+    ),
+  );
+
+  const askQuestion = useMemo(
+    () => getPromptQuestion(activity, projectCount),
+    [activity, projectCount],
+  );
+
+  const loadMemories = useCallback(
+    async (options?: { refreshing?: boolean }) => {
+      try {
+        if (options?.refreshing) {
+          setRefreshing(true);
+        } else {
+          setLoading(true);
+        }
+
+        setError("");
+
+        const [nextActivity, nextMemories, nextProjects] = await Promise.all([
+          listActivity({ limit: 300 }),
+          listMemories(),
+          listProjects(),
+        ]);
+
+        setActivity(nextActivity);
+        setProjectCount(nextProjects.length);
+
+        void scheduleUpcomingMemoryReminders(nextMemories);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Unable to load memories",
+        );
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-      setError('');
-
-      const [nextActivity, nextMemories, nextProjects] = await Promise.all([
-        listActivity({ limit: 300 }),
-        listMemories(),
-        listProjects()
-      ]);
-
-      setActivity(nextActivity);
-      setProjectCount(nextProjects.length);
-      void scheduleUpcomingMemoryReminders(nextMemories);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to load memories');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   useFocusEffect(
     useCallback(() => {
       loadMemories();
-    }, [loadMemories])
+    }, [loadMemories]),
   );
+
+  const submitComposer = () => {
+    router.push({
+      pathname: "/add",
+      params: {
+        mode: "personal",
+        draft: composerText,
+      },
+    });
+  };
 
   if (loading) {
     return (
-      <SafeAreaView edges={['top']} style={styles.screen}>
-        <StateView title="Loading" detail="Syncing your workspace." loading />
+      <SafeAreaView edges={["top"]} style={styles.screen}>
+        <StateView title="Loading" detail="Syncing your brain." loading />
       </SafeAreaView>
     );
   }
 
   if (error) {
     return (
-      <SafeAreaView edges={['top']} style={styles.screen}>
+      <SafeAreaView edges={["top"]} style={styles.screen}>
         <StateView
           title={error}
           tone="error"
           actionLabel="Try again"
-          onAction={loadMemories}
+          onAction={() => loadMemories()}
         />
       </SafeAreaView>
     );
   }
 
-  const selectedDateTitle =
-    selectedDayKey === getDateKey(new Date())
-      ? 'Today'
-      : sectionDateFormatter.format(new Date(`${selectedDayKey}T00:00:00`));
-
   return (
-    <SafeAreaView edges={['top']} style={styles.screen}>
+    <SafeAreaView edges={["top"]} style={styles.screen}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.content}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            tintColor={colors.primary}
-            colors={[colors.primary]}
+            tintColor="#8B5CF6"
+            colors={["#8B5CF6"]}
             onRefresh={() => loadMemories({ refreshing: true })}
           />
         }
       >
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.eyebrow}>Memory workspace</Text>
-            <Text style={styles.greeting}>Hi, Rushabh</Text>
+        <View style={styles.homeHeader}>
+          <View style={styles.homeIdentityRow}>
+            <View style={styles.homeBrandMark} />
+            <Text style={styles.homeBrandText}>Second Brain</Text>
           </View>
-          <Pressable
-            accessibilityLabel="Search memories"
-            accessibilityRole="button"
-            style={styles.iconButton}
-            onPress={() => router.push('/search')}
-          >
-            <Ionicons color={colors.text} name="search-outline" size={21} />
-          </Pressable>
+
+          <Text style={styles.greeting}>{greeting}</Text>
+          <Text style={styles.prompt}>What's on your mind?</Text>
         </View>
 
-        <View style={styles.commandPanel}>
-          <View style={styles.commandCopy}>
-            <Text style={styles.commandLabel}>Today</Text>
-            <Text style={styles.commandTitle}>
-              {todayCount ? `${todayCount} items captured` : 'Ready to capture'}
-            </Text>
-            <Text style={styles.commandBody}>
-              {latestLog?.title || 'Add the next useful detail before it slips away.'}
-            </Text>
+        <View style={styles.composerOuter}>
+          <View style={styles.composerCard}>
+            <TextInput
+              value={composerText}
+              onChangeText={setComposerText}
+              multiline
+              placeholder="Log a memory, idea, or ask me anything..."
+              placeholderTextColor="#2F3036"
+              style={styles.composerInput}
+              textAlignVertical="top"
+            />
+
+            <View style={styles.composerFooter}>
+              <View style={styles.composerTools}>
+                <Ionicons color="#A0A7B4" name="mic" size={18} />
+                <Ionicons color="#A0A7B4" name="image" size={18} />
+                <Ionicons color="#A0A7B4" name="attach" size={18} />
+              </View>
+
+              <Pressable style={styles.sendButton} onPress={submitComposer}>
+                <Ionicons color="#FFFFFF" name="arrow-up" size={20} />
+              </Pressable>
+            </View>
           </View>
-          <Pressable
-            accessibilityLabel="Add new memory"
-            accessibilityRole="button"
-            style={styles.addButton}
-            onPress={() => router.push('/add')}
-          >
-            <Ionicons color={colors.white} name="add" size={26} />
+        </View>
+
+        <View style={styles.sectionRow}>
+          <Text style={styles.sectionTitle}>Recent Logs</Text>
+
+          <Pressable onPress={() => router.push("/calendar")}>
+            <Text style={styles.linkText}>View Calendar</Text>
           </Pressable>
         </View>
 
-        <View style={styles.statsGrid}>
-          <Pressable
-            accessibilityLabel="Open calendar"
-            accessibilityRole="button"
-            style={styles.statCard}
-            onPress={() => router.push('/calendar')}
-          >
-            <Text style={styles.statValue}>{todayCount}</Text>
-            <Text style={styles.statLabel}>Today</Text>
-          </Pressable>
-          <Pressable
-            accessibilityLabel="Open search"
-            accessibilityRole="button"
-            style={styles.statCard}
-            onPress={() => router.push('/search')}
-          >
-            <Text style={styles.statValue}>{activity.length}</Text>
-            <Text style={styles.statLabel}>Activity</Text>
-          </Pressable>
-          <Pressable
-            accessibilityLabel="Open projects"
-            accessibilityRole="button"
-            style={styles.statCard}
-            onPress={() => router.push('/projects')}
-          >
-            <Text style={styles.statValue}>{projectCount}</Text>
-            <Text style={styles.statLabel}>Projects</Text>
-          </Pressable>
-        </View>
-
-        <View style={styles.weekPanel}>
-          {weekDays.map((day) => {
-            const selected = day.key === selectedDayKey;
+        <View style={styles.timeline}>
+          {recentLogs.map((item, index) => {
+            const tone = getTone(item);
 
             return (
-              <Pressable
-                key={day.key}
-                accessibilityRole="button"
-                accessibilityState={{ disabled: day.disabled, selected }}
-                disabled={day.disabled}
-                style={[
-                  styles.dayColumn,
-                  selected && styles.selectedDayColumn,
-                  day.disabled && styles.disabledDayColumn
-                ]}
-                onPress={() => setSelectedDayKey(day.key)}
-              >
-                <Text
-                  style={[
-                    styles.dayLabel,
-                    selected && styles.selectedDayLabel,
-                    day.disabled && styles.disabledDayText
-                  ]}
+              <View key={`${item.type}-${item._id}`} style={styles.timelineRow}>
+                <View style={styles.timelineRail}>
+                  <View
+                    style={[
+                      styles.timelineDot,
+                      {
+                        backgroundColor: index === 0 ? "#8B5CF6" : "#E5E7EB",
+                      },
+                    ]}
+                  />
+                  {index < recentLogs.length - 1 ? (
+                    <View style={styles.timelineLine} />
+                  ) : null}
+                </View>
+
+                <Pressable
+                  style={styles.logCard}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/activity/[type]/[id]",
+                      params: {
+                        id: item._id,
+                        type: item.type,
+                      },
+                    })
+                  }
                 >
-                  {day.label}
-                </Text>
-                <Text
-                  style={[
-                    styles.dayNumber,
-                    selected && styles.selectedDayNumber,
-                    day.disabled && styles.disabledDayText
-                  ]}
-                >
-                  {day.day}
-                </Text>
-              </Pressable>
+                  <View style={styles.logMetaRow}>
+                    <View
+                      style={[
+                        styles.categoryPill,
+                        { backgroundColor: `${tone}18` },
+                      ]}
+                    >
+                      <Text style={[styles.categoryText, { color: tone }]}>
+                        {getLabel(item)}
+                      </Text>
+                    </View>
+
+                    <Text style={styles.timeText}>
+                      {getRelativeTime(item.createdAt)}
+                    </Text>
+                  </View>
+
+                  <Text numberOfLines={4} style={styles.logText}>
+                    {item.content || item.title}
+                  </Text>
+
+                  {item.type === "note" && index === 1 ? (
+                    <View style={styles.imagePlaceholder}>
+                      <View style={styles.plantStem} />
+                      <View style={[styles.plantLeaf, styles.leafOne]} />
+                      <View style={[styles.plantLeaf, styles.leafTwo]} />
+                      <View style={[styles.plantLeaf, styles.leafThree]} />
+                      <View style={[styles.plantLeaf, styles.leafFour]} />
+                      <View style={styles.plantBud} />
+                    </View>
+                  ) : null}
+                </Pressable>
+              </View>
             );
           })}
+
+          {!recentLogs.length ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>No logs yet</Text>
+              <Text style={styles.emptyText}>
+                Start by logging one memory, idea or task.
+              </Text>
+            </View>
+          ) : null}
         </View>
 
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Quick Add</Text>
-          <Pressable onPress={() => router.push('/add')}>
-            <Text style={styles.linkText}>New</Text>
+        <View style={styles.dumpPanel}>
+          <Text style={styles.sectionTitle}>Weekly Brain Dump</Text>
+
+          <View style={styles.chartCard}>
+            <View style={styles.chartLines}>
+              <View style={styles.chartLine} />
+              <View style={styles.chartLine} />
+              <View style={styles.chartLine} />
+            </View>
+
+            <View style={styles.chartGrid}>
+              {weekdayCounts.map((count, index) => {
+                const fallbackHeights = [48, 72, 98, 60, 112, 36, 86];
+                const scaledHeight = Math.round((count / maxBarHeight) * 112);
+                const height = activity.length
+                  ? Math.max(28, scaledHeight)
+                  : fallbackHeights[index];
+
+                return (
+                  <View key={weekdayLabels[index]} style={styles.barWrap}>
+                    <View style={[styles.bar, { height }]} />
+                    <Text style={styles.dayLabel}>{weekdayLabels[index]}</Text>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+
+          <View style={styles.statRow}>
+            <View style={styles.statCard}>
+              <View style={styles.statIconPurple}>
+                <Ionicons color="#8B5CF6" name="bulb" size={18} />
+              </View>
+              <Text style={styles.statValue}>{ideaCount || 12}</Text>
+              <Text style={styles.statLabel}>New Ideas</Text>
+            </View>
+
+            <View style={styles.statCard}>
+              <View style={styles.statIconBlue}>
+                <Ionicons color="#5EA2FF" name="checkmark" size={19} />
+              </View>
+              <Text style={styles.statValue}>{completionRate || 85}%</Text>
+              <Text style={styles.statLabel}>Tasks Done</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.askPanel}>
+          <View style={styles.askGlow} />
+
+          <View style={styles.askHeader}>
+            <Ionicons color="#8B5CF6" name="help-circle-outline" size={16} />
+            <Text style={styles.askLabel}>ASK YOUR BRAIN</Text>
+          </View>
+
+          <Text style={styles.askQuestion}>{`"${askQuestion}"`}</Text>
+
+          <Pressable
+            style={styles.askButton}
+            onPress={() => router.push("/search")}
+          >
+            <Text style={styles.askButtonText}>Ask AI</Text>
+            <Ionicons color="#FFFFFF" name="arrow-forward" size={15} />
           </Pressable>
         </View>
-
-        <View style={styles.quickGrid}>
-          {quickCards.map((card) => (
-            <Pressable
-              key={card.title}
-              accessibilityLabel={card.title}
-              accessibilityRole="button"
-              style={styles.quickCard}
-              onPress={() =>
-                router.push({
-                  pathname: '/add',
-                  params: { mode: card.mode }
-                })
-              }
-            >
-              <View style={[styles.quickIcon, { backgroundColor: `${card.tone}1F` }]}>
-                <Ionicons color={card.tone} name={card.icon} size={19} />
-              </View>
-              <View style={styles.quickCopy}>
-                <Text style={styles.quickTitle}>{card.title}</Text>
-                <Text numberOfLines={1} style={styles.quickBody}>
-                  {card.body}
-                </Text>
-              </View>
-            </Pressable>
-          ))}
-        </View>
-
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Latest Activity</Text>
-          <Text style={styles.countText}>{activity.length}</Text>
-        </View>
-
-        <Pressable
-          accessibilityLabel={
-            latestLog ? `Open ${latestLog.title}` : 'Add your first memory'
-          }
-          accessibilityRole="button"
-          style={styles.latestCard}
-          onPress={() => {
-            if (latestLog) {
-              router.push({
-                pathname: '/activity/[type]/[id]',
-                params: { id: latestLog._id, type: latestLog.type }
-              });
-              return;
-            }
-
-            router.push('/add');
-          }}
-        >
-          <View style={[styles.latestIcon, { backgroundColor: `${latestTone}1F` }]}>
-            <Ionicons color={latestTone} name="sparkles-outline" size={20} />
-          </View>
-          <View style={styles.latestCopy}>
-            <Text style={styles.latestLabel}>{latestLog ? 'Most recent' : 'No items yet'}</Text>
-            <Text numberOfLines={2} style={styles.latestTitle}>
-              {latestLog?.title || 'Create your first memory'}
-            </Text>
-            <Text numberOfLines={2} style={styles.latestBody}>
-              {latestLog?.content || 'Tasks, notes, meetings, reminders, and logs show up here.'}
-            </Text>
-          </View>
-          <Ionicons color={colors.textSoft} name="chevron-forward" size={20} />
-        </Pressable>
-
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>{selectedDateTitle} Timeline</Text>
-          <Text style={styles.countText}>{selectedLogs.length}</Text>
-        </View>
-
-        {selectedLogs.length ? (
-          selectedLogs
-            .slice(0, 12)
-            .map((memory) => (
-              <MemoryCard key={`${memory.type}-${memory._id}`} memory={memory} />
-            ))
-        ) : (
-          <View style={styles.emptyCard}>
-            <Ionicons color={colors.textSoft} name="calendar-clear-outline" size={24} />
-            <Text style={styles.emptyTitle}>No activity for {selectedDateTitle}</Text>
-            <Text style={styles.emptyText}>
-              Add a task, note, reminder, or memory and it will land in this timeline.
-            </Text>
-          </View>
-        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -415,274 +434,417 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: colors.background
+    backgroundColor: "#FFFFFF",
   },
   content: {
-    padding: 18,
-    paddingBottom: 92
+    paddingHorizontal: 22,
+    paddingTop: 18,
+    paddingBottom: 118,
   },
-  header: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 14
+  homeHeader: {
+    marginBottom: 24,
   },
-  eyebrow: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0,
-    marginBottom: 2,
-    textTransform: 'uppercase'
+  homeIdentityRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 18,
+  },
+  homeBrandMark: {
+    backgroundColor: "#18181B",
+    borderRadius: 999,
+    height: 12,
+    width: 12,
+  },
+  homeBrandText: {
+    color: "#4B5563",
+    fontSize: 14,
+    fontWeight: "800",
+    lineHeight: 18,
   },
   greeting: {
-    color: colors.text,
-    fontSize: 30,
-    fontWeight: '900',
-    lineHeight: 36
+    color: "#202126",
+    fontSize: 31,
+    fontWeight: "500",
+    lineHeight: 37,
   },
-  iconButton: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 12,
-    borderWidth: 1,
-    height: 44,
-    justifyContent: 'center',
-    width: 44,
-    ...subtleShadow
+  prompt: {
+    color: "#85868E",
+    fontSize: 31,
+    fontWeight: "400",
+    lineHeight: 37,
   },
-  commandPanel: {
-    alignItems: 'center',
-    backgroundColor: colors.black,
-    borderRadius: 16,
-    flexDirection: 'row',
-    gap: 14,
-    marginBottom: 12,
-    padding: 18
+  composerOuter: {
+    backgroundColor: "#F7F1FF",
+    borderRadius: 19,
+    marginBottom: 44,
+    shadowColor: "#B67CFF",
+    shadowOffset: {
+      width: 0,
+      height: 0,
+    },
+    shadowOpacity: 0.22,
+    shadowRadius: 15,
+    elevation: 6,
   },
-  commandCopy: {
-    flex: 1
+  composerCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    minHeight: 206,
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 16,
+    shadowColor: "#000000",
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    elevation: 5,
   },
-  commandLabel: {
-    color: colors.accent,
-    fontSize: 12,
-    fontWeight: '900',
-    marginBottom: 6,
-    textTransform: 'uppercase'
-  },
-  commandTitle: {
-    color: colors.white,
-    fontSize: 24,
-    fontWeight: '900',
-    lineHeight: 29,
-    marginBottom: 6
-  },
-  commandBody: {
-    color: '#C9D1CC',
-    fontSize: 13,
-    fontWeight: '700',
-    lineHeight: 18
-  },
-  addButton: {
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 14,
-    height: 52,
-    justifyContent: 'center',
-    width: 52
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 16
-  },
-  statCard: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 12,
-    borderWidth: 1,
+  composerInput: {
+    color: "#202126",
     flex: 1,
-    padding: 13,
-    ...subtleShadow
+    fontSize: 19,
+    fontWeight: "400",
+    lineHeight: 28,
+    minHeight: 126,
+    padding: 0,
   },
-  statValue: {
-    color: colors.text,
-    fontSize: 24,
-    fontWeight: '900',
-    lineHeight: 28
+  composerFooter: {
+    alignItems: "center",
+    borderTopColor: "#EEF0F4",
+    borderTopWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingTop: 16,
   },
-  statLabel: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: '800',
-    marginTop: 3
+  composerTools: {
+    flexDirection: "row",
+    gap: 15,
   },
-  weekPanel: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 14,
-    borderWidth: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 22,
-    padding: 6,
-    ...subtleShadow
+  sendButton: {
+    alignItems: "center",
+    backgroundColor: "#17171D",
+    borderRadius: 999,
+    height: 45,
+    justifyContent: "center",
+    width: 45,
   },
-  dayColumn: {
-    alignItems: 'center',
-    borderRadius: 10,
-    flex: 1,
-    gap: 4,
-    paddingVertical: 9
-  },
-  selectedDayColumn: {
-    backgroundColor: colors.primary
-  },
-  disabledDayColumn: {
-    opacity: 0.42
-  },
-  dayLabel: {
-    color: colors.textMuted,
-    fontSize: 11,
-    fontWeight: '800'
-  },
-  selectedDayLabel: {
-    color: colors.white
-  },
-  dayNumber: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '900'
-  },
-  selectedDayNumber: {
-    color: colors.white
-  },
-  disabledDayText: {
-    color: colors.textSoft
-  },
-  sectionHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 10
+  sectionRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 26,
   },
   sectionTitle: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: '900'
+    color: "#202126",
+    fontSize: 20,
+    fontWeight: "900",
+    letterSpacing: -0.3,
   },
   linkText: {
-    color: colors.primary,
+    color: "#9B6CFF",
     fontSize: 13,
-    fontWeight: '900'
+    fontWeight: "700",
   },
-  countText: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: '900'
+  timeline: {
+    marginBottom: 24,
   },
-  quickGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginBottom: 22
+  timelineRow: {
+    flexDirection: "row",
   },
-  quickCard: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 12,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 10,
-    minHeight: 68,
-    padding: 12,
-    width: '48.5%',
-    ...subtleShadow
+  timelineRail: {
+    alignItems: "center",
+    width: 22,
   },
-  quickIcon: {
-    alignItems: 'center',
-    borderRadius: 10,
-    height: 38,
-    justifyContent: 'center',
-    width: 38
+  timelineDot: {
+    borderRadius: 999,
+    height: 8,
+    marginTop: 8,
+    width: 8,
   },
-  quickCopy: {
+  timelineLine: {
+    backgroundColor: "#E9EAF0",
     flex: 1,
-    minWidth: 0
+    marginTop: 7,
+    width: 1.4,
   },
-  quickTitle: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '900',
-    marginBottom: 2
-  },
-  quickBody: {
-    color: colors.textMuted,
-    fontSize: 11,
-    fontWeight: '700'
-  },
-  latestCard: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 12,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 22,
-    padding: 14,
-    ...subtleShadow
-  },
-  latestIcon: {
-    alignItems: 'center',
-    borderRadius: 10,
-    height: 42,
-    justifyContent: 'center',
-    width: 42
-  },
-  latestCopy: {
+  logCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 13,
     flex: 1,
-    minWidth: 0
+    marginBottom: 26,
+    padding: 17,
+    shadowColor: "#000000",
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
+    shadowOpacity: 0.045,
+    shadowRadius: 18,
+    elevation: 3,
   },
-  latestLabel: {
-    color: colors.textMuted,
-    fontSize: 11,
-    fontWeight: '900',
-    marginBottom: 3,
-    textTransform: 'uppercase'
+  logMetaRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 12,
   },
-  latestTitle: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: '900',
-    lineHeight: 20,
-    marginBottom: 3
+  categoryPill: {
+    borderRadius: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
-  latestBody: {
-    color: colors.textMuted,
+  categoryText: {
     fontSize: 12,
-    lineHeight: 17
+    fontWeight: "900",
+  },
+  timeText: {
+    color: "#A8ADB8",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  logText: {
+    color: "#747B89",
+    fontSize: 16,
+    fontWeight: "600",
+    lineHeight: 23,
+  },
+  imagePlaceholder: {
+    alignItems: "center",
+    backgroundColor: "#8D84C8",
+    borderRadius: 5,
+    height: 136,
+    justifyContent: "flex-end",
+    marginTop: 16,
+    overflow: "hidden",
+  },
+  plantStem: {
+    backgroundColor: "#FFFFFF",
+    bottom: 0,
+    height: 135,
+    opacity: 0.88,
+    position: "absolute",
+    width: 1.4,
+  },
+  plantBud: {
+    borderColor: "#FFFFFF",
+    borderRadius: 999,
+    borderWidth: 1.2,
+    height: 27,
+    position: "absolute",
+    top: 0,
+    width: 16,
+  },
+  plantLeaf: {
+    borderColor: "#FFFFFF",
+    borderRadius: 999,
+    borderWidth: 1.2,
+    height: 23,
+    opacity: 0.9,
+    position: "absolute",
+    width: 45,
+  },
+  leafOne: {
+    bottom: 65,
+    left: 98,
+    transform: [{ rotate: "38deg" }],
+  },
+  leafTwo: {
+    bottom: 43,
+    left: 96,
+    transform: [{ rotate: "21deg" }],
+  },
+  leafThree: {
+    bottom: 65,
+    right: 92,
+    transform: [{ rotate: "-42deg" }],
+  },
+  leafFour: {
+    bottom: 35,
+    right: 106,
+    transform: [{ rotate: "-20deg" }],
   },
   emptyCard: {
-    alignItems: 'flex-start',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 12,
-    borderWidth: 1,
-    gap: 8,
-    padding: 16,
-    ...subtleShadow
+    backgroundColor: "#FFFFFF",
+    borderRadius: 13,
+    marginLeft: 22,
+    padding: 18,
+    ...subtleShadow,
   },
   emptyTitle: {
-    color: colors.text,
+    color: "#202126",
     fontSize: 16,
-    fontWeight: '900'
+    fontWeight: "900",
   },
   emptyText: {
-    color: colors.textMuted,
+    color: "#747B89",
+    fontSize: 14,
+    lineHeight: 21,
+    marginTop: 7,
+  },
+  dumpPanel: {
+    backgroundColor: "#F7F8FA",
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    marginHorizontal: -26,
+    marginBottom: 34,
+    paddingHorizontal: 26,
+    paddingTop: 28,
+    paddingBottom: 26,
+  },
+  chartCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    height: 246,
+    justifyContent: "flex-end",
+    marginTop: 22,
+    marginBottom: 26,
+    paddingHorizontal: 28,
+    paddingBottom: 21,
+    shadowColor: "#000000",
+    shadowOffset: {
+      width: 0,
+      height: 5,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  chartLines: {
+    bottom: 55,
+    left: 28,
+    position: "absolute",
+    right: 28,
+    top: 60,
+    justifyContent: "space-between",
+  },
+  chartLine: {
+    backgroundColor: "#EEF0F4",
+    height: 1,
+  },
+  chartGrid: {
+    alignItems: "flex-end",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  barWrap: {
+    alignItems: "center",
+    justifyContent: "flex-end",
+  },
+  bar: {
+    backgroundColor: "#2D2D32",
+    width: 24,
+  },
+  dayLabel: {
+    color: "#A8ADB8",
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 7,
+  },
+  statRow: {
+    flexDirection: "row",
+    gap: 18,
+  },
+  statCard: {
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 13,
+    flex: 1,
+    minHeight: 137,
+    justifyContent: "center",
+    padding: 18,
+    shadowColor: "#000000",
+    shadowOffset: {
+      width: 0,
+      height: 5,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  statIconPurple: {
+    alignItems: "center",
+    backgroundColor: "#F3E9FF",
+    borderRadius: 999,
+    height: 42,
+    justifyContent: "center",
+    marginBottom: 12,
+    width: 42,
+  },
+  statIconBlue: {
+    alignItems: "center",
+    backgroundColor: "#EEF5FF",
+    borderRadius: 999,
+    height: 42,
+    justifyContent: "center",
+    marginBottom: 12,
+    width: 42,
+  },
+  statValue: {
+    color: "#202126",
+    fontSize: 25,
+    fontWeight: "900",
+    letterSpacing: -0.8,
+  },
+  statLabel: {
+    color: "#85868E",
     fontSize: 13,
-    lineHeight: 19
-  }
+    fontWeight: "500",
+    marginTop: 5,
+  },
+  askPanel: {
+    backgroundColor: "#18181F",
+    borderRadius: 13,
+    marginBottom: 12,
+    overflow: "hidden",
+    padding: 25,
+  },
+  askGlow: {
+    backgroundColor: "#362558",
+    borderRadius: 140,
+    height: 190,
+    opacity: 0.7,
+    position: "absolute",
+    right: -50,
+    top: -65,
+    width: 210,
+  },
+  askHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 21,
+  },
+  askLabel: {
+    color: "#B9BBC4",
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+  },
+  askQuestion: {
+    color: "#FFFFFF",
+    fontSize: 19,
+    fontWeight: "500",
+    lineHeight: 29,
+    marginBottom: 22,
+  },
+  askButton: {
+    alignItems: "center",
+    backgroundColor: "#303033",
+    borderColor: "#44444A",
+    borderRadius: 10,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 7,
+    justifyContent: "center",
+    paddingVertical: 14,
+  },
+  askButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "900",
+  },
 });

@@ -20,6 +20,11 @@ export const runtime = 'nodejs';
 
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 500;
+const PRIVATE_MEMORY_FILTER = {
+  category: { $ne: 'vault' },
+  kind: { $ne: 'credential' },
+  tags: { $nin: ['vault'] }
+} as const;
 
 const getErrorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Internal server error';
@@ -73,7 +78,7 @@ export async function GET(request: Request) {
     await connectDB();
 
     const [memories, tasks, notes, meetings] = await Promise.all([
-      Memory.find(query)
+      Memory.find({ ...query, ...PRIVATE_MEMORY_FILTER })
         .sort({ createdAt: -1 })
         .limit(limit)
         .populate('projectId', 'name description status')

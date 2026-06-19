@@ -20,6 +20,11 @@ export const runtime = 'nodejs';
 
 const SEARCH_RESULT_LIMIT = 40;
 const SEARCH_CANDIDATE_LIMIT = 1000;
+const PRIVATE_MEMORY_FILTER = {
+  category: { $ne: 'vault' },
+  kind: { $ne: 'credential' },
+  tags: { $nin: ['vault'] }
+} as const;
 const STOP_WORDS = new Set([
   'a',
   'about',
@@ -89,6 +94,14 @@ type ScoredActivity<T> = {
   activity: T;
   score: number;
   createdAt: number;
+};
+
+type TokenMatch = {
+  score: number;
+  exact: boolean;
+  prefix: boolean;
+  substring: boolean;
+  fuzzy: boolean;
 };
 
 const getErrorMessage = (error: unknown) =>
@@ -185,20 +198,49 @@ const getEditDistance = (left: string, right: string, maxDistance: number) => {
   return previous[right.length];
 };
 
-const scoreQueryToken = (queryToken: string, activityTokens: string[]) => {
+const scoreQueryToken = (queryToken: string, activityTokens: string[]): TokenMatch => {
   const allowedDistance = getAllowedDistance(queryToken);
-  let bestScore = 0;
+  let bestMatch: TokenMatch = {
+    score: 0,
+    exact: false,
+    prefix: false,
+    substring: false,
+    fuzzy: false
+  };
 
   for (const activityToken of activityTokens) {
     if (activityToken === queryToken) {
-      return 6;
+      return {
+        score: 8,
+        exact: true,
+        prefix: false,
+        substring: false,
+        fuzzy: false
+      };
+    }
+
+    if (queryToken.length >= 3 && activityToken.startsWith(queryToken)) {
+      bestMatch = {
+        score: Math.max(bestMatch.score, 6),
+        exact: bestMatch.exact,
+        prefix: true,
+        substring: bestMatch.substring,
+        fuzzy: bestMatch.fuzzy
+      };
+      continue;
     }
 
     if (
-      queryToken.length >= 3 &&
+      queryToken.length >= 4 &&
       (activityToken.includes(queryToken) || queryToken.includes(activityToken))
     ) {
-      bestScore = Math.max(bestScore, 4);
+      bestMatch = {
+        score: Math.max(bestMatch.score, 3),
+        exact: bestMatch.exact,
+        prefix: bestMatch.prefix,
+        substring: true,
+        fuzzy: bestMatch.fuzzy
+      };
       continue;
     }
 
@@ -206,12 +248,18 @@ const scoreQueryToken = (queryToken: string, activityTokens: string[]) => {
       const distance = getEditDistance(queryToken, activityToken, allowedDistance);
 
       if (distance <= allowedDistance) {
-        bestScore = Math.max(bestScore, 3 - distance);
+        bestMatch = {
+          score: Math.max(bestMatch.score, 2 - distance),
+          exact: bestMatch.exact,
+          prefix: bestMatch.prefix,
+          substring: bestMatch.substring,
+          fuzzy: true
+        };
       }
     }
   }
 
-  return bestScore;
+  return bestMatch;
 };
 
 const scoreActivity = (activity: SearchableActivity, query: string, queryTokens: string[]) => {
@@ -225,13 +273,19 @@ const scoreActivity = (activity: SearchableActivity, query: string, queryTokens:
 
   let score = normalizedSearchText.includes(normalizeText(query)) ? 10 : 0;
   let matchedTokens = 0;
+  let exactOrPrefixMatches = 0;
+  let substringMatches = 0;
+  let fuzzyMatches = 0;
 
   for (const queryToken of queryTokens) {
-    const tokenScore = scoreQueryToken(queryToken, uniqueActivityTokens);
+    const match = scoreQueryToken(queryToken, uniqueActivityTokens);
 
-    if (tokenScore) {
+    if (match.score) {
       matchedTokens += 1;
-      score += tokenScore;
+      score += match.score;
+      exactOrPrefixMatches += Number(match.exact || match.prefix);
+      substringMatches += Number(match.substring);
+      fuzzyMatches += Number(match.fuzzy);
     }
   }
 
@@ -239,13 +293,59 @@ const scoreActivity = (activity: SearchableActivity, query: string, queryTokens:
     return 0;
   }
 
+  const normalizedQuery = normalizeText(query);
+  const phraseMatch = normalizedSearchText.includes(normalizedQuery);
+
   const requiredMatches = queryTokens.length <= 2 ? 1 : Math.ceil(queryTokens.length * 0.55);
 
   if (matchedTokens < requiredMatches) {
     return 0;
   }
 
-  return score + matchedTokens * 2;
+  if (queryTokens.length === 1) {
+    const [queryToken] = queryTokens;
+
+    if (queryToken.length <= 3 && !phraseMatch && exactOrPrefixMatches === 0) {
+      return 0;
+    }
+
+    if (!phraseMatch && exactOrPrefixMatches === 0) {
+      return 0;
+    }
+  } else if (!phraseMatch && exactOrPrefixMatches === 0) {
+    return 0;
+  }
+
+  if (!phraseMatch && exactOrPrefixMatches === 0 && substringMatches === 0) {
+    return 0;
+  }
+
+  if (matchedTokens === fuzzyMatches && !phraseMatch) {
+    return 0;
+  }
+
+  const titleText = normalizeText(activity.title || '');
+  const contentText = normalizeText(activity.content || '');
+  const tagTexts = (activity.tags || []).map((tag) => normalizeText(tag));
+  const projectText = normalizeText(activity.projectName || getProjectField(activity.projectId, 'name') || '');
+
+  if (titleText.includes(normalizedQuery)) {
+    score += 12;
+  }
+
+  if (projectText && projectText.includes(normalizedQuery)) {
+    score += 8;
+  }
+
+  if (tagTexts.some((tag) => tag === normalizedQuery || tag.includes(normalizedQuery))) {
+    score += 8;
+  }
+
+  if (contentText.includes(normalizedQuery)) {
+    score += 4;
+  }
+
+  return score + matchedTokens * 2 + exactOrPrefixMatches * 2;
 };
 
 export async function GET(request: Request) {
@@ -278,7 +378,7 @@ export async function GET(request: Request) {
     await connectDB();
 
     const [memories, tasks, notes, meetings] = await Promise.all([
-      Memory.find()
+      Memory.find(PRIVATE_MEMORY_FILTER)
         .sort({ createdAt: -1 })
         .limit(SEARCH_CANDIDATE_LIMIT)
         .populate('projectId', 'name description status')

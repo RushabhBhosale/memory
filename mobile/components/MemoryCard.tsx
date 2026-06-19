@@ -33,7 +33,7 @@ const getKindLabel = (memory: ActivityItem | Memory) => {
     case 'requirement':
       return 'Project';
     case 'credential':
-      return 'Reminder';
+      return 'Vault';
     default:
       return 'Personal';
   }
@@ -65,7 +65,7 @@ const getKindTone = (memory: ActivityItem | Memory) => {
     case 'requirement':
       return colors.projectTag;
     case 'credential':
-      return colors.reminderTag;
+      return colors.success;
     default:
       return colors.personalTag;
   }
@@ -109,7 +109,7 @@ const getCategoryTone = (memory: ActivityItem | Memory, projectName: string) => 
   }
 
   if (category.includes('reminder') || memory.kind === 'credential') {
-    return colors.reminderTag;
+    return memory.kind === 'credential' ? colors.success : colors.reminderTag;
   }
 
   if (category.includes('project') || memory.kind === 'requirement') {
@@ -193,11 +193,9 @@ export function MemoryCard({ memory }: MemoryCardProps) {
 const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
-    borderColor: colors.border,
     borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: 10,
-    padding: 13,
+    marginBottom: 12,
+    padding: 14,
     ...subtleShadow
   },
   cardPressed: {
@@ -222,15 +220,16 @@ const styles = StyleSheet.create({
   },
   title: {
     color: colors.text,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '900',
-    lineHeight: 19,
+    lineHeight: 18,
     marginBottom: 3
   },
   content: {
     color: colors.textMuted,
     fontSize: 13,
-    lineHeight: 18
+    fontWeight: '700',
+    lineHeight: 19
   },
   date: {
     color: colors.textSoft,

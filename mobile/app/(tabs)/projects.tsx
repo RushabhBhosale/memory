@@ -10,7 +10,9 @@ import {
   View
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ScreenHeader } from '../../components/ScreenHeader';
 import {
   createProject,
   listProjects,
@@ -82,11 +84,8 @@ export default function ProjectsScreen() {
   };
 
   return (
-    <View style={styles.screen}>
-      <View style={styles.header}>
-        <Text style={styles.eyebrow}>Work</Text>
-        <Text style={styles.title}>Projects</Text>
-      </View>
+    <SafeAreaView edges={['top']} style={styles.screen}>
+      <ScreenHeader mode="back" title="Projects" />
 
       <View style={styles.createPanel}>
         <TextInput
@@ -160,7 +159,7 @@ export default function ProjectsScreen() {
           )}
         />
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -168,23 +167,7 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.background,
-    paddingHorizontal: 16,
-    paddingTop: 12
-  },
-  header: {
-    marginBottom: 12
-  },
-  eyebrow: {
-    color: colors.textMuted,
-    fontSize: 11,
-    fontWeight: '800',
-    marginBottom: 2,
-    textTransform: 'uppercase'
-  },
-  title: {
-    color: colors.text,
-    fontSize: 24,
-    fontWeight: '800'
+    paddingHorizontal: 22
   },
   createPanel: {
     backgroundColor: colors.surface,

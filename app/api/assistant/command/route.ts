@@ -747,6 +747,11 @@ const toMemoryCandidate = (memory: RawDocument): SearchCandidate => {
 };
 
 const searchRanked = async (query: string, activeProject: ProjectLike | null) => {
+  const privateMemoryFilter = {
+    category: { $ne: 'vault' },
+    kind: { $ne: 'credential' },
+    tags: { $nin: ['vault'] }
+  };
   const projectQuery = buildTextQuery(query, ['name', 'description', 'tags']);
   const taskQuery = buildTextQuery(query, ['title', 'description', 'category', 'status', 'tags']);
   const noteQuery = buildTextQuery(query, ['title', 'content', 'category', 'kind', 'tags']);
@@ -789,7 +794,7 @@ const searchRanked = async (query: string, activeProject: ProjectLike | null) =>
       .limit(SEARCH_CANDIDATE_LIMIT)
       .populate('projectId', 'name description status')
       .lean(),
-    Memory.find(memoryQuery)
+    Memory.find({ $and: [privateMemoryFilter, memoryQuery] })
       .sort({ updatedAt: -1 })
       .limit(SEARCH_CANDIDATE_LIMIT)
       .populate('projectId', 'name description status')
@@ -798,7 +803,7 @@ const searchRanked = async (query: string, activeProject: ProjectLike | null) =>
     ProjectTask.countDocuments(taskQuery),
     ProjectNote.countDocuments(noteQuery),
     ProjectMeeting.countDocuments(meetingQuery),
-    Memory.countDocuments(memoryQuery)
+    Memory.countDocuments({ $and: [privateMemoryFilter, memoryQuery] })
   ])) as [
     RawDocument[],
     RawDocument[],
@@ -856,7 +861,16 @@ const searchTasksForDelete = async (query: string, projectId?: unknown) => {
 };
 
 const searchMemoriesForDelete = async (query: string) =>
-  Memory.find(buildTextQuery(query, ['title', 'content', 'category', 'tags', 'source']))
+  Memory.find({
+    $and: [
+      {
+        category: { $ne: 'vault' },
+        kind: { $ne: 'credential' },
+        tags: { $nin: ['vault'] }
+      },
+      buildTextQuery(query, ['title', 'content', 'category', 'tags', 'source'])
+    ]
+  })
     .sort({ updatedAt: -1 })
     .limit(DELETE_CHOICE_LIMIT)
     .lean();
@@ -1661,7 +1675,14 @@ const handleCommand = async (
     }
 
     case 'memories': {
-      const memories = await Memory.find().sort({ createdAt: -1 }).limit(RECENT_LIMIT).lean();
+      const memories = await Memory.find({
+        category: { $ne: 'vault' },
+        kind: { $ne: 'credential' },
+        tags: { $nin: ['vault'] }
+      })
+        .sort({ createdAt: -1 })
+        .limit(RECENT_LIMIT)
+        .lean();
 
       return NextResponse.json({
         message: `Recent memories: ${memories.length}`,

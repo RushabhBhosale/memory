@@ -28,6 +28,8 @@ export default function RootLayout() {
         <Stack.Screen name="activity/[type]/[id]" options={{ title: 'Details' }} />
         <Stack.Screen name="memories/[id]" options={{ title: 'Memory' }} />
         <Stack.Screen name="projects/[id]" options={{ title: 'Project' }} />
+        <Stack.Screen name="vault-add" options={{ headerShown: false }} />
+        <Stack.Screen name="vault-settings" options={{ headerShown: false }} />
       </Stack>
     </SafeAreaProvider>
   );

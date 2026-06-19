@@ -10,6 +10,11 @@ export const runtime = 'nodejs';
 
 const SEARCH_RESULT_LIMIT = 20;
 const SEARCH_CANDIDATE_LIMIT = 1000;
+const PRIVATE_MEMORY_FILTER = {
+  category: { $ne: 'vault' },
+  kind: { $ne: 'credential' },
+  tags: { $nin: ['vault'] }
+} as const;
 const STOP_WORDS = new Set([
   'a',
   'about',
@@ -258,7 +263,7 @@ export async function GET(request: Request) {
 
     await connectDB();
 
-    const candidates = await Memory.find()
+    const candidates = await Memory.find(PRIVATE_MEMORY_FILTER)
       .sort({ createdAt: -1 })
       .limit(SEARCH_CANDIDATE_LIMIT)
       .populate('projectId', 'name description status')

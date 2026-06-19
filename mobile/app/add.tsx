@@ -121,7 +121,8 @@ const mergeTimePart = (current: Date, nextTime: Date) =>
   );
 
 export default function AddScreen() {
-  const params = useLocalSearchParams<{ projectId?: string; mode?: string }>();
+  const params = useLocalSearchParams<{ draft?: string; projectId?: string; mode?: string }>();
+  const draftParam = getParamValue(params.draft);
   const projectIdParam = getParamValue(params.projectId);
   const modeParam = getParamValue(params.mode);
   const initialMode = getModeById(modeParam);
@@ -180,6 +181,12 @@ export default function AddScreen() {
       setShowMore(true);
     }
   }, [modeParam, projectIdParam]);
+
+  useEffect(() => {
+    if (draftParam) {
+      setTitle(draftParam);
+    }
+  }, [draftParam]);
 
   const selectMode = (mode: SaveMode) => {
     setSelectedMode(mode);

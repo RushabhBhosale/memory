@@ -1,16 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors } from '../../styles/theme';
 
 type IconName = keyof typeof Ionicons.glyphMap;
-
-type TabIconConfig = {
-  active: IconName;
-  inactive: IconName;
-};
 
 type TabRoute = {
   key: string;
@@ -22,6 +17,7 @@ type TabDescriptor = {
   options: {
     tabBarAccessibilityLabel?: string;
     tabBarButtonTestID?: string;
+    title?: string;
   };
 };
 
@@ -41,48 +37,54 @@ type FloatingTabBarProps = {
   };
 };
 
-const tabIcons: Record<string, TabIconConfig> = {
+const tabConfig: Record<string, { active: IconName; inactive: IconName; label: string }> = {
   calendar: {
     active: 'calendar',
-    inactive: 'calendar-outline'
+    inactive: 'calendar-outline',
+    label: 'History'
   },
   index: {
     active: 'home',
-    inactive: 'home-outline'
+    inactive: 'home-outline',
+    label: 'Home'
   },
   create: {
     active: 'add',
-    inactive: 'add'
-  },
-  projects: {
-    active: 'folder-open',
-    inactive: 'folder-open-outline'
+    inactive: 'add',
+    label: ''
   },
   search: {
     active: 'search',
-    inactive: 'search-outline'
+    inactive: 'search-outline',
+    label: 'Search'
+  },
+  vault: {
+    active: 'key',
+    inactive: 'key-outline',
+    label: 'Vault'
   }
 };
 
 function FloatingTabBar({ state, descriptors, navigation }: FloatingTabBarProps) {
   const insets = useSafeAreaInsets();
+  const visibleRoutes = state.routes.filter((route) => Boolean(tabConfig[route.name]));
 
   return (
     <View
-      pointerEvents="auto"
+      pointerEvents="box-none"
       style={[
         styles.tabBarShell,
         {
-          paddingBottom: Math.max(insets.bottom, 8)
+          bottom: Math.max(insets.bottom, 10)
         }
       ]}
     >
       <View style={styles.tabBar}>
-        {state.routes.map((route, index) => {
-          const isFocused = state.index === index;
+        {visibleRoutes.map((route) => {
+          const isFocused = state.routes[state.index]?.key === route.key;
           const options = descriptors[route.key].options;
           const isAdd = route.name === 'create';
-          const icon = tabIcons[route.name] ?? tabIcons.index;
+          const config = tabConfig[route.name] ?? tabConfig.index;
 
           const onPress = () => {
             const event = navigation.emit({
@@ -112,16 +114,18 @@ function FloatingTabBar({ state, descriptors, navigation }: FloatingTabBarProps)
             >
               {isAdd ? (
                 <View style={styles.addButton}>
-                  <Ionicons color={colors.text} name="add" size={31} />
+                  <Ionicons color={colors.white} name="add" size={30} />
                 </View>
               ) : (
                 <View style={styles.iconStack}>
                   <Ionicons
-                    color={isFocused ? colors.text : stylesConfig.inactiveIcon}
-                    name={isFocused ? icon.active : icon.inactive}
+                    color={isFocused ? colors.primary : colors.textSoft}
+                    name={isFocused ? config.active : config.inactive}
                     size={22}
                   />
-                  <View style={[styles.activeLine, isFocused && styles.activeLineVisible]} />
+                  <Text style={[styles.tabLabel, isFocused && styles.activeTabLabel]}>
+                    {config.label}
+                  </Text>
                 </View>
               )}
             </Pressable>
@@ -142,118 +146,88 @@ export default function TabsLayout() {
       }}
       tabBar={(props) => <FloatingTabBar {...props} />}
     >
-      <Tabs.Screen
-        name="calendar"
-        options={{
-          title: 'Calendar'
-        }}
-      />
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home'
-        }}
-      />
-      <Tabs.Screen
-        name="create"
-        options={{
-          title: 'Add'
-        }}
-      />
-      <Tabs.Screen
-        name="projects"
-        options={{
-          title: 'Projects'
-        }}
-      />
-      <Tabs.Screen
-        name="search"
-        options={{
-          title: 'Search'
-        }}
-      />
+      <Tabs.Screen name="index" options={{ title: 'Home' }} />
+      <Tabs.Screen name="search" options={{ title: 'Search' }} />
+      <Tabs.Screen name="create" options={{ title: 'Add' }} />
+      <Tabs.Screen name="calendar" options={{ title: 'History' }} />
+      <Tabs.Screen name="vault" options={{ title: 'Vault' }} />
+      <Tabs.Screen name="projects" options={{ href: null }} />
     </Tabs>
   );
 }
 
-const stylesConfig = {
-  inactiveIcon: colors.textSoft
-};
-
 const styles = StyleSheet.create({
-  activeLine: {
-    backgroundColor: 'transparent',
-    borderRadius: 999,
-    height: 3,
-    marginTop: 8,
-    width: 13
-  },
-  activeLineVisible: {
-    backgroundColor: colors.primary
-  },
   addButton: {
     alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderColor: '#A8D244',
+    backgroundColor: colors.black,
+    borderColor: colors.white,
     borderRadius: 999,
-    borderWidth: 2,
+    borderWidth: 4,
     height: 58,
     justifyContent: 'center',
-    shadowColor: colors.primary,
+    shadowColor: '#000000',
+    shadowOffset: {
+      width: 0,
+      height: 8
+    },
+    shadowOpacity: 0.24,
+    shadowRadius: 12,
+    width: 58,
+    elevation: 9
+  },
+  addItem: {
+    transform: [
+      {
+        translateY: -19
+      }
+    ]
+  },
+  activeTabLabel: {
+    color: colors.primary
+  },
+  iconStack: {
+    alignItems: 'center',
+    gap: 4,
+    height: 45,
+    justifyContent: 'center'
+  },
+  pressedItem: {
+    opacity: 0.72
+  },
+  tabBar: {
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    borderRadius: 34,
+    flexDirection: 'row',
+    height: 72,
+    justifyContent: 'space-around',
+    paddingHorizontal: 12,
+    width: '100%'
+  },
+  tabBarShell: {
+    alignSelf: 'center',
+    borderRadius: 34,
+    left: 18,
+    position: 'absolute',
+    right: 18,
+    shadowColor: '#000000',
     shadowOffset: {
       width: 0,
       height: 10
     },
-    shadowOpacity: 0.32,
-    shadowRadius: 14,
-    width: 58,
-    elevation: 8
-  },
-  addItem: {
-    marginHorizontal: 2,
-    transform: [
-      {
-        translateY: -20
-      }
-    ]
-  },
-  iconStack: {
-    alignItems: 'center',
-    height: 36,
-    justifyContent: 'center'
-  },
-  pressedItem: {
-    opacity: 0.76
-  },
-  tabBar: {
-    alignItems: 'center',
-    backgroundColor: 'transparent',
-    flexDirection: 'row',
-    height: 64,
-    justifyContent: 'space-around',
-    paddingHorizontal: 18,
-    width: '100%'
-  },
-  tabBarShell: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderTopColor: colors.border,
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    borderTopWidth: 1,
-    shadowColor: '#000000',
-    shadowOffset: {
-      width: 0,
-      height: -8
-    },
-    shadowOpacity: 0.06,
-    shadowRadius: 14,
-    elevation: 10
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
+    elevation: 12
   },
   tabItem: {
     alignItems: 'center',
-    height: 62,
+    height: 64,
     justifyContent: 'center',
-    width: 56
+    width: 58
+  },
+  tabLabel: {
+    color: colors.textSoft,
+    fontSize: 10,
+    fontWeight: '800'
   }
 });

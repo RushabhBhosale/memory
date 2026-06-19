@@ -37,7 +37,7 @@ const getKindLabel = (memory: Memory) => {
     case 'requirement':
       return 'Project';
     case 'credential':
-      return 'Reminder';
+      return 'Vault';
     default:
       return 'Personal';
   }
@@ -58,7 +58,7 @@ const getKindTone = (memory: Memory) => {
     case 'requirement':
       return colors.projectTag;
     case 'credential':
-      return colors.reminderTag;
+      return colors.success;
     default:
       return colors.personalTag;
   }
