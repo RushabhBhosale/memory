@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -12,9 +13,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { ScreenHeader } from "../../components/ScreenHeader";
+import { MemoryCard } from "../../components/MemoryCard";
+import { generateMetadata } from "../../services/ai";
 import { StateView } from "../../components/StateView";
 import {
+  createMemory,
   listActivity,
   listMemories,
   listProjects,
@@ -23,25 +26,30 @@ import {
 import { scheduleUpcomingMemoryReminders } from "../../services/notifications";
 import { colors, subtleShadow } from "../../styles/theme";
 
-const getDateKey = (date: Date) =>
-  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
-    date.getDate(),
-  ).padStart(2, "0")}`;
+const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 const timeFormatter = new Intl.DateTimeFormat(undefined, {
   hour: "numeric",
   minute: "2-digit",
 });
 
-const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const getDateKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate(),
+  ).padStart(2, "0")}`;
 
 const getGreeting = () => {
   const hour = new Date().getHours();
 
-  if (hour < 12) return "Good Morning,";
-  if (hour < 18) return "Good Afternoon,";
+  if (hour < 12) {
+    return "Good Morning";
+  }
 
-  return "Good Evening,";
+  if (hour < 18) {
+    return "Good Afternoon";
+  }
+
+  return "Good Evening";
 };
 
 const getWeekdayIndex = (date: Date) => {
@@ -59,40 +67,16 @@ const getWeekdayCounts = (items: ActivityItem[]) => {
   return counts;
 };
 
-const getTone = (item: ActivityItem) => {
-  switch (item.type) {
-    case "task":
-      return "#60DFA4";
-    case "meeting":
-      return "#9B6CFF";
-    case "note":
-      return "#5EA2FF";
-    default:
-      return "#60DFA4";
-  }
-};
-
-const getLabel = (item: ActivityItem) => {
-  switch (item.type) {
-    case "task":
-      return "Task";
-    case "meeting":
-      return "Meeting";
-    case "note":
-      return item.category?.trim()
-        ? item.category.charAt(0).toUpperCase() + item.category.slice(1)
-        : "Note";
-    default:
-      return item.kind === "credential" ? "Credentials" : "Memory";
-  }
-};
-
 const getRelativeTime = (value: string) => {
   const date = new Date(value);
   const today = getDateKey(new Date());
   const itemDay = getDateKey(date);
 
-  return today === itemDay ? timeFormatter.format(date) : "Yesterday";
+  if (today === itemDay) {
+    return timeFormatter.format(date);
+  }
+
+  return "Earlier";
 };
 
 const getPromptQuestion = (items: ActivityItem[], projectCount: number) => {
@@ -110,7 +94,44 @@ const getPromptQuestion = (items: ActivityItem[], projectCount: number) => {
     return "Which project has the most recent activity?";
   }
 
-  return "What books did I mention wanting to read last month?";
+  return "What should I review from this week?";
+};
+
+const getInsightSlot = () => Math.floor(new Date().getHours() / 6);
+
+const getTodayActivityCount = (items: ActivityItem[]) => {
+  const todayKey = getDateKey(new Date());
+
+  return items.filter(
+    (item) => getDateKey(new Date(item.createdAt)) === todayKey,
+  ).length;
+};
+
+const getAiInsight = (
+  items: ActivityItem[],
+  projectCount: number,
+  todayCount: number,
+  taskCount: number,
+  slot: number,
+) => {
+  const latest = items[0];
+  const latestProject = latest?.projectName;
+  const options = [
+    latestProject
+      ? `${latestProject} is leading your recent activity.`
+      : "Your recent activity is building a useful trail.",
+    taskCount > 0
+      ? `${taskCount} task${taskCount === 1 ? "" : "s"} are active in your recent memory.`
+      : "Your recent saves are more notes than tasks right now.",
+    todayCount > 0
+      ? `You've already captured ${todayCount} item${todayCount === 1 ? "" : "s"} today.`
+      : "No captures yet today. A quick note will start the thread.",
+    projectCount > 0
+      ? `${projectCount} project${projectCount === 1 ? "" : "s"} are currently in motion.`
+      : "Your memory is mostly general context right now."
+  ];
+
+  return options[slot % options.length];
 };
 
 export default function HomeScreen() {
@@ -120,39 +141,34 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [composerText, setComposerText] = useState("");
+  const [savingComposer, setSavingComposer] = useState(false);
 
   const greeting = getGreeting();
 
-  const recentLogs = activity.slice(0, 3);
-
+  const recentLogs = activity.slice(0, 4);
   const weekdayCounts = useMemo(() => getWeekdayCounts(activity), [activity]);
-  const maxBarHeight = Math.max(...weekdayCounts, 1);
-
-  const ideaCount = useMemo(
-    () => activity.filter((item) => item.type === "note").length,
+  const maxWeekCount = Math.max(...weekdayCounts, 1);
+  const todayCount = useMemo(() => getTodayActivityCount(activity), [activity]);
+  const noteCount = useMemo(
+    () =>
+      activity.filter((item) => item.type === "note" || item.type === "memory")
+        .length,
     [activity],
   );
-
   const taskCount = useMemo(
     () =>
       activity.filter((item) => item.type === "task" || item.kind === "task")
         .length,
     [activity],
   );
-
-  const completionRate = Math.min(
-    96,
-    Math.max(
-      18,
-      activity.length
-        ? Math.round((taskCount / Math.max(activity.length, 1)) * 100) + 28
-        : 0,
-    ),
-  );
-
   const askQuestion = useMemo(
     () => getPromptQuestion(activity, projectCount),
     [activity, projectCount],
+  );
+  const insightSlot = getInsightSlot();
+  const aiInsight = useMemo(
+    () => getAiInsight(activity, projectCount, todayCount, taskCount, insightSlot),
+    [activity, insightSlot, projectCount, taskCount, todayCount],
   );
 
   const loadMemories = useCallback(
@@ -174,7 +190,6 @@ export default function HomeScreen() {
 
         setActivity(nextActivity);
         setProjectCount(nextProjects.length);
-
         void scheduleUpcomingMemoryReminders(nextMemories);
       } catch (err) {
         setError(
@@ -194,14 +209,35 @@ export default function HomeScreen() {
     }, [loadMemories]),
   );
 
-  const submitComposer = () => {
-    router.push({
-      pathname: "/add",
-      params: {
-        mode: "personal",
-        draft: composerText,
-      },
-    });
+  const submitComposer = async () => {
+    const trimmedContent = composerText.trim();
+
+    if (!trimmedContent) {
+      return;
+    }
+
+    try {
+      setSavingComposer(true);
+      setError("");
+
+      const metadata = await generateMetadata(trimmedContent);
+
+      await createMemory({
+        title: metadata.title,
+        content: trimmedContent,
+        category: metadata.category,
+        tags: metadata.tags,
+        importance: metadata.importance,
+        kind: "note",
+      });
+
+      setComposerText("");
+      await loadMemories();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to save memory");
+    } finally {
+      setSavingComposer(false);
+    }
   };
 
   if (loading) {
@@ -228,204 +264,185 @@ export default function HomeScreen() {
   return (
     <SafeAreaView edges={["top"]} style={styles.screen}>
       <ScrollView
-        showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.content}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            tintColor="#8B5CF6"
-            colors={["#8B5CF6"]}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
             onRefresh={() => loadMemories({ refreshing: true })}
           />
         }
+        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.homeHeader}>
-          <View style={styles.homeIdentityRow}>
-            <View style={styles.homeBrandMark} />
-            <Text style={styles.homeBrandText}>Second Brain</Text>
+        <View style={styles.headerRow}>
+          <View style={styles.brandRow}>
+            <View style={styles.brandMark} />
+            <Text style={styles.brandText}>Second Brain</Text>
           </View>
-
-          <Text style={styles.greeting}>{greeting}</Text>
-          <Text style={styles.prompt}>What's on your mind?</Text>
+          <Pressable
+            style={styles.headerAction}
+            onPress={() => router.push("/search")}
+          >
+            <Ionicons color={colors.text} name="sparkles-outline" size={18} />
+          </Pressable>
         </View>
 
-        <View style={styles.composerOuter}>
+        <View style={styles.heroBlock}>
+          <Text style={styles.greeting}>{greeting}</Text>
+          <View style={styles.insightRow}>
+            <Ionicons color={colors.primary} name="sparkles-outline" size={14} />
+            <Text style={styles.insightText}>{aiInsight}</Text>
+          </View>
+        </View>
+
+        <View style={styles.composerShell}>
+          <View style={styles.composerGlowA} />
+          <View style={styles.composerGlowB} />
+
           <View style={styles.composerCard}>
+            <View style={styles.composerHeader}>
+              <View style={styles.composerBadge}>
+                <Ionicons
+                  color={colors.primary}
+                  name="sparkles-outline"
+                  size={13}
+                />
+                <Text style={styles.composerBadgeText}>AI quick capture</Text>
+              </View>
+            </View>
+
             <TextInput
               value={composerText}
               onChangeText={setComposerText}
               multiline
-              placeholder="Log a memory, idea, or ask me anything..."
-              placeholderTextColor="#2F3036"
+              placeholder="Log a memory, work update, reminder, or idea..."
+              placeholderTextColor={colors.textSoft}
               style={styles.composerInput}
               textAlignVertical="top"
             />
 
             <View style={styles.composerFooter}>
-              <View style={styles.composerTools}>
-                <Ionicons color="#A0A7B4" name="mic" size={18} />
-                <Ionicons color="#A0A7B4" name="image" size={18} />
-                <Ionicons color="#A0A7B4" name="attach" size={18} />
+              <View style={styles.composerHints}>
+                <View style={styles.hintPill}>
+                  <Text style={styles.hintText}>Auto title</Text>
+                </View>
+                <View style={styles.hintPill}>
+                  <Text style={styles.hintText}>Smart tags</Text>
+                </View>
               </View>
 
-              <Pressable style={styles.sendButton} onPress={submitComposer}>
-                <Ionicons color="#FFFFFF" name="arrow-up" size={20} />
+              <Pressable
+                disabled={savingComposer}
+                style={[
+                  styles.sendButton,
+                  savingComposer && styles.sendButtonDisabled,
+                ]}
+                onPress={() => void submitComposer()}
+              >
+                {savingComposer ? (
+                  <ActivityIndicator color={colors.white} size="small" />
+                ) : (
+                  <Ionicons color={colors.white} name="arrow-up" size={18} />
+                )}
               </Pressable>
             </View>
           </View>
         </View>
 
-        <View style={styles.sectionRow}>
-          <Text style={styles.sectionTitle}>Recent Logs</Text>
+        <View style={styles.metricsRow}>
+          <View style={styles.metricCardLarge}>
+            <Text style={styles.metricEyebrow}>Today</Text>
+            <Text style={styles.metricValue}>{todayCount}</Text>
+            <Text style={styles.metricLabel}>items captured</Text>
+          </View>
 
-          <Pressable onPress={() => router.push("/calendar")}>
-            <Text style={styles.linkText}>View Calendar</Text>
-          </Pressable>
+          <View style={styles.metricStack}>
+            <View style={styles.metricCardSmall}>
+              <Text style={styles.metricMiniValue}>{noteCount}</Text>
+              <Text style={styles.metricMiniLabel}>notes</Text>
+            </View>
+            <View style={styles.metricCardSmall}>
+              <Text style={styles.metricMiniValue}>{taskCount}</Text>
+              <Text style={styles.metricMiniLabel}>tasks</Text>
+            </View>
+          </View>
         </View>
 
-        <View style={styles.timeline}>
-          {recentLogs.map((item, index) => {
-            const tone = getTone(item);
+        <View style={styles.panel}>
+          <View style={styles.panelHeader}>
+            <Text style={styles.panelTitle}>Weekly activity</Text>
+            <Text style={styles.panelCaption}>Last 7 days</Text>
+          </View>
 
-            return (
-              <View key={`${item.type}-${item._id}`} style={styles.timelineRow}>
-                <View style={styles.timelineRail}>
-                  <View
-                    style={[
-                      styles.timelineDot,
-                      {
-                        backgroundColor: index === 0 ? "#8B5CF6" : "#E5E7EB",
-                      },
-                    ]}
-                  />
-                  {index < recentLogs.length - 1 ? (
-                    <View style={styles.timelineLine} />
-                  ) : null}
+          <View style={styles.chartWrap}>
+            {weekdayCounts.map((count, index) => {
+              const height = activity.length
+                ? Math.max(18, Math.round((count / maxWeekCount) * 94))
+                : 18;
+
+              return (
+                <View key={weekdayLabels[index]} style={styles.barColumn}>
+                  <View style={[styles.bar, { height }]} />
+                  <Text style={styles.barLabel}>{weekdayLabels[index]}</Text>
                 </View>
-
-                <Pressable
-                  style={styles.logCard}
-                  onPress={() =>
-                    router.push({
-                      pathname: "/activity/[type]/[id]",
-                      params: {
-                        id: item._id,
-                        type: item.type,
-                      },
-                    })
-                  }
-                >
-                  <View style={styles.logMetaRow}>
-                    <View
-                      style={[
-                        styles.categoryPill,
-                        { backgroundColor: `${tone}18` },
-                      ]}
-                    >
-                      <Text style={[styles.categoryText, { color: tone }]}>
-                        {getLabel(item)}
-                      </Text>
-                    </View>
-
-                    <Text style={styles.timeText}>
-                      {getRelativeTime(item.createdAt)}
-                    </Text>
-                  </View>
-
-                  <Text numberOfLines={4} style={styles.logText}>
-                    {item.content || item.title}
-                  </Text>
-
-                  {item.type === "note" && index === 1 ? (
-                    <View style={styles.imagePlaceholder}>
-                      <View style={styles.plantStem} />
-                      <View style={[styles.plantLeaf, styles.leafOne]} />
-                      <View style={[styles.plantLeaf, styles.leafTwo]} />
-                      <View style={[styles.plantLeaf, styles.leafThree]} />
-                      <View style={[styles.plantLeaf, styles.leafFour]} />
-                      <View style={styles.plantBud} />
-                    </View>
-                  ) : null}
-                </Pressable>
-              </View>
-            );
-          })}
-
-          {!recentLogs.length ? (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>No logs yet</Text>
-              <Text style={styles.emptyText}>
-                Start by logging one memory, idea or task.
-              </Text>
-            </View>
-          ) : null}
-        </View>
-
-        <View style={styles.dumpPanel}>
-          <Text style={styles.sectionTitle}>Weekly Brain Dump</Text>
-
-          <View style={styles.chartCard}>
-            <View style={styles.chartLines}>
-              <View style={styles.chartLine} />
-              <View style={styles.chartLine} />
-              <View style={styles.chartLine} />
-            </View>
-
-            <View style={styles.chartGrid}>
-              {weekdayCounts.map((count, index) => {
-                const fallbackHeights = [48, 72, 98, 60, 112, 36, 86];
-                const scaledHeight = Math.round((count / maxBarHeight) * 112);
-                const height = activity.length
-                  ? Math.max(28, scaledHeight)
-                  : fallbackHeights[index];
-
-                return (
-                  <View key={weekdayLabels[index]} style={styles.barWrap}>
-                    <View style={[styles.bar, { height }]} />
-                    <Text style={styles.dayLabel}>{weekdayLabels[index]}</Text>
-                  </View>
-                );
-              })}
-            </View>
-          </View>
-
-          <View style={styles.statRow}>
-            <View style={styles.statCard}>
-              <View style={styles.statIconPurple}>
-                <Ionicons color="#8B5CF6" name="bulb" size={18} />
-              </View>
-              <Text style={styles.statValue}>{ideaCount || 12}</Text>
-              <Text style={styles.statLabel}>New Ideas</Text>
-            </View>
-
-            <View style={styles.statCard}>
-              <View style={styles.statIconBlue}>
-                <Ionicons color="#5EA2FF" name="checkmark" size={19} />
-              </View>
-              <Text style={styles.statValue}>{completionRate || 85}%</Text>
-              <Text style={styles.statLabel}>Tasks Done</Text>
-            </View>
+              );
+            })}
           </View>
         </View>
 
-        <View style={styles.askPanel}>
-          <View style={styles.askGlow} />
-
-          <View style={styles.askHeader}>
-            <Ionicons color="#8B5CF6" name="help-circle-outline" size={16} />
-            <Text style={styles.askLabel}>ASK YOUR BRAIN</Text>
-          </View>
-
-          <Text style={styles.askQuestion}>{`"${askQuestion}"`}</Text>
-
-          <Pressable
-            style={styles.askButton}
-            onPress={() => router.push("/search")}
-          >
-            <Text style={styles.askButtonText}>Ask AI</Text>
-            <Ionicons color="#FFFFFF" name="arrow-forward" size={15} />
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Recent activity</Text>
+          <Pressable onPress={() => router.push("/(tabs)/calendar")}>
+            <Text style={styles.sectionLink}>View calendar</Text>
           </Pressable>
         </View>
+
+        {recentLogs.length ? (
+          <View style={styles.recentList}>
+            {recentLogs.map((item) => (
+              <MemoryCard key={`${item.type}-${item._id}`} memory={item} />
+            ))}
+          </View>
+        ) : (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>No activity yet</Text>
+            <Text style={styles.emptyText}>
+              Start with one quick capture and your dashboard will build itself.
+            </Text>
+          </View>
+        )}
+
+        <Pressable
+          style={styles.askPanel}
+          onPress={() => router.push("/search")}
+        >
+          <View style={styles.askTopRow}>
+            <View style={styles.askBadge}>
+              <Ionicons
+                color={colors.primary}
+                name="sparkles-outline"
+                size={14}
+              />
+              <Text style={styles.askBadgeText}>Ask Memory</Text>
+            </View>
+            <Ionicons color={colors.textSoft} name="arrow-forward" size={18} />
+          </View>
+
+          <Text style={styles.askQuestion}>{askQuestion}</Text>
+          <Text style={styles.askDescription}>
+            Search across memories, tasks, meetings, reminders, and project
+            notes with natural language.
+          </Text>
+
+          <View style={styles.askPromptRow}>
+            <Text numberOfLines={1} style={styles.askPromptText}>
+              {askQuestion}
+            </Text>
+          </View>
+        </Pressable>
+
+        <View style={styles.footerSpace} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -434,417 +451,361 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: colors.background,
   },
   content: {
     paddingHorizontal: 22,
     paddingTop: 18,
     paddingBottom: 118,
   },
-  homeHeader: {
-    marginBottom: 24,
+  headerRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 18,
   },
-  homeIdentityRow: {
+  brandRow: {
     alignItems: "center",
     flexDirection: "row",
     gap: 10,
-    marginBottom: 18,
   },
-  homeBrandMark: {
-    backgroundColor: "#18181B",
+  brandMark: {
+    backgroundColor: colors.black,
     borderRadius: 999,
     height: 12,
     width: 12,
   },
-  homeBrandText: {
-    color: "#4B5563",
+  brandText: {
+    color: colors.textMuted,
     fontSize: 14,
     fontWeight: "800",
-    lineHeight: 18,
+  },
+  headerAction: {
+    alignItems: "center",
+    backgroundColor: "#F6F7FA",
+    borderColor: colors.border,
+    borderRadius: 999,
+    borderWidth: 1,
+    height: 40,
+    justifyContent: "center",
+    width: 40,
+  },
+  heroBlock: {
+    marginBottom: 18,
   },
   greeting: {
-    color: "#202126",
-    fontSize: 31,
-    fontWeight: "500",
-    lineHeight: 37,
+    color: colors.text,
+    fontSize: 32,
+    fontWeight: "900",
+    lineHeight: 38,
   },
-  prompt: {
-    color: "#85868E",
-    fontSize: 31,
-    fontWeight: "400",
-    lineHeight: 37,
+  insightRow: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: colors.accentSurface,
+    borderRadius: 999,
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 12,
+    maxWidth: "96%",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
-  composerOuter: {
-    backgroundColor: "#F7F1FF",
-    borderRadius: 19,
-    marginBottom: 44,
-    shadowColor: "#B67CFF",
-    shadowOffset: {
-      width: 0,
-      height: 0,
-    },
-    shadowOpacity: 0.22,
-    shadowRadius: 15,
-    elevation: 6,
+  insightText: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 18,
+  },
+  composerShell: {
+    marginBottom: 18,
+    position: "relative",
+  },
+  composerGlowA: {
+    backgroundColor: "#F3EAFF",
+    borderRadius: 28,
+    bottom: 8,
+    left: 8,
+    position: "absolute",
+    right: 8,
+    top: 8,
+  },
+  composerGlowB: {
+    backgroundColor: "#EDF5FF",
+    borderRadius: 28,
+    bottom: 0,
+    left: 18,
+    opacity: 0.8,
+    position: "absolute",
+    right: 18,
+    top: 18,
   },
   composerCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    minHeight: 206,
-    paddingHorizontal: 18,
-    paddingTop: 18,
-    paddingBottom: 16,
-    shadowColor: "#000000",
-    shadowOffset: {
-      width: 0,
-      height: 8,
-    },
-    shadowOpacity: 0.08,
-    shadowRadius: 18,
-    elevation: 5,
+    backgroundColor: colors.surface,
+    borderColor: "#EDF0F5",
+    borderRadius: 28,
+    borderWidth: 1,
+    minHeight: 204,
+    padding: 18,
+    position: "relative",
+    ...subtleShadow,
+  },
+  composerHeader: {
+    marginBottom: 14,
+  },
+  composerBadge: {
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: colors.accentSurface,
+    borderRadius: 999,
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  composerBadgeText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "800",
   },
   composerInput: {
-    color: "#202126",
+    color: colors.text,
     flex: 1,
-    fontSize: 19,
-    fontWeight: "400",
-    lineHeight: 28,
-    minHeight: 126,
+    fontSize: 18,
+    fontWeight: "600",
+    lineHeight: 27,
+    minHeight: 94,
     padding: 0,
   },
   composerFooter: {
     alignItems: "center",
-    borderTopColor: "#EEF0F4",
-    borderTopWidth: 1,
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingTop: 16,
+    marginTop: 14,
   },
-  composerTools: {
+  composerHints: {
     flexDirection: "row",
-    gap: 15,
+    gap: 8,
+  },
+  hintPill: {
+    backgroundColor: "#F5F7FB",
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+  },
+  hintText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "800",
   },
   sendButton: {
     alignItems: "center",
-    backgroundColor: "#17171D",
+    backgroundColor: colors.text,
     borderRadius: 999,
-    height: 45,
+    height: 46,
     justifyContent: "center",
-    width: 45,
+    width: 46,
   },
-  sectionRow: {
+  sendButtonDisabled: {
+    opacity: 0.72,
+  },
+  metricsRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 18,
+  },
+  metricCardLarge: {
+    backgroundColor: "#F8FBFF",
+    borderColor: "#E7EEF8",
+    borderRadius: 24,
+    borderWidth: 1,
+    flex: 1.2,
+    minHeight: 142,
+    padding: 18,
+    ...subtleShadow,
+  },
+  metricEyebrow: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  metricValue: {
+    color: colors.text,
+    fontSize: 40,
+    fontWeight: "900",
+    lineHeight: 46,
+    marginTop: 18,
+  },
+  metricLabel: {
+    color: colors.textMuted,
+    fontSize: 14,
+    fontWeight: "700",
+    marginTop: 6,
+  },
+  metricStack: {
+    flex: 1,
+    gap: 12,
+  },
+  metricCardSmall: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 20,
+    borderWidth: 1,
+    flex: 1,
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    ...subtleShadow,
+  },
+  metricMiniValue: {
+    color: colors.text,
+    fontSize: 24,
+    fontWeight: "900",
+  },
+  metricMiniLabel: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: "700",
+    marginTop: 4,
+  },
+  panel: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 24,
+    borderWidth: 1,
+    marginBottom: 22,
+    padding: 18,
+    ...subtleShadow,
+  },
+  panelHeader: {
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 26,
+    marginBottom: 14,
+  },
+  panelTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  panelCaption: {
+    color: colors.textSoft,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  chartWrap: {
+    alignItems: "flex-end",
+    flexDirection: "row",
+    gap: 14,
+    minHeight: 126,
+    paddingTop: 12,
+  },
+  barColumn: {
+    alignItems: "center",
+    flex: 1,
+    gap: 10,
+  },
+  bar: {
+    backgroundColor: colors.text,
+    borderRadius: 999,
+    minHeight: 18,
+    width: 24,
+  },
+  barLabel: {
+    color: colors.textSoft,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  sectionHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 14,
   },
   sectionTitle: {
-    color: "#202126",
+    color: colors.text,
     fontSize: 20,
     fontWeight: "900",
-    letterSpacing: -0.3,
   },
-  linkText: {
-    color: "#9B6CFF",
+  sectionLink: {
+    color: colors.primary,
     fontSize: 13,
-    fontWeight: "700",
+    fontWeight: "800",
   },
-  timeline: {
-    marginBottom: 24,
-  },
-  timelineRow: {
-    flexDirection: "row",
-  },
-  timelineRail: {
-    alignItems: "center",
-    width: 22,
-  },
-  timelineDot: {
-    borderRadius: 999,
-    height: 8,
-    marginTop: 8,
-    width: 8,
-  },
-  timelineLine: {
-    backgroundColor: "#E9EAF0",
-    flex: 1,
-    marginTop: 7,
-    width: 1.4,
-  },
-  logCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 13,
-    flex: 1,
-    marginBottom: 26,
-    padding: 17,
-    shadowColor: "#000000",
-    shadowOffset: {
-      width: 0,
-      height: 8,
-    },
-    shadowOpacity: 0.045,
-    shadowRadius: 18,
-    elevation: 3,
-  },
-  logMetaRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 12,
-  },
-  categoryPill: {
-    borderRadius: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  categoryText: {
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  timeText: {
-    color: "#A8ADB8",
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  logText: {
-    color: "#747B89",
-    fontSize: 16,
-    fontWeight: "600",
-    lineHeight: 23,
-  },
-  imagePlaceholder: {
-    alignItems: "center",
-    backgroundColor: "#8D84C8",
-    borderRadius: 5,
-    height: 136,
-    justifyContent: "flex-end",
-    marginTop: 16,
-    overflow: "hidden",
-  },
-  plantStem: {
-    backgroundColor: "#FFFFFF",
-    bottom: 0,
-    height: 135,
-    opacity: 0.88,
-    position: "absolute",
-    width: 1.4,
-  },
-  plantBud: {
-    borderColor: "#FFFFFF",
-    borderRadius: 999,
-    borderWidth: 1.2,
-    height: 27,
-    position: "absolute",
-    top: 0,
-    width: 16,
-  },
-  plantLeaf: {
-    borderColor: "#FFFFFF",
-    borderRadius: 999,
-    borderWidth: 1.2,
-    height: 23,
-    opacity: 0.9,
-    position: "absolute",
-    width: 45,
-  },
-  leafOne: {
-    bottom: 65,
-    left: 98,
-    transform: [{ rotate: "38deg" }],
-  },
-  leafTwo: {
-    bottom: 43,
-    left: 96,
-    transform: [{ rotate: "21deg" }],
-  },
-  leafThree: {
-    bottom: 65,
-    right: 92,
-    transform: [{ rotate: "-42deg" }],
-  },
-  leafFour: {
-    bottom: 35,
-    right: 106,
-    transform: [{ rotate: "-20deg" }],
+  recentList: {
+    marginBottom: 22,
   },
   emptyCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 13,
-    marginLeft: 22,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 20,
+    borderWidth: 1,
+    marginBottom: 22,
     padding: 18,
     ...subtleShadow,
   },
   emptyTitle: {
-    color: "#202126",
+    color: colors.text,
     fontSize: 16,
     fontWeight: "900",
   },
   emptyText: {
-    color: "#747B89",
+    color: colors.textMuted,
     fontSize: 14,
+    fontWeight: "600",
     lineHeight: 21,
-    marginTop: 7,
-  },
-  dumpPanel: {
-    backgroundColor: "#F7F8FA",
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    marginHorizontal: -26,
-    marginBottom: 34,
-    paddingHorizontal: 26,
-    paddingTop: 28,
-    paddingBottom: 26,
-  },
-  chartCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 14,
-    height: 246,
-    justifyContent: "flex-end",
-    marginTop: 22,
-    marginBottom: 26,
-    paddingHorizontal: 28,
-    paddingBottom: 21,
-    shadowColor: "#000000",
-    shadowOffset: {
-      width: 0,
-      height: 5,
-    },
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
-    elevation: 3,
-  },
-  chartLines: {
-    bottom: 55,
-    left: 28,
-    position: "absolute",
-    right: 28,
-    top: 60,
-    justifyContent: "space-between",
-  },
-  chartLine: {
-    backgroundColor: "#EEF0F4",
-    height: 1,
-  },
-  chartGrid: {
-    alignItems: "flex-end",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  barWrap: {
-    alignItems: "center",
-    justifyContent: "flex-end",
-  },
-  bar: {
-    backgroundColor: "#2D2D32",
-    width: 24,
-  },
-  dayLabel: {
-    color: "#A8ADB8",
-    fontSize: 11,
-    fontWeight: "700",
-    marginTop: 7,
-  },
-  statRow: {
-    flexDirection: "row",
-    gap: 18,
-  },
-  statCard: {
-    alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 13,
-    flex: 1,
-    minHeight: 137,
-    justifyContent: "center",
-    padding: 18,
-    shadowColor: "#000000",
-    shadowOffset: {
-      width: 0,
-      height: 5,
-    },
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
-    elevation: 3,
-  },
-  statIconPurple: {
-    alignItems: "center",
-    backgroundColor: "#F3E9FF",
-    borderRadius: 999,
-    height: 42,
-    justifyContent: "center",
-    marginBottom: 12,
-    width: 42,
-  },
-  statIconBlue: {
-    alignItems: "center",
-    backgroundColor: "#EEF5FF",
-    borderRadius: 999,
-    height: 42,
-    justifyContent: "center",
-    marginBottom: 12,
-    width: 42,
-  },
-  statValue: {
-    color: "#202126",
-    fontSize: 25,
-    fontWeight: "900",
-    letterSpacing: -0.8,
-  },
-  statLabel: {
-    color: "#85868E",
-    fontSize: 13,
-    fontWeight: "500",
-    marginTop: 5,
+    marginTop: 6,
   },
   askPanel: {
-    backgroundColor: "#18181F",
-    borderRadius: 13,
-    marginBottom: 12,
+    backgroundColor: "#111217",
+    borderRadius: 28,
     overflow: "hidden",
-    padding: 25,
+    padding: 18,
   },
-  askGlow: {
-    backgroundColor: "#362558",
-    borderRadius: 140,
-    height: 190,
-    opacity: 0.7,
-    position: "absolute",
-    right: -50,
-    top: -65,
-    width: 210,
+  askTopRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
   },
-  askHeader: {
+  askBadge: {
     alignItems: "center",
     flexDirection: "row",
     gap: 8,
-    marginBottom: 21,
   },
-  askLabel: {
-    color: "#B9BBC4",
+  askBadgeText: {
+    color: "#C8B5FF",
     fontSize: 12,
     fontWeight: "900",
-    letterSpacing: 0.8,
+    textTransform: "uppercase",
   },
   askQuestion: {
-    color: "#FFFFFF",
-    fontSize: 19,
-    fontWeight: "500",
-    lineHeight: 29,
-    marginBottom: 22,
+    color: colors.white,
+    fontSize: 28,
+    fontWeight: "900",
+    lineHeight: 34,
+    marginTop: 18,
   },
-  askButton: {
-    alignItems: "center",
-    backgroundColor: "#303033",
-    borderColor: "#44444A",
-    borderRadius: 10,
+  askDescription: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 15,
+    fontWeight: "600",
+    lineHeight: 23,
+    marginTop: 10,
+  },
+  askPromptRow: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(255,255,255,0.08)",
+    borderRadius: 18,
     borderWidth: 1,
-    flexDirection: "row",
-    gap: 7,
-    justifyContent: "center",
+    marginTop: 18,
+    paddingHorizontal: 14,
     paddingVertical: 14,
   },
-  askButtonText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "900",
+  askPromptText: {
+    color: colors.white,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  footerSpace: {
+    height: 16,
   },
 });

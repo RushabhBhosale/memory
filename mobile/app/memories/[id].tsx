@@ -10,7 +10,8 @@ import {
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 
-import { deleteMemory, getMemory, Memory } from '../../services/api';
+import { generateMetadata } from '../../services/ai';
+import { deleteMemory, getMemory, Memory, updateMemory } from '../../services/api';
 import { cardShadow, colors, subtleShadow } from '../../styles/theme';
 
 const formatDateTime = (value: string) =>
@@ -71,6 +72,7 @@ export default function DetailScreen() {
   const [memory, setMemory] = useState<Memory | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const [error, setError] = useState('');
 
   const loadMemory = useCallback(async () => {
@@ -119,6 +121,33 @@ export default function DetailScreen() {
         }
       }
     ]);
+  };
+
+  const regenerateMemoryMetadata = async () => {
+    if (!memory || !id) {
+      return;
+    }
+
+    try {
+      setRegenerating(true);
+      setError('');
+
+      const metadataSource = memory.content.trim() || memory.title.trim();
+      const metadata = await generateMetadata(metadataSource);
+      const updatedMemory = await updateMemory(id, {
+        title: metadata.title,
+        category: metadata.category,
+        tags: metadata.tags,
+        importance: metadata.importance
+      });
+
+      setMemory(updatedMemory);
+      Alert.alert('Metadata updated', 'Title, category, tags, and importance were regenerated.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to regenerate metadata');
+    } finally {
+      setRegenerating(false);
+    }
   };
 
   if (loading) {
@@ -189,6 +218,28 @@ export default function DetailScreen() {
           <Text style={styles.metaValue}>
             {memory.reminderAt ? formatDateTime(memory.reminderAt) : formatDateTime(memory.updatedAt)}
           </Text>
+        </View>
+      </View>
+
+      <View style={styles.metaCard}>
+        <View style={styles.metaBlock}>
+          <Text style={styles.metaLabel}>Importance</Text>
+          <Text style={styles.metaValue}>{memory.importance || 3} / 5</Text>
+        </View>
+        <View style={styles.metaDivider} />
+        <View style={styles.metaBlock}>
+          <Text style={styles.metaLabel}>AI Metadata</Text>
+          <Pressable
+            disabled={regenerating}
+            style={[styles.secondaryButton, regenerating && styles.disabledButton]}
+            onPress={regenerateMemoryMetadata}
+          >
+            {regenerating ? (
+              <ActivityIndicator color={colors.text} />
+            ) : (
+              <Text style={styles.secondaryButtonText}>Regenerate Metadata</Text>
+            )}
+          </Pressable>
         </View>
       </View>
 

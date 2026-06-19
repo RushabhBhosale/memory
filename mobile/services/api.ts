@@ -38,6 +38,22 @@ export type ActivityItem = Memory & {
   type: ActivityType;
 };
 
+export type AskMemoryPlan = {
+  keywords: string[];
+  types: SaveItemType[];
+  project: string | null;
+  timeframe: 'today' | 'tomorrow' | 'this_week' | 'this_month' | 'upcoming' | 'all_time';
+};
+
+export type AskMemoryResponse = {
+  answer: string;
+  count: number;
+  plan: AskMemoryPlan;
+  projects: string[];
+  sources: ActivityItem[];
+  summary: string[];
+};
+
 export type CreateMemoryInput = {
   title?: string;
   content?: string;
@@ -120,6 +136,7 @@ const getApiConfig = () => {
 
   return {
     apiKey,
+    askMemoryUrl: `${apiRoot}/api/ask-memory`,
     activityUrl: `${apiRoot}/api/activity`,
     memoriesUrl: `${apiRoot}/api/memories`,
     projectsUrl: `${apiRoot}/api/projects`
@@ -219,6 +236,14 @@ export const searchActivity = async (query: string) => {
   return response.data;
 };
 
+export const askMemory = async (query: string) => {
+  const { askMemoryUrl } = getApiConfig();
+  return request<AskMemoryResponse>(askMemoryUrl, '', {
+    method: 'POST',
+    body: JSON.stringify({ query })
+  });
+};
+
 export const getMemory = async (id: string) => {
   const { memoriesUrl } = getApiConfig();
   const response = await request<SingleResponse>(memoriesUrl, `/${id}`);
@@ -240,6 +265,16 @@ export const deleteMemory = async (id: string) => {
   await request<{ message: string; data: Memory }>(memoriesUrl, `/${id}`, {
     method: 'DELETE'
   });
+};
+
+export const updateMemory = async (id: string, input: Partial<CreateMemoryInput>) => {
+  const { memoriesUrl } = getApiConfig();
+  const response = await request<SingleResponse>(memoriesUrl, `/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input)
+  });
+
+  return response.data;
 };
 
 export const listProjects = async () => {

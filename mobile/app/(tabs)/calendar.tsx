@@ -14,9 +14,11 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { MemoryCard } from "../../components/MemoryCard";
 import { ScreenHeader } from "../../components/ScreenHeader";
+import { StateView } from "../../components/StateView";
 import { listActivity, type ActivityItem } from "../../services/api";
-import { colors } from "../../styles/theme";
+import { colors, subtleShadow } from "../../styles/theme";
 
 type CalendarCell = {
   date: Date;
@@ -65,10 +67,8 @@ const addDays = (date: Date, days: number) => {
 const getMonthCells = (visibleMonth: Date): CalendarCell[] => {
   const year = visibleMonth.getFullYear();
   const month = visibleMonth.getMonth();
-
   const firstDate = new Date(year, month, 1);
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-
   const startDate = new Date(year, month, 1 - firstDate.getDay());
   const totalCells = firstDate.getDay() + daysInMonth > 35 ? 42 : 35;
 
@@ -106,9 +106,18 @@ const toTitleCase = (value: string) =>
     .join(" ");
 
 const getLabel = (item: ActivityItem) => {
-  if (item.type === "meeting") return "Meeting";
-  if (item.type === "task" || item.kind === "task") return "Task";
-  if (item.kind === "credential") return "Credentials";
+  if (item.type === "meeting") {
+    return "Meeting";
+  }
+
+  if (item.type === "task" || item.kind === "task") {
+    return "Task";
+  }
+
+  if (item.kind === "credential") {
+    return "Credentials";
+  }
+
   if (item.type === "note") {
     return item.category?.trim() ? toTitleCase(item.category) : "Note";
   }
@@ -116,63 +125,43 @@ const getLabel = (item: ActivityItem) => {
   return "Note";
 };
 
-const getCategoryStyle = (item: ActivityItem) => {
-  const label = getLabel(item);
-
-  switch (label) {
-    case "Meeting":
-      return {
-        color: "#9B6CFF",
-        backgroundColor: "#F3E9FF",
-      };
-    case "Task":
-      return {
-        color: "#4F8EF7",
-        backgroundColor: "#EAF2FF",
-      };
-    case "Credentials":
-      return {
-        color: "#20C987",
-        backgroundColor: "#E9FFF5",
-      };
-    case "Note":
-      return {
-        color: "#4F8EF7",
-        backgroundColor: "#EAF2FF",
-      };
-    default:
-      return {
-        color: "#FF8A3D",
-        backgroundColor: "#FFF0E5",
-      };
-  }
-};
-
 const getMarkerColor = (item: ActivityItem) => {
   const label = getLabel(item);
 
   switch (label) {
     case "Meeting":
-      return "#8B5CF6";
+      return colors.primary;
     case "Task":
-      return "#3B82F6";
+      return colors.secondary;
     case "Credentials":
-      return "#18C58B";
-    case "Note":
-      return "#3B82F6";
+      return colors.success;
     default:
-      return "#FF914D";
+      return colors.reminderTag;
   }
 };
 
 const matchesFilter = (item: ActivityItem, filter: string) => {
   const label = getLabel(item);
 
-  if (filter === "All") return true;
-  if (filter === "Notes") return item.type === "note";
-  if (filter === "Meetings") return label === "Meeting";
-  if (filter === "Credentials") return label === "Credentials";
-  if (filter === "Tasks") return label === "Task";
+  if (filter === "All") {
+    return true;
+  }
+
+  if (filter === "Notes") {
+    return item.type === "note" || item.type === "memory";
+  }
+
+  if (filter === "Meetings") {
+    return label === "Meeting";
+  }
+
+  if (filter === "Credentials") {
+    return label === "Credentials";
+  }
+
+  if (filter === "Tasks") {
+    return label === "Task";
+  }
 
   return true;
 };
@@ -184,14 +173,30 @@ const formatSectionTitle = (dayKey: string) => {
   const dateLabel = shortMonthDayFormatter.format(date);
 
   if (dayKey === todayKey) {
-    return `Today - ${dateLabel}`;
+    return `Today • ${dateLabel}`;
   }
 
   if (dayKey === yesterdayKey) {
-    return `Yesterday - ${dateLabel}`;
+    return `Yesterday • ${dateLabel}`;
   }
 
   return dateLabel;
+};
+
+const getInsight = (
+  monthTotal: number,
+  averagePerDay: string,
+  selectedCount: number,
+) => {
+  if (selectedCount > 0) {
+    return `${selectedCount} saved item${selectedCount === 1 ? "" : "s"} on the selected day.`;
+  }
+
+  if (monthTotal > 0) {
+    return `${monthTotal} items logged this month, averaging ${averagePerDay} per day.`;
+  }
+
+  return "Your timeline is quiet right now. New captures will appear here automatically.";
 };
 
 export default function CalendarScreen() {
@@ -210,10 +215,8 @@ export default function CalendarScreen() {
   const todayKey = getDateKey(new Date());
   const selectedDate = parseDateKey(selectedDay);
   const previousDayKey = getDateKey(addDays(selectedDate, -1));
-
-  const calendarInnerWidth = screenWidth - 52 - 44;
+  const calendarInnerWidth = screenWidth - 44 - 36;
   const dayCellSize = Math.floor(calendarInnerWidth / 7);
-
   const monthCells = useMemo(() => getMonthCells(visibleMonth), [visibleMonth]);
   const visibleMonthKey = getMonthKey(visibleMonth);
 
@@ -221,10 +224,10 @@ export default function CalendarScreen() {
     const query = searchText.trim().toLowerCase();
 
     return activity.filter((item) => {
-      const title = item.title || "";
-      const content = item.content || "";
-      const project = item.projectName || "";
-      const searchable = `${title} ${content} ${project}`.toLowerCase();
+      const searchable =
+        `${item.title || ""} ${item.content || ""} ${item.projectName || ""} ${
+          item.category || ""
+        } ${item.tags.join(" ")}`.toLowerCase();
 
       return (
         matchesFilter(item, activeFilter) &&
@@ -237,7 +240,6 @@ export default function CalendarScreen() {
     () => groupActivityByDay(filteredActivity),
     [filteredActivity],
   );
-
   const selectedActivity = groupedActivity[selectedDay] || [];
   const previousActivity = groupedActivity[previousDayKey] || [];
 
@@ -250,15 +252,12 @@ export default function CalendarScreen() {
   );
 
   const monthTotal = selectedMonthItems.length;
-
   const daysInVisibleMonth = new Date(
     visibleMonth.getFullYear(),
     visibleMonth.getMonth() + 1,
     0,
   ).getDate();
-
   const isCurrentMonth = visibleMonthKey === getMonthKey(new Date());
-
   const averagePerDay = monthTotal
     ? (
         monthTotal /
@@ -267,14 +266,19 @@ export default function CalendarScreen() {
     : "0.0";
 
   const noteCount = selectedMonthItems.filter(
-    (item) => item.type === "note",
+    (item) => item.type === "note" || item.type === "memory",
   ).length;
   const taskCount = selectedMonthItems.filter(
     (item) => getLabel(item) === "Task",
   ).length;
-  const healthCount = selectedMonthItems.filter(
+  const credentialCount = selectedMonthItems.filter(
     (item) => getLabel(item) === "Credentials",
   ).length;
+  const aiInsight = getInsight(
+    monthTotal,
+    averagePerDay,
+    selectedActivity.length,
+  );
 
   const loadActivity = useCallback(
     async (options?: { refreshing?: boolean }) => {
@@ -286,9 +290,7 @@ export default function CalendarScreen() {
         }
 
         setError("");
-
         const nextActivity = await listActivity({ limit: 500 });
-
         setActivity(nextActivity);
 
         const latest = nextActivity[0];
@@ -324,7 +326,6 @@ export default function CalendarScreen() {
         1,
       );
       const nextMonthKey = getMonthKey(next);
-
       const nextSelectedDay =
         nextMonthKey === getMonthKey(new Date())
           ? todayKey
@@ -348,49 +349,6 @@ export default function CalendarScreen() {
     }
   };
 
-  const renderLogCard = (item: ActivityItem) => {
-    const category = getCategoryStyle(item);
-
-    return (
-      <Pressable
-        key={`${item.type}-${item._id}`}
-        style={styles.logCard}
-        onPress={() =>
-          router.push({
-            pathname: "/activity/[type]/[id]",
-            params: {
-              id: item._id,
-              type: item.type,
-            },
-          })
-        }
-      >
-        <View style={styles.logTopRow}>
-          <View
-            style={[
-              styles.categoryPill,
-              {
-                backgroundColor: category.backgroundColor,
-              },
-            ]}
-          >
-            <Text style={[styles.categoryText, { color: category.color }]}>
-              {getLabel(item)}
-            </Text>
-          </View>
-
-          <Text style={styles.logTime}>
-            {timeFormatter.format(new Date(item.createdAt))}
-          </Text>
-        </View>
-
-        <Text numberOfLines={3} style={styles.logText}>
-          {item.content || item.title}
-        </Text>
-      </Pressable>
-    );
-  };
-
   const renderSection = (
     title: string,
     items: ActivityItem[],
@@ -402,22 +360,24 @@ export default function CalendarScreen() {
     const visibleItems = options?.limit ? items.slice(0, options.limit) : items;
 
     return (
-      <View style={styles.daySection}>
-        <View style={styles.daySectionHeader}>
-          <Text style={styles.daySectionTitle}>{title}</Text>
-
-          <Text style={styles.daySectionCount}>
-            {items.length} log{items.length === 1 ? "" : "s"}
+      <View style={styles.sectionBlock}>
+        <View style={styles.sectionHead}>
+          <Text style={styles.sectionBlockTitle}>{title}</Text>
+          <Text style={styles.sectionCount}>
+            {items.length} item{items.length === 1 ? "" : "s"}
           </Text>
         </View>
 
         {visibleItems.length ? (
-          visibleItems.map(renderLogCard)
+          visibleItems.map((item) => (
+            <MemoryCard key={`${item.type}-${item._id}`} memory={item} />
+          ))
         ) : (
           <View style={styles.emptyDayCard}>
             <Text style={styles.emptyDayTitle}>No logs here</Text>
             <Text style={styles.emptyDayText}>
-              Pick a marked date from the calendar to view your saved memories.
+              Pick a marked date or change filters to explore your saved
+              history.
             </Text>
           </View>
         )}
@@ -427,8 +387,10 @@ export default function CalendarScreen() {
             style={styles.viewAllButton}
             onPress={() => setShowAllPrevious(true)}
           >
-            <Text style={styles.viewAllText}>View all {items.length} logs</Text>
-            <Ionicons color="#9B6CFF" name="chevron-down" size={17} />
+            <Text style={styles.viewAllText}>
+              View all {items.length} items
+            </Text>
+            <Ionicons color={colors.primary} name="chevron-down" size={17} />
           </Pressable>
         ) : null}
       </View>
@@ -438,10 +400,11 @@ export default function CalendarScreen() {
   if (loading) {
     return (
       <SafeAreaView edges={["top"]} style={styles.screen}>
-        <View style={styles.centerState}>
-          <ActivityIndicator color="#8B5CF6" />
-          <Text style={styles.centerText}>Loading history...</Text>
-        </View>
+        <StateView
+          title="Loading history"
+          detail="Building your timeline."
+          loading
+        />
       </SafeAreaView>
     );
   }
@@ -449,13 +412,12 @@ export default function CalendarScreen() {
   if (error) {
     return (
       <SafeAreaView edges={["top"]} style={styles.screen}>
-        <View style={styles.centerState}>
-          <Text style={styles.errorText}>{error}</Text>
-
-          <Pressable style={styles.retryButton} onPress={() => loadActivity()}>
-            <Text style={styles.retryText}>Try again</Text>
-          </Pressable>
-        </View>
+        <StateView
+          title={error}
+          tone="error"
+          actionLabel="Try again"
+          onAction={() => loadActivity()}
+        />
       </SafeAreaView>
     );
   }
@@ -463,77 +425,121 @@ export default function CalendarScreen() {
   return (
     <SafeAreaView edges={["top"]} style={styles.screen}>
       <ScrollView
-        showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.content}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            tintColor="#8B5CF6"
-            colors={["#8B5CF6"]}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
             onRefresh={() => loadActivity({ refreshing: true })}
           />
         }
+        showsVerticalScrollIndicator={false}
       >
         <ScreenHeader mode="back" title="History" />
 
-        <View style={styles.searchBox}>
-          <Ionicons color="#A0A7B4" name="search" size={21} />
+        {/* <View style={styles.heroCard}>
+          <View style={styles.heroTopRow}>
+            <View style={styles.heroBadge}>
+              <Ionicons color={colors.primary} name="time-outline" size={14} />
+              <Text style={styles.heroBadgeText}>Timeline</Text>
+            </View>
+            <Text style={styles.heroMonth}>{monthFormatter.format(visibleMonth)}</Text>
+          </View>
 
-          <TextInput
-            value={searchText}
-            onChangeText={setSearchText}
-            placeholder="Search your memories..."
-            placeholderTextColor="#5F626B"
-            style={styles.searchInput}
-          />
+          <Text style={styles.heroTitle}>Browse your memory by date</Text>
+          <Text style={styles.heroInsight}>{aiInsight}</Text>
+
+          <View style={styles.metricRow}>
+            <View style={styles.metricCard}>
+              <Text style={styles.metricValue}>{monthTotal}</Text>
+              <Text style={styles.metricLabel}>this month</Text>
+            </View>
+            <View style={styles.metricCard}>
+              <Text style={styles.metricValue}>{averagePerDay}</Text>
+              <Text style={styles.metricLabel}>avg per day</Text>
+            </View>
+            <View style={styles.metricCard}>
+              <Text style={styles.metricValue}>{selectedActivity.length}</Text>
+              <Text style={styles.metricLabel}>selected day</Text>
+            </View>
+          </View>
+        </View> */}
+
+        <View style={styles.searchCard}>
+          <View style={styles.searchBox}>
+            <Ionicons color={colors.textSoft} name="search" size={20} />
+            <TextInput
+              value={searchText}
+              onChangeText={setSearchText}
+              placeholder="Search titles, content, projects, tags..."
+              placeholderTextColor={colors.textSoft}
+              style={styles.searchInput}
+            />
+          </View>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterRow}
+          >
+            {filters.map((filter) => {
+              const isActive = activeFilter === filter;
+
+              return (
+                <Pressable
+                  key={filter}
+                  style={[
+                    styles.filterChip,
+                    isActive && styles.activeFilterChip,
+                  ]}
+                  onPress={() => setActiveFilter(filter)}
+                >
+                  <Text
+                    style={[
+                      styles.filterText,
+                      isActive && styles.activeFilterText,
+                    ]}
+                  >
+                    {filter}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
         </View>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterRow}
-        >
-          {filters.map((filter) => {
-            const isActive = activeFilter === filter;
-
-            return (
-              <Pressable
-                key={filter}
-                style={[styles.filterChip, isActive && styles.activeFilterChip]}
-                onPress={() => setActiveFilter(filter)}
-              >
-                <Text
-                  style={[
-                    styles.filterText,
-                    isActive && styles.activeFilterText,
-                  ]}
-                >
-                  {filter}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-
         <View style={styles.calendarCard}>
-          <View style={styles.monthHeader}>
-            <Text style={styles.monthTitle}>
-              {monthFormatter.format(visibleMonth)}
-            </Text>
+          <View style={styles.calendarHead}>
+            <View>
+              <Text style={styles.calendarTitle}>
+                {monthFormatter.format(visibleMonth)}
+              </Text>
+              <Text style={styles.calendarCaption}>
+                Tap a day to inspect saved activity.
+              </Text>
+            </View>
 
             <View style={styles.monthControls}>
               <Pressable
                 style={styles.monthControlButton}
                 onPress={() => changeMonth(-1)}
               >
-                <Ionicons color="#A0A7B4" name="chevron-back" size={21} />
+                <Ionicons
+                  color={colors.textMuted}
+                  name="chevron-back"
+                  size={20}
+                />
               </Pressable>
-
               <Pressable
                 style={styles.monthControlButton}
                 onPress={() => changeMonth(1)}
               >
-                <Ionicons color="#A0A7B4" name="chevron-forward" size={21} />
+                <Ionicons
+                  color={colors.textMuted}
+                  name="chevron-forward"
+                  size={20}
+                />
               </Pressable>
             </View>
           </View>
@@ -560,9 +566,7 @@ export default function CalendarScreen() {
                   key={cell.key}
                   style={[
                     styles.dayCell,
-                    {
-                      width: dayCellSize,
-                    },
+                    { width: dayCellSize, height: dayCellSize + 6 },
                     isSelected && styles.selectedDayCell,
                     isToday && !isSelected && styles.todayDayCell,
                   ]}
@@ -580,7 +584,7 @@ export default function CalendarScreen() {
                     {cell.day}
                   </Text>
 
-                  {!isSelected ? (
+                  {count > 0 ? (
                     <View style={styles.dotRow}>
                       {(groupedActivity[dateKey] || [])
                         .slice(0, 3)
@@ -589,17 +593,53 @@ export default function CalendarScreen() {
                             key={`${item.type}-${item._id}`}
                             style={[
                               styles.dot,
-                              {
-                                backgroundColor: getMarkerColor(item),
-                              },
+                              { backgroundColor: getMarkerColor(item) },
                             ]}
                           />
                         ))}
                     </View>
-                  ) : null}
+                  ) : (
+                    <View style={styles.dotRowPlaceholder} />
+                  )}
                 </Pressable>
               );
             })}
+          </View>
+        </View>
+
+        <View style={styles.statsPanel}>
+          <View style={styles.statsHeader}>
+            <Text style={styles.statsTitle}>Month snapshot</Text>
+            <Text style={styles.statsSubtitle}>
+              {monthFormatter.format(visibleMonth)}
+            </Text>
+          </View>
+
+          <View style={styles.statsList}>
+            <View style={styles.statsRow}>
+              <View
+                style={[
+                  styles.statsDot,
+                  { backgroundColor: colors.reminderTag },
+                ]}
+              />
+              <Text style={styles.statsName}>Notes and memories</Text>
+              <Text style={styles.statsValue}>{noteCount}</Text>
+            </View>
+            <View style={styles.statsRow}>
+              <View
+                style={[styles.statsDot, { backgroundColor: colors.secondary }]}
+              />
+              <Text style={styles.statsName}>Tasks</Text>
+              <Text style={styles.statsValue}>{taskCount}</Text>
+            </View>
+            <View style={styles.statsRow}>
+              <View
+                style={[styles.statsDot, { backgroundColor: colors.success }]}
+              />
+              <Text style={styles.statsName}>Credentials</Text>
+              <Text style={styles.statsValue}>{credentialCount}</Text>
+            </View>
           </View>
         </View>
 
@@ -615,161 +655,195 @@ export default function CalendarScreen() {
               },
             )
           : null}
-
-        <View style={styles.monthStatsPanel}>
-          <Text style={styles.statsTitle}>This Month</Text>
-
-          <View style={styles.statCardsRow}>
-            <View style={styles.statCard}>
-              <Text style={styles.statValue}>{monthTotal}</Text>
-              <Text style={styles.statLabel}>Total Logs</Text>
-            </View>
-
-            <View style={styles.statCard}>
-              <Text style={styles.statValue}>{averagePerDay}</Text>
-              <Text style={styles.statLabel}>Avg per Day</Text>
-            </View>
-          </View>
-
-          <View style={styles.categoryCard}>
-            <Text style={styles.categoryCardTitle}>Most Active Categories</Text>
-
-            <View style={styles.categoryRow}>
-              <View
-                style={[styles.categoryDot, { backgroundColor: "#8B5CF6" }]}
-              />
-              <Text style={styles.categoryName}>Notes</Text>
-              <Text style={styles.categoryValue}>{noteCount}</Text>
-            </View>
-
-            <View style={styles.categoryRow}>
-              <View
-                style={[styles.categoryDot, { backgroundColor: "#3B82F6" }]}
-              />
-              <Text style={styles.categoryName}>Tasks</Text>
-              <Text style={styles.categoryValue}>{taskCount}</Text>
-            </View>
-
-            <View style={styles.categoryRow}>
-              <View
-                style={[styles.categoryDot, { backgroundColor: "#18C58B" }]}
-              />
-              <Text style={styles.categoryName}>Credentials</Text>
-              <Text style={styles.categoryValue}>{healthCount}</Text>
-            </View>
-          </View>
-        </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-const cardShadow = {
-  shadowColor: "#000000",
-  shadowOffset: {
-    width: 0,
-    height: 8,
-  },
-  shadowOpacity: 0.045,
-  shadowRadius: 18,
-  elevation: 3,
-};
-
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: colors.background,
   },
   content: {
     paddingHorizontal: 22,
-    // paddingTop: 16,
     paddingBottom: 120,
+  },
+  heroCard: {
+    backgroundColor: "#F8FBFF",
+    borderColor: "#E7EEF8",
+    borderRadius: 28,
+    borderWidth: 1,
+    marginBottom: 16,
+    padding: 18,
+    ...subtleShadow,
+  },
+  heroTopRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  heroBadge: {
+    alignItems: "center",
+    backgroundColor: colors.white,
+    borderColor: colors.border,
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
+  heroBadgeText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  heroMonth: {
+    color: colors.textSoft,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  heroTitle: {
+    color: colors.text,
+    fontSize: 28,
+    fontWeight: "900",
+    lineHeight: 34,
+  },
+  heroInsight: {
+    color: colors.textMuted,
+    fontSize: 15,
+    fontWeight: "600",
+    lineHeight: 23,
+    marginTop: 10,
+  },
+  metricRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 18,
+  },
+  metricCard: {
+    backgroundColor: colors.white,
+    borderRadius: 18,
+    flex: 1,
+    minHeight: 86,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  metricValue: {
+    color: colors.text,
+    fontSize: 24,
+    fontWeight: "900",
+  },
+  metricLabel: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 5,
+  },
+  searchCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 24,
+    borderWidth: 1,
+    marginBottom: 16,
+    padding: 16,
+    ...subtleShadow,
   },
   searchBox: {
     alignItems: "center",
-    backgroundColor: "#F8F9FB",
-    borderColor: "#EEF0F4",
-    borderRadius: 11,
+    backgroundColor: colors.backgroundSoft,
+    borderColor: colors.border,
+    borderRadius: 16,
     borderWidth: 1,
     flexDirection: "row",
     gap: 12,
-    height: 48,
-    marginBottom: 17,
+    height: 50,
     paddingHorizontal: 16,
   },
   searchInput: {
-    color: "#202126",
+    color: colors.text,
     flex: 1,
     fontSize: 15,
     fontWeight: "700",
     padding: 0,
   },
   filterRow: {
-    gap: 9,
-    marginBottom: 43,
-    paddingRight: 26,
+    gap: 10,
+    paddingRight: 10,
+    paddingTop: 14,
   },
   filterChip: {
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    borderColor: "#EEF0F4",
+    backgroundColor: colors.white,
+    borderColor: colors.border,
     borderRadius: 999,
     borderWidth: 1,
     height: 36,
     justifyContent: "center",
-    minWidth: 75,
-    paddingHorizontal: 17,
+    minWidth: 78,
+    paddingHorizontal: 16,
   },
   activeFilterChip: {
-    backgroundColor: "#17171D",
-    borderColor: "#17171D",
+    backgroundColor: colors.text,
+    borderColor: colors.text,
   },
   filterText: {
-    color: "#747B89",
+    color: colors.textMuted,
     fontSize: 13,
     fontWeight: "800",
   },
   activeFilterText: {
-    color: "#FFFFFF",
+    color: colors.white,
   },
   calendarCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 14,
-    marginBottom: 42,
-    paddingHorizontal: 22,
-    paddingTop: 26,
-    paddingBottom: 25,
-    ...cardShadow,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 28,
+    borderWidth: 1,
+    marginBottom: 16,
+    padding: 18,
+    ...subtleShadow,
   },
-  monthHeader: {
+  calendarHead: {
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 30,
+    marginBottom: 18,
   },
-  monthTitle: {
-    color: "#202126",
+  calendarTitle: {
+    color: colors.text,
     fontSize: 18,
     fontWeight: "900",
-    letterSpacing: -0.3,
+  },
+  calendarCaption: {
+    color: colors.textSoft,
+    fontSize: 13,
+    fontWeight: "700",
+    marginTop: 4,
   },
   monthControls: {
     alignItems: "center",
     flexDirection: "row",
-    gap: 18,
+    gap: 10,
   },
   monthControlButton: {
     alignItems: "center",
-    height: 28,
+    backgroundColor: colors.backgroundSoft,
+    borderColor: colors.border,
+    borderRadius: 999,
+    borderWidth: 1,
+    height: 38,
     justifyContent: "center",
-    width: 28,
+    width: 38,
   },
   weekdayRow: {
     flexDirection: "row",
-    marginBottom: 17,
+    marginBottom: 10,
   },
   weekdayText: {
-    color: "#A8ADB8",
+    color: colors.textSoft,
     flex: 1,
     fontSize: 12,
     fontWeight: "800",
@@ -778,251 +852,152 @@ const styles = StyleSheet.create({
   calendarGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
+    gap: 4,
     justifyContent: "space-between",
-    rowGap: 8,
   },
   dayCell: {
     alignItems: "center",
-    borderRadius: 9,
-    height: 42,
+    borderRadius: 16,
     justifyContent: "center",
+    marginBottom: 4,
   },
   selectedDayCell: {
-    backgroundColor: "#8A5CF6CA",
-    borderRadius: 30,
+    backgroundColor: colors.text,
   },
   todayDayCell: {
-    borderColor: "#17171D",
-    borderWidth: 1,
+    backgroundColor: colors.accentSurface,
   },
   dayText: {
-    color: "#4E515A",
-    fontSize: 14,
+    color: colors.textMuted,
+    fontSize: 15,
     fontWeight: "800",
-    lineHeight: 17,
-  },
-  activeDayText: {
-    color: "#34363D",
   },
   mutedDayText: {
-    color: "#D4D8DF",
+    color: "#D0D5DF",
   },
   futureDayText: {
-    color: "#B8BEC8",
+    color: "#C2C8D2",
+  },
+  activeDayText: {
+    color: colors.text,
   },
   selectedDayText: {
-    color: "#FFFFFF",
+    color: colors.white,
   },
   dotRow: {
     alignItems: "center",
     flexDirection: "row",
     gap: 3,
-    height: 6,
-    justifyContent: "center",
-    marginTop: 3,
+    height: 12,
+    marginTop: 6,
+  },
+  dotRowPlaceholder: {
+    height: 12,
+    marginTop: 6,
   },
   dot: {
     borderRadius: 999,
-    height: 4,
-    width: 4,
+    height: 5,
+    width: 5,
   },
-  daySection: {
-    marginBottom: 26,
+  statsPanel: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 24,
+    borderWidth: 1,
+    marginBottom: 18,
+    padding: 18,
+    ...subtleShadow,
   },
-  daySectionHeader: {
-    alignItems: "flex-start",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 17,
-  },
-  daySectionTitle: {
-    color: "#202126",
-    flex: 1,
-    fontSize: 18,
-    fontWeight: "900",
-    letterSpacing: -0.3,
-    lineHeight: 24,
-  },
-  daySectionCount: {
-    color: "#A8ADB8",
-    fontSize: 13,
-    fontWeight: "800",
-    marginTop: 2,
-  },
-  logCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 11,
-    marginBottom: 16,
-    paddingHorizontal: 18,
-    paddingTop: 17,
-    paddingBottom: 18,
-    ...cardShadow,
-  },
-  logTopRow: {
+  statsHeader: {
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 13,
+    marginBottom: 14,
   },
-  categoryPill: {
-    borderRadius: 5,
-    paddingHorizontal: 9,
-    paddingVertical: 6,
-  },
-  categoryText: {
-    fontSize: 13,
+  statsTitle: {
+    color: colors.text,
+    fontSize: 18,
     fontWeight: "900",
   },
-  logTime: {
-    color: "#A8ADB8",
+  statsSubtitle: {
+    color: colors.textSoft,
     fontSize: 13,
     fontWeight: "700",
   },
-  logText: {
-    color: "#747B89",
-    fontSize: 16,
-    fontWeight: "600",
-    lineHeight: 24,
+  statsList: {
+    gap: 12,
   },
-  viewAllButton: {
+  statsRow: {
     alignItems: "center",
-    alignSelf: "center",
     flexDirection: "row",
-    gap: 5,
-    marginTop: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
   },
-  viewAllText: {
-    color: "#9B6CFF",
+  statsDot: {
+    borderRadius: 999,
+    height: 8,
+    marginRight: 10,
+    width: 8,
+  },
+  statsName: {
+    color: colors.textMuted,
+    flex: 1,
     fontSize: 15,
-    fontWeight: "800",
+    fontWeight: "700",
+  },
+  statsValue: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  sectionBlock: {
+    marginBottom: 20,
+  },
+  sectionHead: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  sectionBlockTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  sectionCount: {
+    color: colors.textSoft,
+    fontSize: 13,
+    fontWeight: "700",
   },
   emptyDayCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 11,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 20,
+    borderWidth: 1,
     padding: 18,
-    ...cardShadow,
+    ...subtleShadow,
   },
   emptyDayTitle: {
-    color: "#202126",
+    color: colors.text,
     fontSize: 16,
     fontWeight: "900",
-    marginBottom: 6,
   },
   emptyDayText: {
-    color: "#747B89",
+    color: colors.textMuted,
     fontSize: 14,
     fontWeight: "600",
     lineHeight: 21,
+    marginTop: 6,
   },
-  monthStatsPanel: {
-    backgroundColor: "#F7F8FA",
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    marginHorizontal: -26,
-    marginTop: 31,
-    paddingHorizontal: 26,
-    paddingTop: 28,
-    paddingBottom: 26,
-  },
-  statsTitle: {
-    color: "#202126",
-    fontSize: 18,
-    fontWeight: "900",
-    letterSpacing: -0.3,
-    marginBottom: 20,
-  },
-  statCardsRow: {
+  viewAllButton: {
+    alignItems: "center",
+    alignSelf: "flex-start",
     flexDirection: "row",
-    gap: 18,
-    marginBottom: 18,
+    gap: 6,
+    marginTop: 4,
   },
-  statCard: {
-    alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 13,
-    flex: 1,
-    minHeight: 92,
-    justifyContent: "center",
-    paddingVertical: 16,
-    ...cardShadow,
-  },
-  statValue: {
-    color: "#202126",
-    fontSize: 31,
-    fontWeight: "900",
-    letterSpacing: -1,
-  },
-  statLabel: {
-    color: "#85868E",
-    fontSize: 13,
-    fontWeight: "600",
-    marginTop: 3,
-  },
-  categoryCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 13,
-    paddingHorizontal: 18,
-    paddingTop: 19,
-    paddingBottom: 18,
-    ...cardShadow,
-  },
-  categoryCardTitle: {
-    color: "#747B89",
-    fontSize: 13,
-    fontWeight: "800",
-    marginBottom: 14,
-  },
-  categoryRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    marginTop: 13,
-  },
-  categoryDot: {
-    borderRadius: 999,
-    height: 8,
-    marginRight: 12,
-    width: 8,
-  },
-  categoryName: {
-    color: "#34363D",
-    flex: 1,
-    fontSize: 16,
-    fontWeight: "800",
-  },
-  categoryValue: {
-    color: "#5E6470",
-    fontSize: 16,
-    fontWeight: "900",
-  },
-  centerState: {
-    alignItems: "center",
-    flex: 1,
-    gap: 12,
-    justifyContent: "center",
-    paddingHorizontal: 24,
-  },
-  centerText: {
-    color: "#747B89",
+  viewAllText: {
+    color: colors.primary,
     fontSize: 14,
-    fontWeight: "700",
-  },
-  errorText: {
-    color: "#EF4444",
-    fontSize: 15,
-    fontWeight: "700",
-    textAlign: "center",
-  },
-  retryButton: {
-    backgroundColor: "#17171D",
-    borderRadius: 999,
-    paddingHorizontal: 18,
-    paddingVertical: 11,
-  },
-  retryText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "900",
+    fontWeight: "800",
   },
 });

@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { NextResponse } from 'next/server';
 
 import { validateApiKey } from '@/lib/apiKey';
+import { normalizeMemoryCategory } from '@/lib/memoryCategories';
 import { connectDB } from '@/lib/mongodb';
 import Memory from '@/models/Memory';
 import '@/models/Project';
@@ -24,7 +25,8 @@ const allowedUpdateFields = [
   'kind',
   'projectId',
   'reminderAt',
-  'notificationEnabled'
+  'notificationEnabled',
+  'importance'
 ] as const;
 
 const getErrorMessage = (error: unknown) =>
@@ -165,6 +167,13 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
 
     const updates = pickMemoryUpdates(body as Record<string, unknown>);
+
+    if (Object.prototype.hasOwnProperty.call(updates, 'category')) {
+      updates.category = normalizeMemoryCategory(updates.category, {
+        allowVault: updates.kind === 'credential',
+        fallback: 'general'
+      });
+    }
     const projectIdError = validateProjectId(updates.projectId);
 
     if (projectIdError) {

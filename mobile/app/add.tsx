@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -17,6 +17,8 @@ import DateTimePicker, {
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ALLOWED_CATEGORIES } from '../../lib/memoryCategories';
+import { generateMetadata, getFallbackMetadata } from '../services/ai';
 import {
   createMemory,
   listProjects,
@@ -31,7 +33,7 @@ type SaveMode = {
   label: string;
   helper: string;
   kind: MemoryKind;
-  category: string;
+  fallbackCategory: string;
   color: string;
 };
 
@@ -41,7 +43,7 @@ const saveModes: SaveMode[] = [
     label: 'Personal',
     helper: 'Memory or note',
     kind: 'note',
-    category: 'personal',
+    fallbackCategory: 'personal',
     color: colors.personalTag
   },
   {
@@ -49,7 +51,7 @@ const saveModes: SaveMode[] = [
     label: 'Work',
     helper: 'Task or work item',
     kind: 'task',
-    category: 'work',
+    fallbackCategory: 'task',
     color: colors.workTag
   },
   {
@@ -57,7 +59,7 @@ const saveModes: SaveMode[] = [
     label: 'Reminder',
     helper: 'Notify me later',
     kind: 'note',
-    category: 'reminder',
+    fallbackCategory: 'reminder',
     color: colors.reminderTag
   },
   {
@@ -65,7 +67,7 @@ const saveModes: SaveMode[] = [
     label: 'Project',
     helper: 'Requirement or context',
     kind: 'requirement',
-    category: 'project',
+    fallbackCategory: 'projects',
     color: colors.projectTag
   }
 ];
@@ -130,17 +132,22 @@ export default function AddScreen() {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [selectedMode, setSelectedMode] = useState<SaveMode>(initialMode);
-  const [category, setCategory] = useState(initialMode.category);
+  const [category, setCategory] = useState(initialMode.fallbackCategory);
   const [tags, setTags] = useState('');
+  const [importance, setImportance] = useState(3);
+  const [metadataSource, setMetadataSource] = useState('');
+  const [isGeneratingMetadata, setIsGeneratingMetadata] = useState(false);
+  const [userEditedTitle, setUserEditedTitle] = useState(false);
   const [reminderAt, setReminderAt] = useState(getDefaultReminderAt);
   const [activePicker, setActivePicker] = useState<'date' | 'time' | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState(projectIdParam || '');
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [showMore, setShowMore] = useState(shouldShowExtraFields(modeParam, projectIdParam));
-  const [showDescription, setShowDescription] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  const generationIdRef = useRef(0);
 
   useEffect(() => {
     let mounted = true;
@@ -175,33 +182,86 @@ export default function AddScreen() {
     const nextMode = getModeById(modeParam);
 
     setSelectedMode(nextMode);
-    setCategory(nextMode.category);
+
+    if (!metadataSource) {
+      setCategory(nextMode.fallbackCategory);
+    }
 
     if (shouldShowExtraFields(modeParam, projectIdParam)) {
       setShowMore(true);
     }
-  }, [modeParam, projectIdParam]);
+  }, [modeParam, metadataSource, projectIdParam]);
 
   useEffect(() => {
     if (draftParam) {
-      setTitle(draftParam);
+      setContent(draftParam);
     }
   }, [draftParam]);
 
-  const selectMode = (mode: SaveMode) => {
-    setSelectedMode(mode);
-    setCategory(mode.category);
+  const applyMetadata = (
+    nextContent: string,
+    metadata: Awaited<ReturnType<typeof generateMetadata>>,
+    options?: { forceTitle?: boolean }
+  ) => {
+    const normalizedContent = nextContent.trim();
+
+    if (!normalizedContent) {
+      return;
+    }
+
+    if (options?.forceTitle || !title.trim() || !userEditedTitle || metadataSource !== normalizedContent) {
+      setTitle(metadata.title);
+      setUserEditedTitle(false);
+    }
+
+    setCategory(metadata.category);
+    setTags(metadata.tags.join(', '));
+    setImportance(metadata.importance);
+    setMetadataSource(normalizedContent);
   };
 
-  const prepareMemoryFields = () => {
-    const trimmedTitle = title.trim();
-    const trimmedContent = content.trim();
+  const runMetadataGeneration = async (
+    nextContent: string,
+    options?: { forceTitle?: boolean }
+  ) => {
+    const normalizedContent = nextContent.trim();
 
-    return {
-      savedTitle: trimmedTitle,
-      savedContent: trimmedContent || undefined
-    };
+    if (!normalizedContent) {
+      return getFallbackMetadata();
+    }
+
+    const requestId = generationIdRef.current + 1;
+    generationIdRef.current = requestId;
+    setIsGeneratingMetadata(true);
+
+    try {
+      const metadata = await generateMetadata(normalizedContent);
+
+      if (generationIdRef.current === requestId) {
+        applyMetadata(normalizedContent, metadata, options);
+      }
+
+      return metadata;
+    } finally {
+      if (generationIdRef.current === requestId) {
+        setIsGeneratingMetadata(false);
+      }
+    }
   };
+
+  useEffect(() => {
+    const normalizedContent = content.trim();
+
+    if (normalizedContent.length < 12 || normalizedContent === metadataSource) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      void runMetadataGeneration(normalizedContent);
+    }, 900);
+
+    return () => clearTimeout(timeout);
+  }, [content, metadataSource]);
 
   const cancel = () => {
     router.replace('/');
@@ -241,9 +301,19 @@ export default function AddScreen() {
     }
   };
 
+  const regenerateMetadata = async () => {
+    if (!content.trim()) {
+      setError('Write the content first');
+      return;
+    }
+
+    setError('');
+    await runMetadataGeneration(content, { forceTitle: true });
+  };
+
   const saveMemory = async () => {
-    if (!title.trim()) {
-      setError('Title is required');
+    if (!content.trim()) {
+      setError('Content is required');
       return;
     }
 
@@ -251,9 +321,16 @@ export default function AddScreen() {
       setSaving(true);
       setError('');
 
+      const normalizedContent = content.trim();
+      const metadata =
+        metadataSource === normalizedContent && title.trim()
+          ? null
+          : await runMetadataGeneration(normalizedContent, { forceTitle: !title.trim() });
+
+      const fallbackMetadata = getFallbackMetadata();
       const parsedTags = parseTags(tags);
-      const { savedTitle, savedContent } = prepareMemoryFields();
       const reminderAtDate = selectedMode.id === 'reminder' ? reminderAt : null;
+      const resolvedMetadata = metadata || fallbackMetadata;
 
       if (reminderAtDate && reminderAtDate.getTime() <= Date.now()) {
         setError('Reminder time must be in the future');
@@ -261,10 +338,12 @@ export default function AddScreen() {
       }
 
       const memory = await createMemory({
-        title: savedTitle,
-        content: savedContent,
-        category: category.trim() || selectedMode.category,
-        tags: parsedTags.length ? parsedTags : undefined,
+        title: title.trim() || resolvedMetadata.title,
+        content: normalizedContent,
+        category:
+          category.trim() || resolvedMetadata.category || selectedMode.fallbackCategory,
+        tags: parsedTags.length ? parsedTags : resolvedMetadata.tags,
+        importance,
         kind: selectedMode.kind,
         projectId: selectedProjectId || undefined,
         reminderAt: reminderAtDate?.toISOString(),
@@ -307,66 +386,36 @@ export default function AddScreen() {
             </Pressable>
           </View>
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.modeRow}
-            style={styles.modeScroller}
-          >
-            {saveModes.map((mode) => {
-              const selected = selectedMode.label === mode.label;
-
-              return (
-                <Pressable
-                  key={mode.label}
-                  style={[
-                    styles.modeChip,
-                    selected && {
-                      backgroundColor: `${mode.color}20`,
-                      borderColor: mode.color
-                    }
-                  ]}
-                  onPress={() => selectMode(mode)}
-                >
-                  <View style={[styles.modeDot, { backgroundColor: mode.color }]} />
-                  <Text style={styles.modeLabel}>{mode.label}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-
           <View style={styles.panel}>
-            <Text style={styles.label}>Title</Text>
+            <Text style={styles.label}>Content</Text>
             <TextInput
-              value={title}
-              onChangeText={setTitle}
-              placeholder="What should I remember?"
-              placeholderTextColor={colors.textSoft}
-              style={styles.input}
+              value={content}
+              onChangeText={setContent}
               multiline
+              placeholder="Write what happened, what you need to save, or what to remember"
+              placeholderTextColor={colors.textSoft}
+              style={[styles.input, styles.textArea]}
+              textAlignVertical="top"
             />
 
-            {showDescription ? (
-              <>
-                <Text style={styles.label}>Description</Text>
-                <TextInput
-                  value={content}
-                  onChangeText={setContent}
-                  multiline
-                  placeholder="Add extra context if needed"
-                  placeholderTextColor={colors.textSoft}
-                  style={[styles.input, styles.textArea]}
-                  textAlignVertical="top"
-                />
-              </>
-            ) : (
-              <Pressable
-                style={styles.addDescriptionButton}
-                onPress={() => setShowDescription(true)}
-              >
-                <Text style={styles.addDescriptionText}>+ Add description</Text>
+            <View style={styles.metadataHeader}>
+              <Text style={styles.label}>AI Generated Title</Text>
+              <Pressable style={styles.regenerateLink} onPress={() => void regenerateMetadata()}>
+                <Text style={styles.regenerateLinkText}>
+                  {isGeneratingMetadata ? 'Generating...' : 'Regenerate'}
+                </Text>
               </Pressable>
-            )}
+            </View>
+            <TextInput
+              value={title}
+              onChangeText={(value) => {
+                setTitle(value);
+                setUserEditedTitle(true);
+              }}
+              placeholder="AI will generate a title"
+              placeholderTextColor={colors.textSoft}
+              style={styles.input}
+            />
 
             {selectedMode.id === 'reminder' ? (
               <View style={styles.reminderBox}>
@@ -434,12 +483,69 @@ export default function AddScreen() {
 
           <Pressable style={styles.moreButton} onPress={() => setShowMore((current) => !current)}>
             <Text style={styles.moreButtonText}>
-              {showMore ? 'Hide project and tags' : 'Project, category, tags'}
+              {showMore ? 'Hide details' : 'More details'}
             </Text>
           </Pressable>
 
           {showMore ? (
             <View style={styles.panel}>
+              <Text style={styles.label}>AI Category</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.chipRow}
+              >
+                {ALLOWED_CATEGORIES.map((item) => {
+                  const selected = category === item;
+
+                  return (
+                    <Pressable
+                      key={item}
+                      onPress={() => setCategory(item)}
+                      style={[styles.chip, selected && styles.selectedChip]}
+                    >
+                      <Text style={[styles.chipText, selected && styles.selectedChipText]}>
+                        {item}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+
+              <Text style={styles.label}>Tags</Text>
+              <TextInput
+                value={tags}
+                onChangeText={setTags}
+                placeholder="comma, separated"
+                placeholderTextColor={colors.textSoft}
+                autoCapitalize="none"
+                style={styles.input}
+              />
+
+              <Text style={styles.label}>Importance</Text>
+              <View style={styles.importanceRow}>
+                {[1, 2, 3, 4, 5].map((value) => {
+                  const selected = importance === value;
+
+                  return (
+                    <Pressable
+                      key={value}
+                      onPress={() => setImportance(value)}
+                      style={[styles.importanceChip, selected && styles.selectedImportanceChip]}
+                    >
+                      <Text
+                        style={[
+                          styles.importanceChipText,
+                          selected && styles.selectedImportanceChipText
+                        ]}
+                      >
+                        {value}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
               <Text style={styles.label}>Project</Text>
               {projectsLoading ? (
                 <ActivityIndicator color={colors.primary} style={styles.inlineLoader} />
@@ -474,25 +580,6 @@ export default function AddScreen() {
                   })}
                 </ScrollView>
               )}
-
-              <Text style={styles.label}>Category</Text>
-              <TextInput
-                value={category}
-                onChangeText={setCategory}
-                placeholder="personal"
-                placeholderTextColor={colors.textSoft}
-                style={styles.input}
-              />
-
-              <Text style={styles.label}>Tags</Text>
-              <TextInput
-                value={tags}
-                onChangeText={setTags}
-                placeholder="comma, separated"
-                placeholderTextColor={colors.textSoft}
-                autoCapitalize="none"
-                style={styles.input}
-              />
             </View>
           ) : null}
 
@@ -557,36 +644,6 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontWeight: '900'
   },
-  modeScroller: {
-    flexGrow: 0,
-    marginBottom: 14
-  },
-  modeRow: {
-    gap: 8,
-    paddingRight: 18
-  },
-  modeChip: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 999,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 9,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    ...subtleShadow
-  },
-  modeDot: {
-    borderRadius: 999,
-    height: 10,
-    width: 10
-  },
-  modeLabel: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '900'
-  },
   panel: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
@@ -609,38 +666,54 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     color: colors.text,
     fontSize: 16,
-    maxHeight: 96,
     paddingHorizontal: 13,
     paddingVertical: 12
   },
   textArea: {
     lineHeight: 22,
-    minHeight: 118
+    minHeight: 132
   },
-  addDescriptionButton: {
-    alignSelf: 'flex-start',
-    marginTop: 12,
-    paddingVertical: 7
+  metadataHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between'
   },
-  addDescriptionText: {
-    color: colors.accentPressed,
-    fontWeight: '900'
+  regenerateLink: {
+    paddingTop: 12
+  },
+  regenerateLinkText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: '800'
+  },
+  importanceRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4
+  },
+  importanceChip: {
+    alignItems: 'center',
+    backgroundColor: colors.backgroundSoft,
+    borderColor: colors.border,
+    borderRadius: 999,
+    borderWidth: 1,
+    height: 38,
+    justifyContent: 'center',
+    width: 38
+  },
+  selectedImportanceChip: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary
+  },
+  importanceChipText: {
+    color: colors.textMuted,
+    fontWeight: '800'
+  },
+  selectedImportanceChipText: {
+    color: colors.white
   },
   reminderBox: {
-    marginTop: 12
-  },
-  pickerButton: {
-    backgroundColor: colors.background,
-    borderColor: colors.border,
-    borderRadius: 14,
-    borderWidth: 1,
-    paddingHorizontal: 13,
-    paddingVertical: 14
-  },
-  pickerButtonText: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: '800'
+    marginTop: 6
   },
   pickerInline: {
     alignItems: 'flex-start',
@@ -648,40 +721,50 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: 14,
     borderWidth: 1,
-    minHeight: 48,
-    justifyContent: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6
+    paddingHorizontal: 8,
+    paddingVertical: 8
+  },
+  pickerButton: {
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 13,
+    paddingVertical: 12
+  },
+  pickerButtonText: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '700'
   },
   moreButton: {
     alignItems: 'center',
-    alignSelf: 'center',
-    marginVertical: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 8
+    marginTop: 14,
+    paddingVertical: 10
   },
   moreButtonText: {
     color: colors.textMuted,
-    fontWeight: '900'
+    fontSize: 13,
+    fontWeight: '800'
   },
   chipRow: {
     gap: 8,
-    paddingRight: 8
+    paddingRight: 18
   },
   chip: {
-    backgroundColor: colors.surfaceMuted,
+    backgroundColor: colors.backgroundSoft,
     borderColor: colors.border,
     borderRadius: 999,
     borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 9
+    paddingHorizontal: 14,
+    paddingVertical: 10
   },
   selectedChip: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent
+    backgroundColor: colors.primary,
+    borderColor: colors.primary
   },
   chipText: {
-    color: colors.textMuted,
+    color: colors.text,
     fontSize: 13,
     fontWeight: '800'
   },
@@ -689,30 +772,25 @@ const styles = StyleSheet.create({
     color: colors.white
   },
   inlineLoader: {
-    alignSelf: 'flex-start',
-    paddingVertical: 10
+    marginVertical: 16
+  },
+  errorText: {
+    color: colors.danger,
+    marginTop: 16,
+    textAlign: 'center'
   },
   primaryButton: {
     alignItems: 'center',
-    backgroundColor: colors.accent,
+    backgroundColor: colors.black,
     borderRadius: 999,
     marginTop: 18,
-    padding: 16
+    padding: 14
   },
   disabledButton: {
     opacity: 0.7
   },
   primaryButtonText: {
     color: colors.white,
-    fontSize: 16,
-    fontWeight: '900'
-  },
-  errorText: {
-    backgroundColor: colors.dangerSurface,
-    borderRadius: 14,
-    color: colors.danger,
-    marginTop: 14,
-    padding: 12,
-    textAlign: 'center'
+    fontWeight: '800'
   }
 });

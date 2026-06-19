@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { NextResponse } from 'next/server';
 
 import { validateApiKey } from '@/lib/apiKey';
+import { normalizeMemoryCategory } from '@/lib/memoryCategories';
 import { connectDB } from '@/lib/mongodb';
 import { getFallbackTitle } from '@/lib/titleFallback';
 import Memory from '@/models/Memory';
@@ -49,9 +50,22 @@ const buildCreatePayload = (body: Record<string, unknown>) => {
     ...body,
     title: incomingTitle || getFallbackTitle(titleSource, type || 'memory'),
     content,
-    category:
+    category: normalizeMemoryCategory(
       getString(body.category) ||
-      (type === 'log' ? 'log' : type === 'reminder' ? 'reminder' : undefined),
+        (type === 'reminder'
+          ? 'reminder'
+          : type === 'task'
+            ? 'task'
+            : type === 'meeting'
+              ? 'meeting'
+              : type === 'log'
+                ? 'general'
+                : undefined),
+      {
+        allowVault: getString(body.kind) === 'credential',
+        fallback: type === 'task' ? 'task' : type === 'meeting' ? 'meeting' : 'general'
+      }
+    ),
     kind:
       type === 'log'
         ? 'work_done'
