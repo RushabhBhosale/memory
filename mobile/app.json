@@ -13,6 +13,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "android": {
+      "package": "com.anonymous.memorymobile"
+    },
+    "ios": {
+      "bundleIdentifier": "com.anonymous.memorymobile"
     }
   }
 }

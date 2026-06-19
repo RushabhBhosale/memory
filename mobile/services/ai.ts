@@ -1,4 +1,4 @@
-import { ALLOWED_CATEGORIES } from '../../lib/memoryCategories';
+import { ALLOWED_CATEGORIES } from '../constants/memoryCategories';
 
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 const FALLBACK_METADATA = {

@@ -1,0 +1,5 @@
+#!/bin/sh
+
+NODE_BINARY="/Users/mac/.nvm/versions/node/v20.20.2/bin/node"
+
+exec "$NODE_BINARY" "$@"

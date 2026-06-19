@@ -17,7 +17,7 @@ import DateTimePicker, {
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ALLOWED_CATEGORIES } from '../../lib/memoryCategories';
+import { ALLOWED_CATEGORIES } from '../constants/memoryCategories';
 import { generateMetadata, getFallbackMetadata } from '../services/ai';
 import {
   createMemory,
