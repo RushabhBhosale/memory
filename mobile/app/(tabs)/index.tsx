@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -20,12 +20,24 @@ import { StateView } from "../../components/StateView";
 import {
   createMemory,
   listActivity,
+  listDesktopActivity,
   listMemories,
   listProjects,
   type ActivityItem,
+  type DesktopActivity,
+  type Memory,
+  type Project,
 } from "../../services/api";
-import { scheduleMemoryReminder, scheduleUpcomingMemoryReminders } from "../../services/notifications";
+import {
+  scheduleMemoryReminder,
+  scheduleUpcomingMemoryReminders,
+} from "../../services/notifications";
 import { colors, subtleShadow } from "../../styles/theme";
+import {
+  isHomeCacheFresh,
+  readHomeCache,
+  writeHomeCache,
+} from "../../utils/homeCache";
 import { parseQuickReminder } from "../../utils/quickReminder";
 
 const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -123,9 +135,13 @@ const getMetricFilteredActivity = (
       );
     }
     case "notes":
-      return items.filter((item) => item.type === "note" || item.type === "memory");
+      return items.filter(
+        (item) => item.type === "note" || item.type === "memory",
+      );
     case "tasks":
-      return items.filter((item) => item.type === "task" || item.kind === "task");
+      return items.filter(
+        (item) => item.type === "task" || item.kind === "task",
+      );
     default:
       return items.slice(0, 4);
   }
@@ -165,7 +181,7 @@ const getAiInsight = (
       : "No captures yet today. A quick note will start the thread.",
     projectCount > 0
       ? `${projectCount} project${projectCount === 1 ? "" : "s"} are currently in motion.`
-      : "Your memory is mostly general context right now."
+      : "Your memory is mostly general context right now.",
   ];
 
   return options[slot % options.length];
@@ -173,9 +189,15 @@ const getAiInsight = (
 
 export default function HomeScreen() {
   const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [desktopActivity, setDesktopActivity] = useState<DesktopActivity[]>([]);
+  const [memories, setMemories] = useState<Memory[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [projectCount, setProjectCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [hasCache, setHasCache] = useState(false);
+  const [offlineMessage, setOfflineMessage] = useState("");
   const [error, setError] = useState("");
   const [composerText, setComposerText] = useState("");
   const [savingComposer, setSavingComposer] = useState(false);
@@ -187,7 +209,9 @@ export default function HomeScreen() {
     () => getMetricFilteredActivity(activity, metricFilter),
     [activity, metricFilter],
   );
-  const activityPreview = metricFilter ? filteredActivity : filteredActivity.slice(0, 4);
+  const activityPreview = metricFilter
+    ? filteredActivity
+    : filteredActivity.slice(0, 4);
   const activitySectionTitle = getMetricFilterTitle(metricFilter);
   const weekdayCounts = useMemo(() => getWeekdayCounts(activity), [activity]);
   const maxWeekCount = Math.max(...weekdayCounts, 1);
@@ -210,40 +234,157 @@ export default function HomeScreen() {
   );
   const insightSlot = getInsightSlot();
   const aiInsight = useMemo(
-    () => getAiInsight(activity, projectCount, todayCount, taskCount, insightSlot),
+    () =>
+      getAiInsight(activity, projectCount, todayCount, taskCount, insightSlot),
     [activity, insightSlot, projectCount, taskCount, todayCount],
+  );
+  const latestDesktopActivity = desktopActivity[0] ?? null;
+
+  const hasHydratedCacheRef = useRef(false);
+  const isSyncingRef = useRef(false);
+  const hasCacheRef = useRef(false);
+  const lastSyncedAtRef = useRef<number | null>(null);
+
+  const applyHomeData = useCallback(
+    (nextData: {
+      activity: ActivityItem[];
+      desktopActivity: DesktopActivity[];
+      memories: Memory[];
+      projects: Project[];
+    }) => {
+      setActivity(nextData.activity);
+      setDesktopActivity(nextData.desktopActivity);
+      setMemories(nextData.memories);
+      setProjects(nextData.projects);
+      setProjectCount(nextData.projects.length);
+    },
+    [],
+  );
+
+  const applyOptimisticMemory = useCallback(
+    async (memory: Memory) => {
+      const activityItem: ActivityItem = {
+        ...memory,
+        type: "memory",
+      };
+      const nextData = {
+        activity: [activityItem, ...activity].slice(0, 300),
+        desktopActivity,
+        memories: [memory, ...memories],
+        projects,
+      };
+
+      applyHomeData(nextData);
+      setHasCache(true);
+      hasCacheRef.current = true;
+      lastSyncedAtRef.current = Date.now();
+      await writeHomeCache(nextData).catch(() => undefined);
+    },
+    [activity, applyHomeData, desktopActivity, memories, projects],
+  );
+
+  const syncHomeData = useCallback(
+    async (options?: { refresh?: boolean; silent?: boolean }) => {
+      if (isSyncingRef.current) {
+        return;
+      }
+
+      isSyncingRef.current = true;
+
+      try {
+        if (options?.refresh) {
+          setRefreshing(true);
+        } else if (!options?.silent) {
+          setLoading(!hasCache);
+        } else {
+          setSyncing(true);
+        }
+
+        setError("");
+        setOfflineMessage("");
+
+        const [nextActivity, nextDesktopActivity, nextMemories, nextProjects] = await Promise.all([
+          listActivity({ limit: 300 }),
+          listDesktopActivity({ limit: 30 }),
+          listMemories(),
+          listProjects(),
+        ]);
+        const nextData = {
+          activity: nextActivity,
+          desktopActivity: nextDesktopActivity,
+          memories: nextMemories,
+          projects: nextProjects,
+        };
+
+        applyHomeData(nextData);
+        setHasCache(true);
+        hasCacheRef.current = true;
+        lastSyncedAtRef.current = Date.now();
+        await writeHomeCache(nextData);
+        void scheduleUpcomingMemoryReminders(nextMemories);
+      } catch (err) {
+        if (hasCacheRef.current) {
+          setOfflineMessage("Showing offline data");
+        } else {
+          setError(
+            err instanceof Error ? err.message : "Unable to load memories",
+          );
+        }
+      } finally {
+        isSyncingRef.current = false;
+        setLoading(false);
+        setSyncing(false);
+        setRefreshing(false);
+      }
+    },
+    [applyHomeData, hasCache],
   );
 
   const loadMemories = useCallback(
     async (options?: { refreshing?: boolean }) => {
-      try {
-        if (options?.refreshing) {
-          setRefreshing(true);
-        } else {
-          setLoading(true);
+      if (options?.refreshing) {
+        await syncHomeData({ refresh: true });
+        return;
+      }
+
+      if (hasHydratedCacheRef.current) {
+        if (isHomeCacheFresh(lastSyncedAtRef.current)) {
+          return;
         }
 
-        setError("");
+        await syncHomeData({ silent: hasCache });
+        return;
+      }
 
-        const [nextActivity, nextMemories, nextProjects] = await Promise.all([
-          listActivity({ limit: 300 }),
-          listMemories(),
-          listProjects(),
-        ]);
+      try {
+        hasHydratedCacheRef.current = true;
+        const cachedData = await readHomeCache();
 
-        setActivity(nextActivity);
-        setProjectCount(nextProjects.length);
-        void scheduleUpcomingMemoryReminders(nextMemories);
+        if (cachedData) {
+          applyHomeData(cachedData);
+          setHasCache(true);
+          hasCacheRef.current = true;
+          lastSyncedAtRef.current = cachedData.lastSyncedAt;
+          setLoading(false);
+
+          if (isHomeCacheFresh(cachedData.lastSyncedAt)) {
+            return;
+          }
+
+          await syncHomeData({ silent: true });
+          return;
+        }
+
+        await syncHomeData();
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Unable to load memories",
         );
       } finally {
         setLoading(false);
-        setRefreshing(false);
       }
     },
-    [],
+    [applyHomeData, hasCache, syncHomeData],
   );
 
   useFocusEffect(
@@ -263,7 +404,6 @@ export default function HomeScreen() {
       setSavingComposer(true);
       setError("");
 
-      const projects = await listProjects();
       const quickReminder = parseQuickReminder(trimmedContent, projects);
 
       if (quickReminder) {
@@ -289,14 +429,15 @@ export default function HomeScreen() {
           );
         }
 
+        await applyOptimisticMemory(memory);
         setComposerText("");
-        await loadMemories();
+        void syncHomeData({ silent: true });
         return;
       }
 
       const metadata = await generateMetadata(trimmedContent);
 
-      await createMemory({
+      const memory = await createMemory({
         title: metadata.title,
         content: trimmedContent,
         category: metadata.category,
@@ -305,8 +446,9 @@ export default function HomeScreen() {
         kind: "note",
       });
 
+      await applyOptimisticMemory(memory);
       setComposerText("");
-      await loadMemories();
+      void syncHomeData({ silent: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to save memory");
     } finally {
@@ -314,7 +456,7 @@ export default function HomeScreen() {
     }
   };
 
-  if (loading) {
+  if (loading && !hasCache) {
     return (
       <SafeAreaView edges={["top"]} style={styles.screen}>
         <StateView title="Loading" detail="Syncing your brain." loading />
@@ -322,7 +464,7 @@ export default function HomeScreen() {
     );
   }
 
-  if (error) {
+  if (error && !hasCache) {
     return (
       <SafeAreaView edges={["top"]} style={styles.screen}>
         <StateView
@@ -354,6 +496,11 @@ export default function HomeScreen() {
             <View style={styles.brandMark} />
             <Text style={styles.brandText}>Second Brain</Text>
           </View>
+          {/* {syncing || offlineMessage ? (
+            <Text style={[styles.syncStatus, offlineMessage && styles.offlineStatus]}>
+              {offlineMessage || "Syncing..."}
+            </Text>
+          ) : null} */}
           <Pressable
             style={styles.headerAction}
             onPress={() => router.push("/search")}
@@ -365,7 +512,11 @@ export default function HomeScreen() {
         <View style={styles.heroBlock}>
           <Text style={styles.greeting}>{greeting}</Text>
           <View style={styles.insightRow}>
-            <Ionicons color={colors.primary} name="sparkles-outline" size={14} />
+            <Ionicons
+              color={colors.primary}
+              name="sparkles-outline"
+              size={14}
+            />
             <Text style={styles.insightText}>{aiInsight}</Text>
           </View>
         </View>
@@ -431,7 +582,11 @@ export default function HomeScreen() {
               styles.metricCardLarge,
               metricFilter === "today" && styles.metricCardSelected,
             ]}
-            onPress={() => setMetricFilter((current) => (current === "today" ? null : "today"))}
+            onPress={() =>
+              setMetricFilter((current) =>
+                current === "today" ? null : "today",
+              )
+            }
           >
             <Text style={styles.metricEyebrow}>Today</Text>
             <Text style={styles.metricValue}>{todayCount}</Text>
@@ -445,7 +600,11 @@ export default function HomeScreen() {
                 styles.metricCardSmall,
                 metricFilter === "notes" && styles.metricCardSelected,
               ]}
-              onPress={() => setMetricFilter((current) => (current === "notes" ? null : "notes"))}
+              onPress={() =>
+                setMetricFilter((current) =>
+                  current === "notes" ? null : "notes",
+                )
+              }
             >
               <Text style={styles.metricMiniValue}>{noteCount}</Text>
               <Text style={styles.metricMiniLabel}>notes</Text>
@@ -456,13 +615,64 @@ export default function HomeScreen() {
                 styles.metricCardSmall,
                 metricFilter === "tasks" && styles.metricCardSelected,
               ]}
-              onPress={() => setMetricFilter((current) => (current === "tasks" ? null : "tasks"))}
+              onPress={() =>
+                setMetricFilter((current) =>
+                  current === "tasks" ? null : "tasks",
+                )
+              }
             >
               <Text style={styles.metricMiniValue}>{taskCount}</Text>
               <Text style={styles.metricMiniLabel}>tasks</Text>
             </Pressable>
           </View>
         </View>
+
+        {desktopActivity.length ? (
+          <View style={styles.desktopSection}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>Desktop activity</Text>
+              <Text style={styles.sectionMeta}>Auto-synced from laptop</Text>
+            </View>
+            {latestDesktopActivity ? (
+              <View style={styles.desktopStatsRow}>
+                <View style={styles.desktopStatCard}>
+                  <Text style={styles.desktopStatValue}>{latestDesktopActivity.codingMinutes}m</Text>
+                  <Text style={styles.desktopStatLabel}>coding</Text>
+                </View>
+                <View style={styles.desktopStatCard}>
+                  <Text style={styles.desktopStatValue}>{latestDesktopActivity.productiveMinutes}m</Text>
+                  <Text style={styles.desktopStatLabel}>productive</Text>
+                </View>
+                <View style={styles.desktopStatCard}>
+                  <Text style={styles.desktopStatValue}>{latestDesktopActivity.idleMinutes}m</Text>
+                  <Text style={styles.desktopStatLabel}>idle</Text>
+                </View>
+              </View>
+            ) : null}
+            {desktopActivity.slice(0, 3).map((item) => (
+              <View key={item._id} style={styles.desktopCard}>
+                <View style={styles.desktopCardHeader}>
+                  <Text style={styles.desktopCardTitle}>{item.title}</Text>
+                  <Text style={styles.desktopCardDate}>{item.date}</Text>
+                </View>
+                <Text numberOfLines={3} style={styles.desktopSummary}>
+                  {item.summary}
+                </Text>
+                <View style={styles.desktopMetrics}>
+                  <View style={styles.desktopMetricPill}>
+                    <Text style={styles.desktopMetricText}>{item.codingMinutes}m coding</Text>
+                  </View>
+                  <View style={styles.desktopMetricPill}>
+                    <Text style={styles.desktopMetricText}>{item.productiveMinutes}m productive</Text>
+                  </View>
+                  <View style={styles.desktopMetricPill}>
+                    <Text style={styles.desktopMetricText}>{item.idleMinutes}m idle</Text>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         <View style={styles.panel}>
           <View style={styles.panelHeader}>
@@ -580,6 +790,17 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 14,
     fontWeight: "800",
+  },
+  syncStatus: {
+    color: colors.textSoft,
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "800",
+    marginHorizontal: 12,
+    textAlign: "right",
+  },
+  offlineStatus: {
+    color: colors.reminderTag,
   },
   headerAction: {
     alignItems: "center",
@@ -796,6 +1017,99 @@ const styles = StyleSheet.create({
     color: colors.textSoft,
     fontSize: 13,
     fontWeight: "700",
+  },
+  desktopSection: {
+    marginBottom: 22,
+  },
+  desktopStatsRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 12,
+  },
+  desktopStatCard: {
+    backgroundColor: "#F8FBFF",
+    borderColor: "#E7EEF8",
+    borderRadius: 18,
+    borderWidth: 1,
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    ...subtleShadow,
+  },
+  desktopStatValue: {
+    color: colors.text,
+    fontSize: 24,
+    fontWeight: "900",
+    lineHeight: 28,
+  },
+  desktopStatLabel: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 4,
+  },
+  sectionHeaderRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  sectionMeta: {
+    color: colors.textSoft,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  desktopCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 20,
+    borderWidth: 1,
+    marginBottom: 12,
+    padding: 16,
+    ...subtleShadow,
+  },
+  desktopCardHeader: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: 12,
+    justifyContent: "space-between",
+  },
+  desktopCardTitle: {
+    color: colors.text,
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "900",
+    lineHeight: 20,
+  },
+  desktopCardDate: {
+    color: colors.textSoft,
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 2,
+  },
+  desktopSummary: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 19,
+    marginTop: 10,
+  },
+  desktopMetrics: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 12,
+  },
+  desktopMetricPill: {
+    backgroundColor: colors.backgroundSoft,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  desktopMetricText: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: "800",
   },
   chartWrap: {
     alignItems: "flex-end",

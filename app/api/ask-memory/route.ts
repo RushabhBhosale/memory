@@ -9,6 +9,7 @@ import {
   type ActivityItem
 } from '@/lib/activityFeed';
 import { validateApiKey } from '@/lib/apiKey';
+import { runHybridSearch, type HybridSearchType } from '@/lib/hybridSearch';
 import { connectDB } from '@/lib/mongodb';
 import { extractJsonBlock, requestOpenRouter } from '@/lib/openRouter';
 import Memory from '@/models/Memory';
@@ -526,94 +527,15 @@ ${JSON.stringify(sourcePayload, null, 2)}`;
 
 const findActivities = async (query: string, plan: SearchPlan) => {
   await connectDB();
+  const hybrid = await runHybridSearch(query, {
+    limit: 10,
+    types: plan.types as HybridSearchType[]
+  });
 
-  const keywords = uniq(
-    [
-      ...plan.keywords,
-      ...tokenize(query).filter((token) => token.length > 2)
-    ].slice(0, 10)
-  );
-  const keywordRegexes = buildTokenRegexes(keywords);
-  const projectIds = await resolveProjectIds(plan.project);
-  const createdAtQuery = buildCreatedAtQuery(plan.timeframe);
-  const reminderQuery = buildReminderQuery(plan.timeframe);
-  const shouldFocusReminders = plan.types.includes('reminder');
-  const projectQuery = projectIds.length ? { projectId: { $in: projectIds } } : {};
-  const textOr =
-    keywordRegexes.length > 0
-      ? [
-          { title: { $in: keywordRegexes } },
-          { content: { $in: keywordRegexes } },
-          { description: { $in: keywordRegexes } },
-          { details: { $in: keywordRegexes } },
-          { tags: { $in: keywordRegexes } },
-          { category: { $in: keywordRegexes } }
-        ]
-      : [];
-
-  const baseMemoryQuery = shouldFocusReminders
-    ? { ...PRIVATE_MEMORY_FILTER, ...projectQuery, ...reminderQuery }
-    : { ...PRIVATE_MEMORY_FILTER, ...projectQuery, ...createdAtQuery };
-
-  const baseProjectQuery = shouldFocusReminders ? projectQuery : { ...projectQuery, ...createdAtQuery };
-  const memoryTextQuery = textOr.length && !shouldFocusReminders ? { $or: textOr } : {};
-  const projectTextQuery = textOr.length ? { $or: textOr } : {};
-
-  const [memories, tasks, notes, meetings] = await Promise.all([
-    Memory.find({
-      ...baseMemoryQuery,
-      ...memoryTextQuery
-    })
-      .sort({ createdAt: -1 })
-      .limit(CANDIDATE_LIMIT)
-      .populate('projectId', 'name description status')
-      .lean(),
-    ProjectTask.find({
-      ...baseProjectQuery,
-      ...projectTextQuery
-    })
-      .sort({ createdAt: -1 })
-      .limit(CANDIDATE_LIMIT)
-      .populate('projectId', 'name description status')
-      .lean(),
-    ProjectNote.find({
-      ...baseProjectQuery,
-      ...projectTextQuery
-    })
-      .sort({ createdAt: -1 })
-      .limit(CANDIDATE_LIMIT)
-      .populate('projectId', 'name description status')
-      .lean(),
-    ProjectMeeting.find({
-      ...baseProjectQuery,
-      ...projectTextQuery
-    })
-      .sort({ createdAt: -1 })
-      .limit(CANDIDATE_LIMIT)
-      .populate('projectId', 'name description status')
-      .lean()
-  ]);
-
-  const activities = sortActivityItems([
-    ...memories.map(toMemoryActivity),
-    ...tasks.map(toTaskActivity),
-    ...notes.map(toNoteActivity),
-    ...meetings.map(toMeetingActivity)
-  ]);
-
-  return activities
-    .filter((item) => matchesRequestedTypes(item, plan.types))
-    .map((item) => ({
-      ...item,
-      score: scoreActivity(item, query, keywords, plan.project)
-    }))
-    .filter((item) => item.score > 0 || (!keywords.length && plan.timeframe !== 'all_time'))
-    .sort(
-      (left, right) =>
-        (right.score || 0) - (left.score || 0) ||
-        new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
-    )
-    .slice(0, SEARCH_RESULT_LIMIT);
+  return {
+    results: hybrid.results as SearchableActivity[],
+    debug: hybrid.debug
+  };
 };
 
 export async function POST(request: Request) {
@@ -624,20 +546,25 @@ export async function POST(request: Request) {
   }
 
   try {
-    const body = (await request.json()) as { query?: string };
+    const { searchParams } = new URL(request.url);
+    const debug = searchParams.get('debug') === 'true';
+    const body = (await request.json()) as { debug?: boolean; query?: string };
     const query = typeof body.query === 'string' ? body.query.trim() : '';
+    const shouldDebug = debug || body.debug === true;
 
     if (!query) {
       return NextResponse.json({ error: 'Query is required' }, { status: 400 });
     }
 
-    const plan = await generateSearchPlan(query).catch(() => SEARCH_PLAN_FALLBACK);
-    const results = await findActivities(query, plan);
+    const plan = generateFallbackPlan(query);
+    const search = await findActivities(query, plan);
+    const results = search.results;
 
     if (!results.length) {
       return NextResponse.json({
         answer: NO_RESULTS_ANSWER,
         count: 0,
+        ...(shouldDebug ? { debug: search.debug } : {}),
         plan,
         projects: [],
         sources: [],
@@ -661,7 +588,8 @@ export async function POST(request: Request) {
       plan,
       projects: uniq(orderedSources.map(getProjectName).filter(Boolean)),
       sources: orderedSources.map(({ score: _score, ...item }) => item),
-      summary: answer.summary.length ? answer.summary : getRelevantHighlights(orderedSources)
+      summary: answer.summary.length ? answer.summary : getRelevantHighlights(orderedSources),
+      ...(shouldDebug ? { debug: search.debug } : {})
     });
   } catch (error) {
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });

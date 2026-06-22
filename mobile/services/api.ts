@@ -4,6 +4,22 @@ export type ProjectStatus = 'active' | 'paused' | 'completed' | 'archived';
 
 export type ActivityType = 'memory' | 'task' | 'note' | 'meeting';
 export type SaveItemType = 'memory' | 'log' | 'task' | 'note' | 'meeting' | 'reminder';
+export type DesktopActivity = {
+  _id: string;
+  date: string;
+  title: string;
+  summary: string;
+  codingMinutes: number;
+  productiveMinutes: number;
+  idleMinutes: number;
+  productivityScore: number;
+  projectBreakdown: Array<{ projectName: string; durationMinutes: number }>;
+  appBreakdown: Array<{ appName: string; durationMinutes: number }>;
+  source: string;
+  deviceLabel?: string;
+  createdAt: string;
+  updatedAt: string;
+};
 
 export type Project = {
   _id: string;
@@ -106,6 +122,11 @@ type ProjectMemoriesResponse = {
   data: ActivityItem[];
 };
 
+type DesktopActivityListResponse = {
+  count: number;
+  data: DesktopActivity[];
+};
+
 const getApiRoot = (value: string) => {
   const baseUrl = value.replace(/\/$/, '');
 
@@ -138,6 +159,7 @@ const getApiConfig = () => {
     apiKey,
     askMemoryUrl: `${apiRoot}/api/ask-memory`,
     activityUrl: `${apiRoot}/api/activity`,
+    desktopActivityUrl: `${apiRoot}/api/desktop-activity`,
     memoriesUrl: `${apiRoot}/api/memories`,
     projectsUrl: `${apiRoot}/api/projects`
   };
@@ -192,6 +214,23 @@ export const listActivity = async (params?: { from?: string; limit?: number; to?
 
   const query = searchParams.toString();
   const response = await request<ActivityListResponse>(activityUrl, query ? `?${query}` : '');
+
+  return response.data;
+};
+
+export const listDesktopActivity = async (params?: { limit?: number }) => {
+  const { desktopActivityUrl } = getApiConfig();
+  const searchParams = new URLSearchParams();
+
+  if (params?.limit) {
+    searchParams.set('limit', String(params.limit));
+  }
+
+  const query = searchParams.toString();
+  const response = await request<DesktopActivityListResponse>(
+    desktopActivityUrl,
+    query ? `?${query}` : ''
+  );
 
   return response.data;
 };

@@ -2,12 +2,12 @@ import mongoose from 'mongoose';
 import { NextResponse } from 'next/server';
 
 import { validateApiKey } from '@/lib/apiKey';
+import { runHybridSearch } from '@/lib/hybridSearch';
 import { connectDB } from '@/lib/mongodb';
 import {
   buildCompactSearchContext,
-  rankSearchCandidates,
-  selectTopRankedResults,
   toCompactSearchResults,
+  type RankedSearchResult,
   type SearchCandidate
 } from '@/lib/searchRanking';
 import { getFallbackTitle } from '@/lib/titleFallback';
@@ -807,88 +807,27 @@ const toMemoryCandidate = (memory: RawDocument): SearchCandidate => {
   };
 };
 
+const toHybridSearchCandidate = (item: RawDocument): RankedSearchResult => ({
+  id: toStringValue(item._id) || String(item._id),
+  type: (toStringValue(item.type) || 'memory') as SearchCandidate['type'],
+  title: toStringValue(item.title),
+  content: toStringValue(item.content),
+  tags: toStringArray(item.tags),
+  projectId: toObjectIdString(item.projectId),
+  projectName: toStringValue(item.projectName),
+  importance: typeof item.importance === 'number' ? item.importance : undefined,
+  createdAt: toDateValue(item.createdAt),
+  score: typeof item.score === 'number' ? item.score : 0
+});
+
 const searchRanked = async (query: string, activeProject: ProjectLike | null) => {
-  const privateMemoryFilter = {
-    category: { $ne: 'vault' },
-    kind: { $ne: 'credential' },
-    tags: { $nin: ['vault'] }
-  };
-  const projectQuery = buildTextQuery(query, ['name', 'description', 'tags']);
-  const taskQuery = buildTextQuery(query, ['title', 'description', 'category', 'status', 'tags']);
-  const noteQuery = buildTextQuery(query, ['title', 'content', 'category', 'kind', 'tags']);
-  const meetingQuery = buildTextQuery(query, ['title', 'details', 'category', 'tags']);
-  const memoryQuery = buildTextQuery(query, [
-    'title',
-    'content',
-    'category',
-    'tags',
-    'source',
-    'sourceTitle',
-    'sourceUrl'
-  ]);
-
-  const [
-    projects,
-    tasks,
-    notes,
-    meetings,
-    memories,
-    projectCount,
-    taskCount,
-    noteCount,
-    meetingCount,
-    memoryCount
-  ] = (await Promise.all([
-    Project.find(projectQuery).sort({ updatedAt: -1 }).limit(SEARCH_CANDIDATE_LIMIT).lean(),
-    ProjectTask.find(taskQuery)
-      .sort({ updatedAt: -1 })
-      .limit(SEARCH_CANDIDATE_LIMIT)
-      .populate('projectId', 'name description status')
-      .lean(),
-    ProjectNote.find(noteQuery)
-      .sort({ updatedAt: -1 })
-      .limit(SEARCH_CANDIDATE_LIMIT)
-      .populate('projectId', 'name description status')
-      .lean(),
-    ProjectMeeting.find(meetingQuery)
-      .sort({ updatedAt: -1 })
-      .limit(SEARCH_CANDIDATE_LIMIT)
-      .populate('projectId', 'name description status')
-      .lean(),
-    Memory.find({ $and: [privateMemoryFilter, memoryQuery] })
-      .sort({ updatedAt: -1 })
-      .limit(SEARCH_CANDIDATE_LIMIT)
-      .populate('projectId', 'name description status')
-      .lean(),
-    Project.countDocuments(projectQuery),
-    ProjectTask.countDocuments(taskQuery),
-    ProjectNote.countDocuments(noteQuery),
-    ProjectMeeting.countDocuments(meetingQuery),
-    Memory.countDocuments({ $and: [privateMemoryFilter, memoryQuery] })
-  ])) as [
-    RawDocument[],
-    RawDocument[],
-    RawDocument[],
-    RawDocument[],
-    RawDocument[],
-    number,
-    number,
-    number,
-    number,
-    number
-  ];
-
-  const candidates: SearchCandidate[] = [
-    ...projects.map(toProjectCandidate),
-    ...tasks.map((task) => toProjectItemCandidate(task, 'task', 'description')),
-    ...notes.map((note) => toProjectItemCandidate(note, 'note', 'content')),
-    ...meetings.map((meeting) => toProjectItemCandidate(meeting, 'meeting', 'details')),
-    ...memories.map(toMemoryCandidate)
-  ];
-  const totalMatches = projectCount + taskCount + noteCount + meetingCount + memoryCount;
   const activeProjectId = toObjectIdString(activeProject?._id) || null;
-  const rankedResults = rankSearchCandidates(candidates, query, activeProjectId);
-  const topResults = selectTopRankedResults(rankedResults, totalMatches);
+  const hybrid = await runHybridSearch(query, {
+    activeProjectId,
+    limit: 10
+  });
+  const topResults = hybrid.results.map((item) => toHybridSearchCandidate(item as RawDocument));
+  const totalMatches = hybrid.candidates.length;
 
   return {
     query,
