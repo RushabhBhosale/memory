@@ -124,6 +124,43 @@ export const scheduleMemoryReminder = async (memory: Memory) => {
   });
 };
 
+export const scheduleTestMemoryNotification = async () => {
+  const Notifications = await getNotifications();
+
+  if (!Notifications) {
+    return null;
+  }
+
+  const hasPermission = await ensureNotificationPermissions();
+
+  if (!hasPermission) {
+    return null;
+  }
+
+  const hasChannel = await ensureReminderChannel();
+
+  if (!hasChannel) {
+    return null;
+  }
+
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      title: 'Memory notification test',
+      body: 'If you can see this, local notifications are working.',
+      data: {
+        source: 'notification-test'
+      },
+      sound: true
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+      seconds: 5,
+      repeats: false,
+      channelId: REMINDER_CHANNEL_ID
+    }
+  });
+};
+
 export const scheduleUpcomingMemoryReminders = async (memories: Memory[]) => {
   const reminders = memories.filter((memory) => memory.reminderAt && memory.notificationEnabled);
 

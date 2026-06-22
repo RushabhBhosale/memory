@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -9,27 +9,30 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  View
-} from 'react-native';
+  View,
+} from "react-native";
 import DateTimePicker, {
-  type DateTimePickerEvent
-} from '@react-native-community/datetimepicker';
-import { router, useLocalSearchParams } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+  type DateTimePickerEvent,
+} from "@react-native-community/datetimepicker";
+import { router, useLocalSearchParams } from "expo-router";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-import { ALLOWED_CATEGORIES } from '../constants/memoryCategories';
-import { generateMetadata, getFallbackMetadata } from '../services/ai';
+import { ALLOWED_CATEGORIES } from "../constants/memoryCategories";
+import { generateMetadata, getFallbackMetadata } from "../services/ai";
 import {
   createMemory,
   listProjects,
   type MemoryKind,
-  type Project
-} from '../services/api';
-import { scheduleMemoryReminder } from '../services/notifications';
-import { colors, subtleShadow } from '../styles/theme';
+  type Project,
+} from "../services/api";
+import {
+  scheduleMemoryReminder,
+  scheduleTestMemoryNotification,
+} from "../services/notifications";
+import { colors, subtleShadow } from "../styles/theme";
 
 type SaveMode = {
-  id: 'personal' | 'task' | 'reminder' | 'project';
+  id: "personal" | "task" | "reminder" | "project";
   label: string;
   helper: string;
   kind: MemoryKind;
@@ -39,58 +42,62 @@ type SaveMode = {
 
 const saveModes: SaveMode[] = [
   {
-    id: 'personal',
-    label: 'Personal',
-    helper: 'Memory or note',
-    kind: 'note',
-    fallbackCategory: 'personal',
-    color: colors.personalTag
+    id: "personal",
+    label: "Personal",
+    helper: "Memory or note",
+    kind: "note",
+    fallbackCategory: "personal",
+    color: colors.personalTag,
   },
   {
-    id: 'task',
-    label: 'Work',
-    helper: 'Task or work item',
-    kind: 'task',
-    fallbackCategory: 'task',
-    color: colors.workTag
+    id: "task",
+    label: "Work",
+    helper: "Task or work item",
+    kind: "task",
+    fallbackCategory: "task",
+    color: colors.workTag,
   },
   {
-    id: 'reminder',
-    label: 'Reminder',
-    helper: 'Notify me later',
-    kind: 'note',
-    fallbackCategory: 'reminder',
-    color: colors.reminderTag
+    id: "reminder",
+    label: "Reminder",
+    helper: "Notify me later",
+    kind: "note",
+    fallbackCategory: "reminder",
+    color: colors.reminderTag,
   },
   {
-    id: 'project',
-    label: 'Project',
-    helper: 'Requirement or context',
-    kind: 'requirement',
-    fallbackCategory: 'projects',
-    color: colors.projectTag
-  }
+    id: "project",
+    label: "Project",
+    helper: "Requirement or context",
+    kind: "requirement",
+    fallbackCategory: "projects",
+    color: colors.projectTag,
+  },
 ];
 
 const parseTags = (value: string) =>
   value
-    .split(',')
+    .split(",")
     .map((tag) => tag.trim())
     .filter(Boolean);
 
-const getParamValue = (value?: string | string[]) => (Array.isArray(value) ? value[0] : value);
+const getParamValue = (value?: string | string[]) =>
+  Array.isArray(value) ? value[0] : value;
 
-const getModeById = (id?: string) => saveModes.find((mode) => mode.id === id) || saveModes[0];
+const getModeById = (id?: string) =>
+  saveModes.find((mode) => mode.id === id) || saveModes[0];
+
+const reminderMode = getModeById("reminder");
 
 const shouldShowExtraFields = (modeId?: string, projectId?: string) =>
-  Boolean(projectId || modeId === 'task' || modeId === 'project');
+  Boolean(projectId || modeId === "task" || modeId === "project");
 
 const reminderDateFormatter = new Intl.DateTimeFormat(undefined, {
-  dateStyle: 'medium'
+  dateStyle: "medium",
 });
 
 const reminderTimeFormatter = new Intl.DateTimeFormat(undefined, {
-  timeStyle: 'short'
+  timeStyle: "short",
 });
 
 const getDefaultReminderAt = () => {
@@ -108,7 +115,7 @@ const mergeDatePart = (current: Date, nextDate: Date) =>
     current.getHours(),
     current.getMinutes(),
     0,
-    0
+    0,
   );
 
 const mergeTimePart = (current: Date, nextTime: Date) =>
@@ -119,33 +126,44 @@ const mergeTimePart = (current: Date, nextTime: Date) =>
     nextTime.getHours(),
     nextTime.getMinutes(),
     0,
-    0
+    0,
   );
 
 export default function AddScreen() {
-  const params = useLocalSearchParams<{ draft?: string; projectId?: string; mode?: string }>();
+  const params = useLocalSearchParams<{
+    draft?: string;
+    projectId?: string;
+    mode?: string;
+  }>();
   const draftParam = getParamValue(params.draft);
   const projectIdParam = getParamValue(params.projectId);
   const modeParam = getParamValue(params.mode);
   const initialMode = getModeById(modeParam);
 
-  const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
   const [selectedMode, setSelectedMode] = useState<SaveMode>(initialMode);
   const [category, setCategory] = useState(initialMode.fallbackCategory);
-  const [tags, setTags] = useState('');
+  const [tags, setTags] = useState("");
   const [importance, setImportance] = useState(3);
-  const [metadataSource, setMetadataSource] = useState('');
+  const [metadataSource, setMetadataSource] = useState("");
   const [isGeneratingMetadata, setIsGeneratingMetadata] = useState(false);
   const [userEditedTitle, setUserEditedTitle] = useState(false);
   const [reminderAt, setReminderAt] = useState(getDefaultReminderAt);
-  const [activePicker, setActivePicker] = useState<'date' | 'time' | null>(null);
+  const [activePicker, setActivePicker] = useState<"date" | "time" | null>(
+    null,
+  );
   const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState(projectIdParam || '');
+  const [selectedProjectId, setSelectedProjectId] = useState(
+    projectIdParam || "",
+  );
   const [projectsLoading, setProjectsLoading] = useState(true);
-  const [showMore, setShowMore] = useState(shouldShowExtraFields(modeParam, projectIdParam));
+  const [showMore, setShowMore] = useState(
+    shouldShowExtraFields(modeParam, projectIdParam),
+  );
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
+  const [testingNotification, setTestingNotification] = useState(false);
+  const [error, setError] = useState("");
 
   const generationIdRef = useRef(0);
 
@@ -158,7 +176,9 @@ export default function AddScreen() {
 
         if (mounted) {
           setProjects(nextProjects);
-          setSelectedProjectId((current: string) => current || projectIdParam || '');
+          setSelectedProjectId(
+            (current: string) => current || projectIdParam || "",
+          );
         }
       } catch {
         if (mounted) {
@@ -201,7 +221,7 @@ export default function AddScreen() {
   const applyMetadata = (
     nextContent: string,
     metadata: Awaited<ReturnType<typeof generateMetadata>>,
-    options?: { forceTitle?: boolean }
+    options?: { forceTitle?: boolean },
   ) => {
     const normalizedContent = nextContent.trim();
 
@@ -209,20 +229,31 @@ export default function AddScreen() {
       return;
     }
 
-    if (options?.forceTitle || !title.trim() || !userEditedTitle || metadataSource !== normalizedContent) {
+    if (
+      options?.forceTitle ||
+      !title.trim() ||
+      !userEditedTitle ||
+      metadataSource !== normalizedContent
+    ) {
       setTitle(metadata.title);
       setUserEditedTitle(false);
     }
 
     setCategory(metadata.category);
-    setTags(metadata.tags.join(', '));
+
+    if (metadata.category === "reminder") {
+      setSelectedMode(reminderMode);
+      setShowMore(true);
+    }
+
+    setTags(metadata.tags.join(", "));
     setImportance(metadata.importance);
     setMetadataSource(normalizedContent);
   };
 
   const runMetadataGeneration = async (
     nextContent: string,
-    options?: { forceTitle?: boolean }
+    options?: { forceTitle?: boolean },
   ) => {
     const normalizedContent = nextContent.trim();
 
@@ -264,7 +295,7 @@ export default function AddScreen() {
   }, [content, metadataSource]);
 
   const cancel = () => {
-    router.replace('/');
+    router.replace("/");
   };
 
   const setReminderDatePart = (date?: Date) => {
@@ -283,57 +314,79 @@ export default function AddScreen() {
     setReminderAt((current) => mergeTimePart(current, date));
   };
 
-  const handleAndroidPickerChange = (event: DateTimePickerEvent, date?: Date) => {
+  const handleAndroidPickerChange = (
+    event: DateTimePickerEvent,
+    date?: Date,
+  ) => {
     const picker = activePicker;
     setActivePicker(null);
 
-    if (event.type !== 'set' || !date) {
+    if (event.type !== "set" || !date) {
       return;
     }
 
-    if (picker === 'date') {
+    if (picker === "date") {
       setReminderDatePart(date);
       return;
     }
 
-    if (picker === 'time') {
+    if (picker === "time") {
       setReminderTimePart(date);
     }
   };
 
   const regenerateMetadata = async () => {
     if (!content.trim()) {
-      setError('Write the content first');
+      setError("Write the content first");
       return;
     }
 
-    setError('');
+    setError("");
     await runMetadataGeneration(content, { forceTitle: true });
+  };
+
+  const selectCategory = (nextCategory: string) => {
+    setCategory(nextCategory);
+
+    if (nextCategory === "reminder") {
+      setSelectedMode(reminderMode);
+    }
+  };
+
+  const selectMode = (nextMode: SaveMode) => {
+    setSelectedMode(nextMode);
+    setCategory(nextMode.fallbackCategory);
+
+    if (nextMode.id === "task" || nextMode.id === "project") {
+      setShowMore(true);
+    }
   };
 
   const saveMemory = async () => {
     if (!content.trim()) {
-      setError('Content is required');
+      setError("Content is required");
       return;
     }
 
     try {
       setSaving(true);
-      setError('');
+      setError("");
 
       const normalizedContent = content.trim();
       const metadata =
         metadataSource === normalizedContent && title.trim()
           ? null
-          : await runMetadataGeneration(normalizedContent, { forceTitle: !title.trim() });
+          : await runMetadataGeneration(normalizedContent, {
+              forceTitle: !title.trim(),
+            });
 
       const fallbackMetadata = getFallbackMetadata();
       const parsedTags = parseTags(tags);
-      const reminderAtDate = selectedMode.id === 'reminder' ? reminderAt : null;
+      const reminderAtDate = selectedMode.id === "reminder" ? reminderAt : null;
       const resolvedMetadata = metadata || fallbackMetadata;
 
       if (reminderAtDate && reminderAtDate.getTime() <= Date.now()) {
-        setError('Reminder time must be in the future');
+        setError("Reminder time must be in the future");
         return;
       }
 
@@ -341,49 +394,126 @@ export default function AddScreen() {
         title: title.trim() || resolvedMetadata.title,
         content: normalizedContent,
         category:
-          category.trim() || resolvedMetadata.category || selectedMode.fallbackCategory,
+          category.trim() ||
+          resolvedMetadata.category ||
+          selectedMode.fallbackCategory,
         tags: parsedTags.length ? parsedTags : resolvedMetadata.tags,
         importance,
         kind: selectedMode.kind,
         projectId: selectedProjectId || undefined,
         reminderAt: reminderAtDate?.toISOString(),
-        notificationEnabled: selectedMode.id === 'reminder'
+        notificationEnabled: selectedMode.id === "reminder",
       });
 
-      if (selectedMode.id === 'reminder') {
+      if (selectedMode.id === "reminder") {
         const notificationId = await scheduleMemoryReminder(memory);
 
         if (!notificationId) {
           Alert.alert(
-            'Reminder saved',
-            'The reminder was saved, but the phone did not schedule a notification. Check notification permission and try a development build if Expo Go blocks it.'
+            "Reminder saved",
+            "The reminder was saved, but the phone did not schedule a notification. Check notification permission and try a development build if Expo Go blocks it.",
           );
         }
       }
 
-      router.replace('/');
+      router.replace("/");
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to create memory');
+      setError(err instanceof Error ? err.message : "Unable to create memory");
     } finally {
       setSaving(false);
     }
   };
 
+  const sendTestNotification = async () => {
+    try {
+      setTestingNotification(true);
+
+      const notificationId = await scheduleTestMemoryNotification();
+
+      if (!notificationId) {
+        Alert.alert(
+          "Notification not scheduled",
+          "The phone did not schedule the test notification. Check notification permission and use a development build if Expo Go blocks it.",
+        );
+        return;
+      }
+
+      Alert.alert(
+        "Notification scheduled",
+        "A test notification should appear in about 5 seconds.",
+      );
+    } catch (err) {
+      Alert.alert(
+        "Notification failed",
+        err instanceof Error
+          ? err.message
+          : "Unable to schedule the test notification.",
+      );
+    } finally {
+      setTestingNotification(false);
+    }
+  };
+
   return (
-    <SafeAreaView edges={['top']} style={styles.screen}>
+    <SafeAreaView edges={["top"]} style={styles.screen}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={styles.keyboardView}
       >
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+        >
           <View style={styles.header}>
             <View>
               <Text style={styles.eyebrow}>New memory</Text>
-              <Text style={styles.title}>Save {selectedMode.label.toLowerCase()}</Text>
+              <Text style={styles.title}>
+                Save {selectedMode.label.toLowerCase()}
+              </Text>
             </View>
-            <Pressable disabled={saving} style={styles.closeButton} onPress={cancel}>
+            <Pressable
+              disabled={saving}
+              style={styles.closeButton}
+              onPress={cancel}
+            >
               <Text style={styles.closeButtonText}>Cancel</Text>
             </Pressable>
+          </View>
+
+          <View style={styles.modeRow}>
+            {saveModes.map((mode) => {
+              const selected = selectedMode.id === mode.id;
+
+              return (
+                <Pressable
+                  key={mode.id}
+                  accessibilityRole="button"
+                  onPress={() => selectMode(mode)}
+                  style={[
+                    styles.modeChip,
+                    { borderColor: mode.color },
+                    selected && { backgroundColor: mode.color },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.modeChipText,
+                      selected && styles.selectedModeChipText,
+                    ]}
+                  >
+                    {mode.label}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.modeChipHelper,
+                      selected && styles.selectedModeChipText,
+                    ]}
+                  >
+                    {mode.helper}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
 
           <View style={styles.panel}>
@@ -400,9 +530,12 @@ export default function AddScreen() {
 
             <View style={styles.metadataHeader}>
               <Text style={styles.label}>AI Generated Title</Text>
-              <Pressable style={styles.regenerateLink} onPress={() => void regenerateMetadata()}>
+              <Pressable
+                style={styles.regenerateLink}
+                onPress={() => void regenerateMetadata()}
+              >
                 <Text style={styles.regenerateLinkText}>
-                  {isGeneratingMetadata ? 'Generating...' : 'Regenerate'}
+                  {isGeneratingMetadata ? "Generating..." : "Regenerate"}
                 </Text>
               </Pressable>
             </View>
@@ -417,10 +550,10 @@ export default function AddScreen() {
               style={styles.input}
             />
 
-            {selectedMode.id === 'reminder' ? (
+            {selectedMode.id === "reminder" ? (
               <View style={styles.reminderBox}>
                 <Text style={styles.label}>Reminder date</Text>
-                {Platform.OS === 'ios' ? (
+                {Platform.OS === "ios" ? (
                   <View style={styles.pickerInline}>
                     <DateTimePicker
                       accentColor={colors.primary}
@@ -436,7 +569,7 @@ export default function AddScreen() {
                   <Pressable
                     accessibilityRole="button"
                     style={styles.pickerButton}
-                    onPress={() => setActivePicker('date')}
+                    onPress={() => setActivePicker("date")}
                   >
                     <Text style={styles.pickerButtonText}>
                       {reminderDateFormatter.format(reminderAt)}
@@ -445,7 +578,7 @@ export default function AddScreen() {
                 )}
 
                 <Text style={styles.label}>Reminder time</Text>
-                {Platform.OS === 'ios' ? (
+                {Platform.OS === "ios" ? (
                   <View style={styles.pickerInline}>
                     <DateTimePicker
                       accentColor={colors.primary}
@@ -460,7 +593,7 @@ export default function AddScreen() {
                   <Pressable
                     accessibilityRole="button"
                     style={styles.pickerButton}
-                    onPress={() => setActivePicker('time')}
+                    onPress={() => setActivePicker("time")}
                   >
                     <Text style={styles.pickerButtonText}>
                       {reminderTimeFormatter.format(reminderAt)}
@@ -468,22 +601,40 @@ export default function AddScreen() {
                   </Pressable>
                 )}
 
-                {Platform.OS !== 'ios' && activePicker ? (
+                {Platform.OS !== "ios" && activePicker ? (
                   <DateTimePicker
-                    display={activePicker === 'date' ? 'calendar' : 'clock'}
-                    minimumDate={activePicker === 'date' ? new Date() : undefined}
+                    display={activePicker === "date" ? "calendar" : "clock"}
+                    minimumDate={
+                      activePicker === "date" ? new Date() : undefined
+                    }
                     mode={activePicker}
                     onChange={handleAndroidPickerChange}
                     value={reminderAt}
                   />
                 ) : null}
+
+                {/* <Pressable
+                  accessibilityRole="button"
+                  disabled={testingNotification}
+                  style={[styles.testNotificationButton, testingNotification && styles.disabledButton]}
+                  onPress={sendTestNotification}
+                >
+                  {testingNotification ? (
+                    <ActivityIndicator color={colors.primary} />
+                  ) : (
+                    <Text style={styles.testNotificationButtonText}>Send test notification</Text>
+                  )}
+                </Pressable> */}
               </View>
             ) : null}
           </View>
 
-          <Pressable style={styles.moreButton} onPress={() => setShowMore((current) => !current)}>
+          <Pressable
+            style={styles.moreButton}
+            onPress={() => setShowMore((current) => !current)}
+          >
             <Text style={styles.moreButtonText}>
-              {showMore ? 'Hide details' : 'More details'}
+              {showMore ? "Hide details" : "More details"}
             </Text>
           </Pressable>
 
@@ -501,10 +652,15 @@ export default function AddScreen() {
                   return (
                     <Pressable
                       key={item}
-                      onPress={() => setCategory(item)}
+                      onPress={() => selectCategory(item)}
                       style={[styles.chip, selected && styles.selectedChip]}
                     >
-                      <Text style={[styles.chipText, selected && styles.selectedChipText]}>
+                      <Text
+                        style={[
+                          styles.chipText,
+                          selected && styles.selectedChipText,
+                        ]}
+                      >
                         {item}
                       </Text>
                     </Pressable>
@@ -531,12 +687,15 @@ export default function AddScreen() {
                     <Pressable
                       key={value}
                       onPress={() => setImportance(value)}
-                      style={[styles.importanceChip, selected && styles.selectedImportanceChip]}
+                      style={[
+                        styles.importanceChip,
+                        selected && styles.selectedImportanceChip,
+                      ]}
                     >
                       <Text
                         style={[
                           styles.importanceChipText,
-                          selected && styles.selectedImportanceChipText
+                          selected && styles.selectedImportanceChipText,
                         ]}
                       >
                         {value}
@@ -548,7 +707,10 @@ export default function AddScreen() {
 
               <Text style={styles.label}>Project</Text>
               {projectsLoading ? (
-                <ActivityIndicator color={colors.primary} style={styles.inlineLoader} />
+                <ActivityIndicator
+                  color={colors.primary}
+                  style={styles.inlineLoader}
+                />
               ) : (
                 <ScrollView
                   horizontal
@@ -556,10 +718,18 @@ export default function AddScreen() {
                   contentContainerStyle={styles.chipRow}
                 >
                   <Pressable
-                    style={[styles.chip, !selectedProjectId && styles.selectedChip]}
-                    onPress={() => setSelectedProjectId('')}
+                    style={[
+                      styles.chip,
+                      !selectedProjectId && styles.selectedChip,
+                    ]}
+                    onPress={() => setSelectedProjectId("")}
                   >
-                    <Text style={[styles.chipText, !selectedProjectId && styles.selectedChipText]}>
+                    <Text
+                      style={[
+                        styles.chipText,
+                        !selectedProjectId && styles.selectedChipText,
+                      ]}
+                    >
                       None
                     </Text>
                   </Pressable>
@@ -572,7 +742,12 @@ export default function AddScreen() {
                         style={[styles.chip, selected && styles.selectedChip]}
                         onPress={() => setSelectedProjectId(project._id)}
                       >
-                        <Text style={[styles.chipText, selected && styles.selectedChipText]}>
+                        <Text
+                          style={[
+                            styles.chipText,
+                            selected && styles.selectedChipText,
+                          ]}
+                        >
                           {project.name}
                         </Text>
                       </Pressable>
@@ -605,44 +780,73 @@ export default function AddScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: colors.background
+    backgroundColor: colors.background,
   },
   keyboardView: {
-    flex: 1
+    flex: 1,
   },
   content: {
     padding: 18,
-    paddingBottom: 32
+    paddingBottom: 32,
   },
   header: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 18
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 18,
   },
   eyebrow: {
     color: colors.accent,
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: "900",
     marginBottom: 4,
-    textTransform: 'uppercase'
+    textTransform: "uppercase",
   },
   title: {
     color: colors.text,
     fontSize: 30,
-    fontWeight: '900',
-    lineHeight: 36
+    fontWeight: "900",
+    lineHeight: 36,
   },
   closeButton: {
     backgroundColor: colors.surface,
     borderRadius: 999,
     paddingHorizontal: 14,
     paddingVertical: 9,
-    ...subtleShadow
+    ...subtleShadow,
   },
   closeButtonText: {
     color: colors.text,
-    fontWeight: '900'
+    fontWeight: "900",
+  },
+  modeRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 9,
+    marginBottom: 14,
+  },
+  modeChip: {
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    flexBasis: "48%",
+    flexGrow: 1,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+  },
+  modeChipText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  modeChipHelper: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 3,
+  },
+  selectedModeChipText: {
+    color: colors.white,
   },
   panel: {
     backgroundColor: colors.surface,
@@ -650,14 +854,14 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     borderWidth: 1,
     padding: 16,
-    ...subtleShadow
+    ...subtleShadow,
   },
   label: {
     color: colors.text,
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: "900",
     marginBottom: 7,
-    marginTop: 12
+    marginTop: 12,
   },
   input: {
     backgroundColor: colors.background,
@@ -667,62 +871,62 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 16,
     paddingHorizontal: 13,
-    paddingVertical: 12
+    paddingVertical: 12,
   },
   textArea: {
     lineHeight: 22,
-    minHeight: 132
+    minHeight: 132,
   },
   metadataHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between'
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
   },
   regenerateLink: {
-    paddingTop: 12
+    paddingTop: 12,
   },
   regenerateLinkText: {
     color: colors.primary,
     fontSize: 12,
-    fontWeight: '800'
+    fontWeight: "800",
   },
   importanceRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 8,
-    marginTop: 4
+    marginTop: 4,
   },
   importanceChip: {
-    alignItems: 'center',
+    alignItems: "center",
     backgroundColor: colors.backgroundSoft,
     borderColor: colors.border,
     borderRadius: 999,
     borderWidth: 1,
     height: 38,
-    justifyContent: 'center',
-    width: 38
+    justifyContent: "center",
+    width: 38,
   },
   selectedImportanceChip: {
     backgroundColor: colors.primary,
-    borderColor: colors.primary
+    borderColor: colors.primary,
   },
   importanceChipText: {
     color: colors.textMuted,
-    fontWeight: '800'
+    fontWeight: "800",
   },
   selectedImportanceChipText: {
-    color: colors.white
+    color: colors.white,
   },
   reminderBox: {
-    marginTop: 6
+    marginTop: 6,
   },
   pickerInline: {
-    alignItems: 'flex-start',
+    alignItems: "flex-start",
     backgroundColor: colors.background,
     borderColor: colors.border,
     borderRadius: 14,
     borderWidth: 1,
     paddingHorizontal: 8,
-    paddingVertical: 8
+    paddingVertical: 8,
   },
   pickerButton: {
     backgroundColor: colors.background,
@@ -730,26 +934,41 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     paddingHorizontal: 13,
-    paddingVertical: 12
+    paddingVertical: 12,
   },
   pickerButtonText: {
     color: colors.text,
     fontSize: 15,
-    fontWeight: '700'
+    fontWeight: "700",
+  },
+  testNotificationButton: {
+    alignItems: "center",
+    backgroundColor: colors.backgroundSoft,
+    borderColor: colors.primary,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginTop: 14,
+    paddingHorizontal: 13,
+    paddingVertical: 12,
+  },
+  testNotificationButtonText: {
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: "900",
   },
   moreButton: {
-    alignItems: 'center',
+    alignItems: "center",
     marginTop: 14,
-    paddingVertical: 10
+    paddingVertical: 10,
   },
   moreButtonText: {
     color: colors.textMuted,
     fontSize: 13,
-    fontWeight: '800'
+    fontWeight: "800",
   },
   chipRow: {
     gap: 8,
-    paddingRight: 18
+    paddingRight: 18,
   },
   chip: {
     backgroundColor: colors.backgroundSoft,
@@ -757,40 +976,40 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     paddingHorizontal: 14,
-    paddingVertical: 10
+    paddingVertical: 10,
   },
   selectedChip: {
     backgroundColor: colors.primary,
-    borderColor: colors.primary
+    borderColor: colors.primary,
   },
   chipText: {
     color: colors.text,
     fontSize: 13,
-    fontWeight: '800'
+    fontWeight: "800",
   },
   selectedChipText: {
-    color: colors.white
+    color: colors.white,
   },
   inlineLoader: {
-    marginVertical: 16
+    marginVertical: 16,
   },
   errorText: {
     color: colors.danger,
     marginTop: 16,
-    textAlign: 'center'
+    textAlign: "center",
   },
   primaryButton: {
-    alignItems: 'center',
+    alignItems: "center",
     backgroundColor: colors.black,
     borderRadius: 999,
     marginTop: 18,
-    padding: 14
+    padding: 14,
   },
   disabledButton: {
-    opacity: 0.7
+    opacity: 0.7,
   },
   primaryButtonText: {
     color: colors.white,
-    fontWeight: '800'
-  }
+    fontWeight: "800",
+  },
 });

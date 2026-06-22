@@ -5,6 +5,13 @@ export type AssistantSessionDocument = Document & {
   activeProjectId?: mongoose.Types.ObjectId;
   lastItemId?: mongoose.Types.ObjectId;
   lastItemType?: 'memory' | 'task' | 'note' | 'meeting';
+  lastSearchResults?: Array<{
+    itemId: mongoose.Types.ObjectId;
+    itemType: 'project' | 'task' | 'note' | 'meeting' | 'memory';
+    title: string;
+  }>;
+  pendingTaskCompletionId?: mongoose.Types.ObjectId;
+  pendingTaskCompletionTitle?: string;
   pendingReminderContent?: string;
   pendingReminderDate?: Date;
   createdAt: Date;
@@ -32,6 +39,36 @@ const assistantSessionSchema = new Schema<AssistantSessionDocument>(
       type: String,
       enum: ['memory', 'task', 'note', 'meeting'],
       default: undefined
+    },
+    lastSearchResults: {
+      type: [
+        {
+          itemId: {
+            type: Schema.Types.ObjectId,
+            required: true
+          },
+          itemType: {
+            type: String,
+            enum: ['project', 'task', 'note', 'meeting', 'memory'],
+            required: true
+          },
+          title: {
+            type: String,
+            default: '',
+            trim: true
+          }
+        }
+      ],
+      default: undefined
+    },
+    pendingTaskCompletionId: {
+      type: Schema.Types.ObjectId,
+      default: undefined
+    },
+    pendingTaskCompletionTitle: {
+      type: String,
+      default: undefined,
+      trim: true
     },
     pendingReminderContent: {
       type: String,

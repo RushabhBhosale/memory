@@ -4,6 +4,7 @@
     "slug": "memory-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/logo.jpg",
     "scheme": "memorymobile",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -15,6 +16,10 @@
       "typedRoutes": true
     },
     "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.jpg",
+        "backgroundColor": "#FFFFFF"
+      },
       "package": "com.anonymous.memorymobile"
     },
     "ios": {

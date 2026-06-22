@@ -47,6 +47,7 @@ type ProjectLike = {
 type LastItemType = 'memory' | 'task' | 'note' | 'meeting';
 type RawDocument = Record<string, unknown>;
 type SaveItemType = 'memory' | 'log' | 'task' | 'note' | 'meeting' | 'reminder';
+type LastSearchItemType = 'project' | LastItemType;
 
 type SaveMetadata = {
   category?: string;
@@ -479,6 +480,66 @@ const setLastItem = async (sessionKey: string, type: LastItemType, id: unknown) 
   );
 };
 
+const setLastSearchResults = async (sessionKey: string, results: SearchCandidate[]) => {
+  const lastSearchResults = results
+    .map((result) => {
+      if (!mongoose.Types.ObjectId.isValid(result.id)) {
+        return null;
+      }
+
+      return {
+        itemId: new mongoose.Types.ObjectId(result.id),
+        itemType: result.type as LastSearchItemType,
+        title: result.title
+      };
+    })
+    .filter(Boolean)
+    .slice(0, SUMMARY_LIMIT);
+
+  return AssistantSession.findOneAndUpdate(
+    { sessionKey },
+    {
+      sessionKey,
+      lastSearchResults
+    },
+    { new: true, upsert: true }
+  );
+};
+
+const setPendingTaskCompletion = async (
+  sessionKey: string,
+  taskId: unknown,
+  title: string
+) => {
+  const itemId = toObjectIdString(taskId);
+
+  if (!itemId || !mongoose.Types.ObjectId.isValid(itemId)) {
+    return null;
+  }
+
+  return AssistantSession.findOneAndUpdate(
+    { sessionKey },
+    {
+      sessionKey,
+      pendingTaskCompletionId: new mongoose.Types.ObjectId(itemId),
+      pendingTaskCompletionTitle: title
+    },
+    { new: true, upsert: true }
+  );
+};
+
+const clearPendingTaskCompletion = async (sessionKey: string) =>
+  AssistantSession.findOneAndUpdate(
+    { sessionKey },
+    {
+      $unset: {
+        pendingTaskCompletionId: '',
+        pendingTaskCompletionTitle: ''
+      }
+    },
+    { new: true }
+  );
+
 const setPendingReminder = async (
   sessionKey: string,
   content: string,
@@ -834,18 +895,21 @@ const searchRanked = async (query: string, activeProject: ProjectLike | null) =>
     totalMatches,
     returnedCount: topResults.length,
     context: buildCompactSearchContext(query, topResults),
-    results: toCompactSearchResults(topResults)
+    results: toCompactSearchResults(topResults),
+    sessionResults: topResults
   };
 };
 
 const handleRankedSearch = async (sessionKey: string, query: string) => {
   const activeProject = await getActiveProject(sessionKey);
   const search = await searchRanked(query, activeProject);
+  await setLastSearchResults(sessionKey, search.sessionResults);
+  const { sessionResults: _sessionResults, ...publicSearch } = search;
 
   return NextResponse.json({
     message: `Found ${search.totalMatches} result(s) for "${query}". Retrieved ${search.returnedCount} top result(s).`,
     activeProject: getProjectDisplay(activeProject),
-    data: search
+    data: publicSearch
   });
 };
 
@@ -958,6 +1022,152 @@ const handleDeleteMemory = async (query: string) => {
     message: `Deleted memory: ${memories[0].title}`,
     data: memories[0]
   });
+};
+
+const ordinalToIndex = (input: string) => {
+  const normalized = input.toLowerCase();
+  const digitMatch = normalized.match(/\b(?:#)?([1-9]|10)(?:st|nd|rd|th)?\b/);
+
+  if (digitMatch) {
+    return Number.parseInt(digitMatch[1], 10) - 1;
+  }
+
+  const ordinals: Record<string, number> = {
+    first: 0,
+    second: 1,
+    third: 2,
+    fourth: 3,
+    fifth: 4,
+    sixth: 5,
+    seventh: 6,
+    eighth: 7,
+    ninth: 8,
+    tenth: 9
+  };
+
+  for (const [word, index] of Object.entries(ordinals)) {
+    if (new RegExp(`\\b${word}\\b`).test(normalized)) {
+      return index;
+    }
+  }
+
+  return null;
+};
+
+const isTaskCompletionIntent = (input: string) =>
+  /\b(?:mark|set|move)\b[\s\S]*\b(?:done|complete|completed|finished)\b/i.test(input) ||
+  (
+    /\b(?:done|complete|completed|finished)\b/i.test(input) &&
+    (
+      ordinalToIndex(input) !== null ||
+      /\b(?:it|this|that|task|item|one)\b/i.test(input)
+    )
+  );
+
+const updateTaskStatusToCompleted = async (
+  sessionKey: string,
+  taskId: unknown,
+  fallbackTitle?: string
+) => {
+  const itemId = toObjectIdString(taskId);
+
+  if (!itemId || !mongoose.Types.ObjectId.isValid(itemId)) {
+    return NextResponse.json({ message: 'No valid task id found to complete.', data: null });
+  }
+
+  const task = await ProjectTask.findByIdAndUpdate(
+    itemId,
+    { status: 'completed' },
+    { new: true, runValidators: true }
+  )
+    .populate('projectId', 'name description status')
+    .lean();
+
+  await clearPendingTaskCompletion(sessionKey);
+
+  if (!task) {
+    return NextResponse.json({ message: 'Task not found.', data: null });
+  }
+
+  await setLastItem(sessionKey, 'task', task._id);
+
+  return NextResponse.json({
+    message: `Marked task completed: ${toStringValue(task.title) || fallbackTitle || itemId}`,
+    data: task
+  });
+};
+
+const handlePendingTaskCompletionConfirmation = async (sessionKey: string, input: string) => {
+  if (!/^(?:yes|y|confirm|ok|okay|do it)$/i.test(input.trim())) {
+    return null;
+  }
+
+  const session = await getSession(sessionKey);
+  const pendingTaskId = toObjectIdString(session.pendingTaskCompletionId);
+
+  if (!pendingTaskId) {
+    return null;
+  }
+
+  return updateTaskStatusToCompleted(
+    sessionKey,
+    pendingTaskId,
+    toStringValue(session.pendingTaskCompletionTitle)
+  );
+};
+
+const handleTaskCompletionRequest = async (sessionKey: string, input: string) => {
+  if (!isTaskCompletionIntent(input)) {
+    return null;
+  }
+
+  const session = await getSession(sessionKey);
+  const ordinalIndex = ordinalToIndex(input);
+  const lastSearchResults = Array.isArray(session.lastSearchResults)
+    ? session.lastSearchResults
+    : [];
+
+  if (ordinalIndex !== null) {
+    const selected = lastSearchResults[ordinalIndex];
+
+    if (!selected) {
+      return NextResponse.json({
+        message: `I could not find item ${ordinalIndex + 1} from the last search results.`,
+        needsSelection: true
+      });
+    }
+
+    if (selected.itemType !== 'task') {
+      return NextResponse.json({
+        message: `Item ${ordinalIndex + 1} is a ${selected.itemType}, not a task, so I did not change task status.`,
+        needsSelection: true,
+        data: selected
+      });
+    }
+
+    return updateTaskStatusToCompleted(sessionKey, selected.itemId, selected.title);
+  }
+
+  const lastTask = [...lastSearchResults].reverse().find((item) => item.itemType === 'task');
+
+  if (lastTask) {
+    await setPendingTaskCompletion(sessionKey, lastTask.itemId, lastTask.title);
+
+    return NextResponse.json({
+      message: `Please confirm: mark this task as completed? ${lastTask.title}`,
+      needsConfirmation: true,
+      data: lastTask
+    });
+  }
+
+  const lastItemType = session.lastItemType as LastItemType | undefined;
+  const lastItemId = toObjectIdString(session.lastItemId);
+
+  if (lastItemType === 'task' && lastItemId) {
+    return updateTaskStatusToCompleted(sessionKey, lastItemId);
+  }
+
+  return null;
 };
 
 const updateImportanceForLastItem = async (sessionKey: string, importance: number) => {
@@ -1438,6 +1648,18 @@ const handleNaturalLanguage = async (sessionKey: string, input: string) => {
 
   if (projectSwitch) {
     return handleProjectSelection(sessionKey, projectSwitch[1]);
+  }
+
+  const completedPendingTask = await handlePendingTaskCompletionConfirmation(sessionKey, input);
+
+  if (completedPendingTask) {
+    return completedPendingTask;
+  }
+
+  const completedTask = await handleTaskCompletionRequest(sessionKey, input);
+
+  if (completedTask) {
+    return completedTask;
   }
 
   const completedPendingReminder = await handlePendingReminderTime(sessionKey, input);

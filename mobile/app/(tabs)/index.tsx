@@ -3,6 +3,7 @@ import { router, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -23,8 +24,9 @@ import {
   listProjects,
   type ActivityItem,
 } from "../../services/api";
-import { scheduleUpcomingMemoryReminders } from "../../services/notifications";
+import { scheduleMemoryReminder, scheduleUpcomingMemoryReminders } from "../../services/notifications";
 import { colors, subtleShadow } from "../../styles/theme";
+import { parseQuickReminder } from "../../utils/quickReminder";
 
 const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -107,6 +109,41 @@ const getTodayActivityCount = (items: ActivityItem[]) => {
   ).length;
 };
 
+type MetricFilter = "today" | "notes" | "tasks" | null;
+
+const getMetricFilteredActivity = (
+  items: ActivityItem[],
+  filter: MetricFilter,
+) => {
+  switch (filter) {
+    case "today": {
+      const todayKey = getDateKey(new Date());
+      return items.filter(
+        (item) => getDateKey(new Date(item.createdAt)) === todayKey,
+      );
+    }
+    case "notes":
+      return items.filter((item) => item.type === "note" || item.type === "memory");
+    case "tasks":
+      return items.filter((item) => item.type === "task" || item.kind === "task");
+    default:
+      return items.slice(0, 4);
+  }
+};
+
+const getMetricFilterTitle = (filter: MetricFilter) => {
+  switch (filter) {
+    case "today":
+      return "Today";
+    case "notes":
+      return "Notes";
+    case "tasks":
+      return "Tasks";
+    default:
+      return "Recent activity";
+  }
+};
+
 const getAiInsight = (
   items: ActivityItem[],
   projectCount: number,
@@ -142,10 +179,16 @@ export default function HomeScreen() {
   const [error, setError] = useState("");
   const [composerText, setComposerText] = useState("");
   const [savingComposer, setSavingComposer] = useState(false);
+  const [metricFilter, setMetricFilter] = useState<MetricFilter>(null);
 
   const greeting = getGreeting();
 
-  const recentLogs = activity.slice(0, 4);
+  const filteredActivity = useMemo(
+    () => getMetricFilteredActivity(activity, metricFilter),
+    [activity, metricFilter],
+  );
+  const activityPreview = metricFilter ? filteredActivity : filteredActivity.slice(0, 4);
+  const activitySectionTitle = getMetricFilterTitle(metricFilter);
   const weekdayCounts = useMemo(() => getWeekdayCounts(activity), [activity]);
   const maxWeekCount = Math.max(...weekdayCounts, 1);
   const todayCount = useMemo(() => getTodayActivityCount(activity), [activity]);
@@ -219,6 +262,37 @@ export default function HomeScreen() {
     try {
       setSavingComposer(true);
       setError("");
+
+      const projects = await listProjects();
+      const quickReminder = parseQuickReminder(trimmedContent, projects);
+
+      if (quickReminder) {
+        const metadata = await generateMetadata(quickReminder.content);
+        const memory = await createMemory({
+          title: metadata.title || `Reminder: ${quickReminder.content}`,
+          content: quickReminder.content,
+          category: "reminder",
+          tags: metadata.tags.length ? metadata.tags : ["reminder"],
+          importance: metadata.importance,
+          kind: "note",
+          projectId: quickReminder.projectId,
+          reminderAt: quickReminder.reminderAt.toISOString(),
+          notificationEnabled: true,
+        });
+
+        const notificationId = await scheduleMemoryReminder(memory);
+
+        if (!notificationId) {
+          Alert.alert(
+            "Reminder saved",
+            "The reminder was saved, but the phone did not schedule a notification. Check notification permission and try a development build if Expo Go blocks it.",
+          );
+        }
+
+        setComposerText("");
+        await loadMemories();
+        return;
+      }
 
       const metadata = await generateMetadata(trimmedContent);
 
@@ -351,21 +425,42 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.metricsRow}>
-          <View style={styles.metricCardLarge}>
+          <Pressable
+            accessibilityRole="button"
+            style={[
+              styles.metricCardLarge,
+              metricFilter === "today" && styles.metricCardSelected,
+            ]}
+            onPress={() => setMetricFilter((current) => (current === "today" ? null : "today"))}
+          >
             <Text style={styles.metricEyebrow}>Today</Text>
             <Text style={styles.metricValue}>{todayCount}</Text>
             <Text style={styles.metricLabel}>items captured</Text>
-          </View>
+          </Pressable>
 
           <View style={styles.metricStack}>
-            <View style={styles.metricCardSmall}>
+            <Pressable
+              accessibilityRole="button"
+              style={[
+                styles.metricCardSmall,
+                metricFilter === "notes" && styles.metricCardSelected,
+              ]}
+              onPress={() => setMetricFilter((current) => (current === "notes" ? null : "notes"))}
+            >
               <Text style={styles.metricMiniValue}>{noteCount}</Text>
               <Text style={styles.metricMiniLabel}>notes</Text>
-            </View>
-            <View style={styles.metricCardSmall}>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              style={[
+                styles.metricCardSmall,
+                metricFilter === "tasks" && styles.metricCardSelected,
+              ]}
+              onPress={() => setMetricFilter((current) => (current === "tasks" ? null : "tasks"))}
+            >
               <Text style={styles.metricMiniValue}>{taskCount}</Text>
               <Text style={styles.metricMiniLabel}>tasks</Text>
-            </View>
+            </Pressable>
           </View>
         </View>
 
@@ -392,15 +487,21 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Recent activity</Text>
-          <Pressable onPress={() => router.push("/(tabs)/calendar")}>
-            <Text style={styles.sectionLink}>View calendar</Text>
-          </Pressable>
+          <Text style={styles.sectionTitle}>{activitySectionTitle}</Text>
+          {metricFilter ? (
+            <Pressable onPress={() => setMetricFilter(null)}>
+              <Text style={styles.sectionLink}>Clear filter</Text>
+            </Pressable>
+          ) : (
+            <Pressable onPress={() => router.push("/(tabs)/calendar")}>
+              <Text style={styles.sectionLink}>View calendar</Text>
+            </Pressable>
+          )}
         </View>
 
-        {recentLogs.length ? (
+        {activityPreview.length ? (
           <View style={styles.recentList}>
-            {recentLogs.map((item) => (
+            {activityPreview.map((item) => (
               <MemoryCard key={`${item.type}-${item._id}`} memory={item} />
             ))}
           </View>
@@ -655,6 +756,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 16,
     ...subtleShadow,
+  },
+  metricCardSelected: {
+    borderColor: colors.primary,
+    borderWidth: 2,
   },
   metricMiniValue: {
     color: colors.text,
