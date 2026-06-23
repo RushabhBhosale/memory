@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 
-import type { DashboardStats } from "../../shared/types";
+import type { CompanionConfig, DashboardStats } from "../../shared/types";
 import "./styles.css";
 
 const formatMinutes = (minutes: number) => {
@@ -76,8 +76,12 @@ const Trend = ({ items }: { items: DashboardStats["weeklyTrend"] }) => {
 
 function App() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [config, setConfig] = useState<CompanionConfig | null>(null);
+  const [draftConfig, setDraftConfig] = useState<CompanionConfig | null>(null);
   const [loading, setLoading] = useState(true);
+  const [savingConfig, setSavingConfig] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [configMessage, setConfigMessage] = useState<string | null>(null);
 
   const refresh = async () => {
     try {
@@ -87,7 +91,13 @@ function App() {
         throw new Error("Desktop bridge is unavailable. Open the companion in Electron instead of a regular browser tab.");
       }
 
-      setStats(await window.memoryOS.getStats());
+      const [nextStats, nextConfig] = await Promise.all([
+        window.memoryOS.getStats(),
+        window.memoryOS.getConfig()
+      ]);
+      setStats(nextStats);
+      setConfig(nextConfig);
+      setDraftConfig(nextConfig);
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to load dashboard stats.");
@@ -110,6 +120,30 @@ function App() {
 
     return stats.isTracking ? "Running" : "Paused";
   }, [stats]);
+
+  const saveConfig = async () => {
+    if (!draftConfig) {
+      return;
+    }
+
+    try {
+      setSavingConfig(true);
+      setConfigMessage(null);
+      const saved = await window.memoryOS.saveConfig({
+        ...draftConfig,
+        apiUrl: draftConfig.apiUrl.trim(),
+        apiKey: draftConfig.apiKey.trim(),
+        dashboardUrl: draftConfig.dashboardUrl.trim()
+      });
+      setConfig(saved);
+      setDraftConfig(saved);
+      setConfigMessage("Settings saved.");
+    } catch (caught) {
+      setConfigMessage(caught instanceof Error ? caught.message : "Unable to save settings.");
+    } finally {
+      setSavingConfig(false);
+    }
+  };
 
   if (error && !stats) {
     return (
@@ -152,6 +186,69 @@ function App() {
         ) : (
           <button onClick={() => void window.memoryOS.resumeTracking().then(setStats)}>Resume tracking</button>
         )}
+      </section>
+
+      <section className="panel settings-panel">
+        <div className="panel-header">
+          <h2>Companion Settings</h2>
+          <span>{config?.apiKey ? "Configured" : "Needs API key"}</span>
+        </div>
+        {draftConfig ? (
+          <div className="settings-grid">
+            <label className="field">
+              <span>API URL</span>
+              <input
+                type="url"
+                value={draftConfig.apiUrl}
+                onChange={(event) =>
+                  setDraftConfig({ ...draftConfig, apiUrl: event.target.value })
+                }
+                placeholder="https://memory-green-kappa.vercel.app"
+              />
+            </label>
+            <label className="field">
+              <span>API Key</span>
+              <input
+                type="password"
+                value={draftConfig.apiKey}
+                onChange={(event) =>
+                  setDraftConfig({ ...draftConfig, apiKey: event.target.value })
+                }
+                placeholder="Enter production x-api-key"
+              />
+            </label>
+            <label className="field">
+              <span>Dashboard URL</span>
+              <input
+                type="url"
+                value={draftConfig.dashboardUrl}
+                onChange={(event) =>
+                  setDraftConfig({ ...draftConfig, dashboardUrl: event.target.value })
+                }
+                placeholder="https://memory-green-kappa.vercel.app"
+              />
+            </label>
+            <label className="checkbox-field">
+              <input
+                type="checkbox"
+                checked={draftConfig.launchAtLogin}
+                onChange={(event) =>
+                  setDraftConfig({ ...draftConfig, launchAtLogin: event.target.checked })
+                }
+              />
+              <span>Launch at login</span>
+            </label>
+          </div>
+        ) : null}
+        <div className="settings-actions">
+          <button disabled={!draftConfig || savingConfig} onClick={() => void saveConfig()}>
+            {savingConfig ? "Saving..." : "Save settings"}
+          </button>
+          <p className="settings-copy">
+            Packaged app builds use saved local settings instead of your repo `.env`.
+          </p>
+        </div>
+        {configMessage ? <p className="settings-message">{configMessage}</p> : null}
       </section>
 
       <section className="stats-grid">

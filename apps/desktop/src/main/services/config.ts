@@ -11,6 +11,10 @@ const CONFIG_FILE = "memoryos-companion.config.json";
 const getConfigPath = () => path.join(app.getPath("userData"), CONFIG_FILE);
 
 const resolveEnvFile = () => {
+  if (app.isPackaged) {
+    return null;
+  }
+
   const candidates = [
     path.resolve(process.cwd(), ".env"),
     path.resolve(process.cwd(), "..", ".env"),
@@ -62,7 +66,7 @@ const defaultConfig = (): CompanionConfig => ({
     process.env.MEMORY_API_KEY ||
     envFileValues.MEMORYOS_API_KEY ||
     envFileValues.MEMORY_API_KEY ||
-    "jksnjknd_dhcjdiksa",
+    "",
   dashboardUrl:
     process.env.MEMORYOS_DASHBOARD_URL ||
     envFileValues.MEMORYOS_DASHBOARD_URL ||

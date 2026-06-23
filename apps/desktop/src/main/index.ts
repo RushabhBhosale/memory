@@ -20,6 +20,13 @@ let isQuitting = false;
 let trackerService: TrackingService | null = null;
 let syncService: SyncService | null = null;
 
+const configureMacBackgroundApp = () => {
+  if (process.platform === "darwin") {
+    app.setActivationPolicy?.("accessory");
+    app.dock?.hide();
+  }
+};
+
 const createWindow = () => {
   if (mainWindow) {
     desktopLogger.info("window", "reusing existing window");
@@ -96,6 +103,7 @@ void app.whenReady().then(() => {
     isPackaged: app.isPackaged
   });
   const configService = new ConfigService();
+  configureMacBackgroundApp();
   const config = configService.getConfig();
   const repository = new ActivityRepository();
   const tracker = new TrackingService(repository);
@@ -132,7 +140,12 @@ void app.whenReady().then(() => {
   tracker.on("activity-written", () => trayService?.updateMenu());
   tracker.on("status-changed", () => trayService?.updateMenu());
 
-  if (!process.argv.includes("--hidden")) {
+  const shouldOpenWindowOnLaunch =
+    Boolean(process.env.VITE_DEV_SERVER_URL) &&
+    !process.argv.includes("--hidden") &&
+    !process.argv.includes("--background");
+
+  if (shouldOpenWindowOnLaunch) {
     createWindow();
   }
 });

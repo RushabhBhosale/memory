@@ -5,7 +5,7 @@ import { desktopLogger } from "../services/logger.js";
 import type { TrackingService } from "../services/tracker.js";
 import { electron } from "../../shared/electron.js";
 
-const { ipcMain } = electron;
+const { app, ipcMain } = electron;
 
 export const registerDashboardIpc = ({
   repository,
@@ -47,6 +47,22 @@ export const registerDashboardIpc = ({
 
   ipcMain.handle("config:get", () => {
     desktopLogger.info("ipc", "config:get invoked");
+    return config.getConfig();
+  });
+
+  ipcMain.handle("config:save", (_event, nextConfig) => {
+    desktopLogger.info("ipc", "config:save invoked", {
+      hasApiUrl: Boolean(nextConfig?.apiUrl),
+      hasApiKey: Boolean(nextConfig?.apiKey),
+      launchAtLogin: Boolean(nextConfig?.launchAtLogin)
+    });
+
+    config.saveConfig(nextConfig);
+    app.setLoginItemSettings({
+      openAtLogin: Boolean(nextConfig?.launchAtLogin),
+      openAsHidden: true
+    });
+
     return config.getConfig();
   });
 };

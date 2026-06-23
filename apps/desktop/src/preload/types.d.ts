@@ -8,6 +8,7 @@ declare global {
       resumeTracking: () => Promise<DashboardStats>;
       syncNow: () => Promise<DashboardStats>;
       getConfig: () => Promise<CompanionConfig>;
+      saveConfig: (config: CompanionConfig) => Promise<CompanionConfig>;
     };
   }
 }

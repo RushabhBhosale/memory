@@ -1,4 +1,6 @@
+import path from "node:path";
 import { EventEmitter } from "node:events";
+import { pathToFileURL } from "node:url";
 
 import { ActivityRepository } from "../db/database.js";
 import { electron } from "../../shared/electron.js";
@@ -6,7 +8,7 @@ import { classifyProductivity, detectProjectName, normalizeTrackedAppName } from
 import { desktopLogger } from "./logger.js";
 import { formatLocalDateKey, splitRangeByLocalDay } from "../../shared/localTime.js";
 
-const { powerMonitor } = electron;
+const { app, powerMonitor } = electron;
 
 const TRACK_INTERVAL_MS = 5_000;
 const IDLE_THRESHOLD_SECONDS = 5 * 60;
@@ -42,9 +44,17 @@ let activeWindowLoader:
 const getActiveWindow = async () => {
   if (activeWindowLoader === undefined) {
     try {
-      const module = (await import("get-windows")) as ActiveWindowModule;
+      const module = (app.isPackaged
+        ? ((await import(
+            pathToFileURL(
+              path.join(process.resourcesPath, "app.asar.unpacked", "node_modules", "get-windows", "index.js"),
+            ).href
+          )) as ActiveWindowModule)
+        : ((await import("get-windows")) as ActiveWindowModule));
       activeWindowLoader = module.activeWindow ?? module.default ?? null;
-      desktopLogger.info("tracker", "loaded get-windows native module");
+      desktopLogger.info("tracker", "loaded get-windows native module", {
+        source: app.isPackaged ? "app.asar.unpacked" : "node_modules"
+      });
     } catch (error) {
       activeWindowLoader = null;
       desktopLogger.warn("tracker", "get-windows failed to load; tracking will stay idle until it is available", {

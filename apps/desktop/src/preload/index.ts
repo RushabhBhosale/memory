@@ -9,5 +9,6 @@ contextBridge.exposeInMainWorld("memoryOS", {
   pauseTracking: () => ipcRenderer.invoke("tracking:pause"),
   resumeTracking: () => ipcRenderer.invoke("tracking:resume"),
   syncNow: () => ipcRenderer.invoke("sync:run"),
-  getConfig: () => ipcRenderer.invoke("config:get")
+  getConfig: () => ipcRenderer.invoke("config:get"),
+  saveConfig: (config: unknown) => ipcRenderer.invoke("config:save", config)
 });

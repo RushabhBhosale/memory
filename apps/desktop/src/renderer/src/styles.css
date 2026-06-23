@@ -23,6 +23,22 @@ button {
   padding: 11px 14px;
 }
 
+button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+input {
+  appearance: none;
+  background: #fff;
+  border: 1px solid #d7dce8;
+  border-radius: 10px;
+  color: #18181b;
+  font: inherit;
+  padding: 12px 14px;
+  width: 100%;
+}
+
 .shell {
   margin: 0 auto;
   max-width: 1120px;
@@ -172,6 +188,55 @@ h2 {
   padding: 18px;
 }
 
+.settings-panel {
+  margin-bottom: 18px;
+}
+
+.settings-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.field,
+.checkbox-field {
+  display: grid;
+  gap: 8px;
+}
+
+.field span,
+.checkbox-field span,
+.settings-copy,
+.settings-message {
+  color: #52525b;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.checkbox-field {
+  align-items: center;
+  grid-template-columns: auto 1fr;
+}
+
+.checkbox-field input {
+  width: 18px;
+}
+
+.settings-actions {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.settings-copy {
+  flex: 1;
+}
+
+.settings-message {
+  margin-top: 10px;
+}
+
 .panel-header {
   align-items: center;
   display: flex;
@@ -254,5 +319,11 @@ h2 {
   .panel-grid,
   .stats-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-grid,
+  .settings-actions {
+    grid-template-columns: 1fr;
+    display: grid;
   }
 }
