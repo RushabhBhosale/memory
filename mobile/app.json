@@ -20,6 +20,10 @@
         "foregroundImage": "./assets/logo.jpg",
         "backgroundColor": "#FFFFFF"
       },
+      "permissions": [
+        "android.permission.PACKAGE_USAGE_STATS",
+        "android.permission.QUERY_ALL_PACKAGES"
+      ],
       "package": "com.anonymous.memorymobile"
     },
     "ios": {

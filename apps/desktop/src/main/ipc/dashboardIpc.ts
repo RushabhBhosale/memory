@@ -40,6 +40,7 @@ export const registerDashboardIpc = ({
 
   ipcMain.handle("sync:run", async () => {
     desktopLogger.info("ipc", "sync:run invoked");
+    tracker.flushForSync();
     await sync.sync();
     return repository.getDashboardStats(tracker.isTracking(), sync.getLastSyncedAt());
   });

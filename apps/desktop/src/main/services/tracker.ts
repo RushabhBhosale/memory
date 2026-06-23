@@ -195,6 +195,19 @@ export class TrackingService extends EventEmitter {
     this.current = null;
   }
 
+  flushForSync() {
+    if (!this.current) {
+      return;
+    }
+
+    const now = new Date();
+    this.flushCurrent(now, false, "checkpoint");
+
+    if (this.current) {
+      this.current.startedAt = now;
+    }
+  }
+
   private flushCurrent(endedAt: Date, idle = false, reason: FlushReason = "checkpoint") {
     if (!this.current) {
       return;

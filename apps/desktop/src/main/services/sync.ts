@@ -3,7 +3,7 @@ import { desktopLogger } from "./logger.js";
 import { ConfigService } from "./config.js";
 import { electron } from "../../shared/electron.js";
 
-const SYNC_INTERVAL_MS = 15 * 60 * 1000;
+const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const { app } = electron;
 
 const minutesToHours = (minutes: number) => {
@@ -62,18 +62,23 @@ export class SyncService {
     this.syncing = true;
 
     try {
-      const summaries = this.repository.getUnsyncedDailySummaries();
-      desktopLogger.info("sync", "starting sync", {
-        summaryCount: Array.isArray(summaries) ? summaries.length : 0
-      });
-
-      for (const summary of summaries as Array<{
+      const summaries = this.repository.getUnsyncedDailySummaries() as Array<{
         date: string;
         coding_minutes: number;
         productive_minutes: number;
         idle_minutes: number;
         productivity_score: number;
-      }>) {
+      }>;
+      desktopLogger.info("sync", "starting sync", {
+        summaryCount: summaries.length,
+        dates: summaries.map((summary) => summary.date)
+      });
+
+      if (!summaries.length) {
+        desktopLogger.info("sync", "no unsynced daily summaries available");
+      }
+
+      for (const summary of summaries) {
         const projects = this.repository.getProjectDurations(summary.date) as Array<{
           projectName: string;
           activeSeconds: number;

@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { AppUsageLinkCard } from "../../components/AppUsageLinkCard";
 import { MemoryCard } from "../../components/MemoryCard";
 import { generateMetadata } from "../../services/ai";
 import { StateView } from "../../components/StateView";
@@ -239,6 +240,19 @@ export default function HomeScreen() {
     [activity, insightSlot, projectCount, taskCount, todayCount],
   );
   const latestDesktopActivity = desktopActivity[0] ?? null;
+  const latestDesktopProject = latestDesktopActivity?.projectBreakdown[0]?.projectName;
+  const latestDesktopApp = latestDesktopActivity?.appBreakdown[0]?.appName;
+  const latestDesktopTotalMinutes = latestDesktopActivity
+    ? Math.max(
+        latestDesktopActivity.productiveMinutes + latestDesktopActivity.idleMinutes,
+        1,
+      )
+    : 1;
+  const desktopAppBreakdown = latestDesktopActivity?.appBreakdown.slice(0, 5) ?? [];
+  const maxDesktopAppMinutes = Math.max(
+    ...desktopAppBreakdown.map((item) => item.durationMinutes),
+    1,
+  );
 
   const hasHydratedCacheRef = useRef(false);
   const isSyncingRef = useRef(false);
@@ -627,6 +641,8 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        <AppUsageLinkCard />
+
         {desktopActivity.length ? (
           <View style={styles.desktopSection}>
             <View style={styles.sectionHeaderRow}>
@@ -634,28 +650,121 @@ export default function HomeScreen() {
               <Text style={styles.sectionMeta}>Auto-synced from laptop</Text>
             </View>
             {latestDesktopActivity ? (
-              <View style={styles.desktopStatsRow}>
-                <View style={styles.desktopStatCard}>
-                  <Text style={styles.desktopStatValue}>{latestDesktopActivity.codingMinutes}m</Text>
-                  <Text style={styles.desktopStatLabel}>coding</Text>
+              <View style={styles.desktopOverviewCard}>
+                <View style={styles.desktopOverviewHeader}>
+                  <View>
+                    <Text style={styles.desktopOverviewTitle}>Latest laptop snapshot</Text>
+                    <Text style={styles.desktopOverviewDate}>{latestDesktopActivity.date}</Text>
+                  </View>
+                  <View style={styles.desktopOverviewBadge}>
+                    <Text style={styles.desktopOverviewBadgeText}>
+                      {latestDesktopActivity.productivityScore}% score
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.desktopStatCard}>
-                  <Text style={styles.desktopStatValue}>{latestDesktopActivity.productiveMinutes}m</Text>
-                  <Text style={styles.desktopStatLabel}>productive</Text>
+
+                <View style={styles.desktopStatsRow}>
+                  <View style={styles.desktopStatCard}>
+                    <Text style={styles.desktopStatValue}>{latestDesktopActivity.codingMinutes}m</Text>
+                    <Text style={styles.desktopStatLabel}>coding</Text>
+                  </View>
+                  <View style={styles.desktopStatCard}>
+                    <Text style={styles.desktopStatValue}>{latestDesktopActivity.productiveMinutes}m</Text>
+                    <Text style={styles.desktopStatLabel}>productive</Text>
+                  </View>
+                  <View style={styles.desktopStatCard}>
+                    <Text style={styles.desktopStatValue}>{latestDesktopActivity.idleMinutes}m</Text>
+                    <Text style={styles.desktopStatLabel}>idle</Text>
+                  </View>
                 </View>
-                <View style={styles.desktopStatCard}>
-                  <Text style={styles.desktopStatValue}>{latestDesktopActivity.idleMinutes}m</Text>
-                  <Text style={styles.desktopStatLabel}>idle</Text>
+
+                <View style={styles.desktopStackTrack}>
+                  <View
+                    style={[
+                      styles.desktopStackSegment,
+                      styles.desktopProductiveSegment,
+                      {
+                        flex:
+                          latestDesktopActivity.productiveMinutes /
+                          latestDesktopTotalMinutes,
+                      },
+                    ]}
+                  />
+                  <View
+                    style={[
+                      styles.desktopStackSegment,
+                      styles.desktopIdleSegment,
+                      {
+                        flex:
+                          latestDesktopActivity.idleMinutes /
+                          latestDesktopTotalMinutes,
+                      },
+                    ]}
+                  />
+                </View>
+                <View style={styles.desktopLegendRow}>
+                  <Text style={styles.desktopLegendText}>productive</Text>
+                  <Text style={styles.desktopLegendText}>idle</Text>
+                </View>
+
+                <View style={styles.desktopHighlightsRow}>
+                  {latestDesktopProject ? (
+                    <View style={styles.desktopHighlightPill}>
+                      <Text style={styles.desktopHighlightText}>Top project: {latestDesktopProject}</Text>
+                    </View>
+                  ) : null}
+                  {latestDesktopApp ? (
+                    <View style={styles.desktopHighlightPill}>
+                      <Text style={styles.desktopHighlightText}>Top app: {latestDesktopApp}</Text>
+                    </View>
+                  ) : null}
                 </View>
               </View>
             ) : null}
+
+            {desktopAppBreakdown.length ? (
+              <View style={styles.desktopTrendCard}>
+                <View style={styles.panelHeader}>
+                  <Text style={styles.panelTitle}>Top apps</Text>
+                  <Text style={styles.panelCaption}>Latest sync</Text>
+                </View>
+                <View style={styles.desktopAppList}>
+                  {desktopAppBreakdown.map((item) => (
+                    <View key={item.appName} style={styles.desktopAppRow}>
+                      <View style={styles.desktopAppMeta}>
+                        <Text numberOfLines={1} style={styles.desktopAppName}>
+                          {item.appName}
+                        </Text>
+                        <Text style={styles.desktopAppMinutes}>
+                          {item.durationMinutes}m
+                        </Text>
+                      </View>
+                      <View style={styles.desktopAppTrack}>
+                        <View
+                          style={[
+                            styles.desktopAppBar,
+                            {
+                              width: `${Math.max(
+                                8,
+                                (item.durationMinutes / maxDesktopAppMinutes) * 100,
+                              )}%`,
+                            },
+                          ]}
+                        />
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+
             {desktopActivity.slice(0, 3).map((item) => (
               <View key={item._id} style={styles.desktopCard}>
                 <View style={styles.desktopCardHeader}>
                   <Text style={styles.desktopCardTitle}>{item.title}</Text>
                   <Text style={styles.desktopCardDate}>{item.date}</Text>
                 </View>
-                <Text numberOfLines={3} style={styles.desktopSummary}>
+                <Text numberOfLines={2} style={styles.desktopSummary}>
                   {item.summary}
                 </Text>
                 <View style={styles.desktopMetrics}>
@@ -1021,10 +1130,48 @@ const styles = StyleSheet.create({
   desktopSection: {
     marginBottom: 22,
   },
+  desktopOverviewCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 24,
+    borderWidth: 1,
+    marginBottom: 14,
+    padding: 18,
+    ...subtleShadow,
+  },
+  desktopOverviewHeader: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: 12,
+    justifyContent: "space-between",
+  },
+  desktopOverviewTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  desktopOverviewDate: {
+    color: colors.textSoft,
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 4,
+  },
+  desktopOverviewBadge: {
+    backgroundColor: colors.accentSurface,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  desktopOverviewBadgeText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontWeight: "800",
+  },
   desktopStatsRow: {
     flexDirection: "row",
     gap: 10,
     marginBottom: 12,
+    marginTop: 16,
   },
   desktopStatCard: {
     backgroundColor: "#F8FBFF",
@@ -1047,6 +1194,94 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
     marginTop: 4,
+  },
+  desktopStackTrack: {
+    backgroundColor: colors.backgroundSoft,
+    borderRadius: 999,
+    flexDirection: "row",
+    height: 12,
+    marginTop: 4,
+    overflow: "hidden",
+  },
+  desktopStackSegment: {
+    height: "100%",
+  },
+  desktopProductiveSegment: {
+    backgroundColor: colors.workTag,
+  },
+  desktopIdleSegment: {
+    backgroundColor: colors.reminderTag,
+  },
+  desktopLegendRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 8,
+  },
+  desktopLegendText: {
+    color: colors.textSoft,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  desktopHighlightsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 14,
+  },
+  desktopHighlightPill: {
+    backgroundColor: colors.backgroundSoft,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  desktopHighlightText: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  desktopTrendCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 24,
+    borderWidth: 1,
+    marginBottom: 14,
+    padding: 18,
+    ...subtleShadow,
+  },
+  desktopAppList: {
+    gap: 12,
+    paddingTop: 6,
+  },
+  desktopAppRow: {
+    gap: 8,
+  },
+  desktopAppMeta: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+    justifyContent: "space-between",
+  },
+  desktopAppName: {
+    color: colors.text,
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  desktopAppMinutes: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  desktopAppTrack: {
+    backgroundColor: "#F7F8FC",
+    borderRadius: 999,
+    height: 12,
+    overflow: "hidden",
+  },
+  desktopAppBar: {
+    backgroundColor: colors.workTag,
+    borderRadius: 999,
+    height: "100%",
   },
   sectionHeaderRow: {
     alignItems: "center",
