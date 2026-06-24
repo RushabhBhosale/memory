@@ -29,6 +29,7 @@ import { colors, subtleShadow } from "../styles/theme";
 import { readAppUsageCache, writeAppUsageCache } from "../utils/appUsageCache";
 
 type PeriodKey = "today" | "week" | "month";
+const APP_USAGE_FEATURE_ENABLED = false;
 
 const getTotalTimeMs = (items: AppUsageItem[]) =>
   items.reduce((sum, item) => sum + item.totalTimeMs, 0);
@@ -165,6 +166,17 @@ export default function AppUsageScreen() {
         return todayItems;
     }
   }, [monthItems, selectedPeriod, todayItems, weekItems]);
+
+  if (!APP_USAGE_FEATURE_ENABLED) {
+    return (
+      <SafeAreaView edges={["top"]} style={styles.screen}>
+        <StateView
+          title="App usage hidden"
+          detail="This feature is temporarily hidden from the app for now."
+        />
+      </SafeAreaView>
+    );
+  }
 
   if (Platform.OS !== "android") {
     return (

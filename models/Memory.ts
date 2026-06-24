@@ -13,6 +13,15 @@ export type MemoryDocument = Document & {
   projectId?: mongoose.Types.ObjectId;
   reminderAt?: Date;
   notificationEnabled: boolean;
+  reminderType?: 'time' | 'location';
+  triggerType?: 'enter' | 'exit';
+  placeId?: string;
+  placeName?: string;
+  latitude?: number;
+  longitude?: number;
+  radiusMeters?: number;
+  status?: 'pending' | 'triggered' | 'completed';
+  triggeredAt?: Date;
   importance: number;
   embedding?: number[] | null;
   createdAt: Date;
@@ -78,6 +87,51 @@ const memorySchema = new Schema<MemoryDocument>(
     notificationEnabled: {
       type: Boolean,
       default: false
+    },
+    reminderType: {
+      type: String,
+      enum: ['time', 'location'],
+      default: undefined,
+      index: true
+    },
+    triggerType: {
+      type: String,
+      enum: ['enter', 'exit'],
+      default: undefined
+    },
+    placeId: {
+      type: String,
+      default: '',
+      trim: true,
+      index: true
+    },
+    placeName: {
+      type: String,
+      default: '',
+      trim: true
+    },
+    latitude: {
+      type: Number,
+      default: undefined
+    },
+    longitude: {
+      type: Number,
+      default: undefined
+    },
+    radiusMeters: {
+      type: Number,
+      min: 50,
+      default: undefined
+    },
+    status: {
+      type: String,
+      enum: ['pending', 'triggered', 'completed'],
+      default: undefined,
+      index: true
+    },
+    triggeredAt: {
+      type: Date,
+      default: undefined
     },
     importance: {
       type: Number,

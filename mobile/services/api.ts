@@ -43,6 +43,15 @@ export type Memory = {
   projectId?: string | Project;
   reminderAt?: string;
   notificationEnabled?: boolean;
+  reminderType?: 'time' | 'location';
+  triggerType?: 'enter' | 'exit';
+  placeId?: string;
+  placeName?: string;
+  latitude?: number;
+  longitude?: number;
+  radiusMeters?: number;
+  status?: 'pending' | 'triggered' | 'completed';
+  triggeredAt?: string;
   importance?: number;
   createdAt: string;
   updatedAt: string;
@@ -80,6 +89,15 @@ export type CreateMemoryInput = {
   projectId?: string;
   reminderAt?: string;
   notificationEnabled?: boolean;
+  reminderType?: 'time' | 'location';
+  triggerType?: 'enter' | 'exit';
+  placeId?: string;
+  placeName?: string;
+  latitude?: number;
+  longitude?: number;
+  radiusMeters?: number;
+  status?: 'pending' | 'triggered' | 'completed';
+  triggeredAt?: string;
   importance?: number;
 };
 
@@ -141,7 +159,7 @@ const getApiRoot = (value: string) => {
   return baseUrl;
 };
 
-const getApiConfig = () => {
+export const getApiConfig = () => {
   const apiUrl = process.env.EXPO_PUBLIC_API_URL;
   const apiKey = process.env.EXPO_PUBLIC_MEMORY_API_KEY;
 
@@ -160,12 +178,14 @@ const getApiConfig = () => {
     askMemoryUrl: `${apiRoot}/api/ask-memory`,
     activityUrl: `${apiRoot}/api/activity`,
     desktopActivityUrl: `${apiRoot}/api/desktop-activity`,
+    locationPlacesUrl: `${apiRoot}/api/location/places`,
+    locationTimelineUrl: `${apiRoot}/api/location/timeline`,
     memoriesUrl: `${apiRoot}/api/memories`,
     projectsUrl: `${apiRoot}/api/projects`
   };
 };
 
-const request = async <T>(
+export const request = async <T>(
   baseUrl: string,
   path: string,
   options: RequestInit = {}

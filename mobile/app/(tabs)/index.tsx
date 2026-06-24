@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -30,16 +30,39 @@ import {
   type Project,
 } from "../../services/api";
 import {
+  listExpenses,
+  type ExpenseEntry,
+} from "../../services/expenses";
+import {
   scheduleMemoryReminder,
   scheduleUpcomingMemoryReminders,
 } from "../../services/notifications";
+import {
+  createLocationReminder,
+  getLocationDebugState,
+  getTimelineByRange,
+  getWorkHoursSummary,
+  listLocationReminders,
+  listPlaces,
+  parseLocationReminderRequest,
+  readLocationSettings,
+  type LocationDebugState,
+  type LocationReminder,
+  type PlaceTimelineEvent,
+  type SavedPlace,
+  type WorkHoursSummary,
+} from "../../services/locationIntelligence";
 import { colors, subtleShadow } from "../../styles/theme";
 import {
   isHomeCacheFresh,
+  getHomeMutationRevision,
   readHomeCache,
   writeHomeCache,
 } from "../../utils/homeCache";
 import { parseQuickReminder } from "../../utils/quickReminder";
+
+const SHOW_APP_USAGE_SURFACE = false;
+const SHOW_DESKTOP_ACTIVITY_SURFACE = false;
 
 const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -48,10 +71,23 @@ const timeFormatter = new Intl.DateTimeFormat(undefined, {
   minute: "2-digit",
 });
 
+const currencyFormatter = new Intl.NumberFormat("en-IN", {
+  currency: "INR",
+  maximumFractionDigits: 0,
+  style: "currency",
+});
+
+const weekMonthFormatter = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+});
+
 const getDateKey = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
     date.getDate(),
   ).padStart(2, "0")}`;
+
+const getMonthKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 
 const getGreeting = () => {
   const hour = new Date().getHours();
@@ -72,14 +108,243 @@ const getWeekdayIndex = (date: Date) => {
   return day === 0 ? 6 : day - 1;
 };
 
-const getWeekdayCounts = (items: ActivityItem[]) => {
+const getWeekRange = (date = new Date()) => {
+  const start = new Date(date);
+  const offset = getWeekdayIndex(start);
+  start.setDate(start.getDate() - offset);
+  start.setHours(0, 0, 0, 0);
+
+  const end = new Date(start);
+  end.setDate(start.getDate() + 7);
+
+  return { start, end };
+};
+
+const getWeekRangeLabel = (start: Date, end: Date) => {
+  const lastDay = new Date(end);
+  lastDay.setDate(end.getDate() - 1);
+
+  const startMonth = weekMonthFormatter.format(start);
+  const endMonth = weekMonthFormatter.format(lastDay);
+
+  if (startMonth === endMonth) {
+    return `${startMonth} ${start.getDate()}-${lastDay.getDate()}`;
+  }
+
+  return `${startMonth} ${start.getDate()}-${endMonth} ${lastDay.getDate()}`;
+};
+
+const getWeekdayLabels = (weekStart: Date) =>
+  weekdayLabels.map((weekday, index) => {
+    const date = new Date(weekStart);
+    date.setDate(weekStart.getDate() + index);
+    return { day: date.getDate(), weekday };
+  });
+
+const getWeekdayCounts = (items: ActivityItem[], weekStart: Date, weekEnd: Date) => {
   const counts = new Array(7).fill(0);
+  const startTime = weekStart.getTime();
+  const endTime = weekEnd.getTime();
 
   items.forEach((item) => {
-    counts[getWeekdayIndex(new Date(item.createdAt))] += 1;
+    const itemDate = new Date(item.createdAt);
+    const itemTime = itemDate.getTime();
+
+    if (itemTime >= startTime && itemTime < endTime) {
+      counts[getWeekdayIndex(itemDate)] += 1;
+    }
   });
 
   return counts;
+};
+
+const formatCurrency = (amount: number) => currencyFormatter.format(Math.round(amount));
+
+const formatDuration = (minutes: number) => {
+  if (minutes <= 0) {
+    return "0m";
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+
+  if (!hours) {
+    return `${remainingMinutes}m`;
+  }
+
+  return `${hours}h ${remainingMinutes}m`;
+};
+
+const getPlaceMinutesForToday = (
+  timeline: PlaceTimelineEvent[],
+  place: SavedPlace | undefined,
+) => {
+  if (!place) {
+    return 0;
+  }
+
+  const todayKey = getDateKey(new Date());
+  const sorted = timeline
+    .filter((event) => event.placeId === place.id)
+    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  let minutes = 0;
+  let openEnterTimestamp = "";
+
+  sorted.forEach((event) => {
+    if (getDateKey(new Date(event.timestamp)) !== todayKey) {
+      return;
+    }
+
+    if (event.eventType === "enter") {
+      openEnterTimestamp = event.timestamp;
+      return;
+    }
+
+    if (event.eventType === "exit" && openEnterTimestamp) {
+      minutes +=
+        event.durationMinutes ||
+        Math.max(
+          1,
+          Math.round(
+            (new Date(event.timestamp).getTime() - new Date(openEnterTimestamp).getTime()) /
+              60000,
+          ),
+        );
+      openEnterTimestamp = "";
+    }
+  });
+
+  if (openEnterTimestamp) {
+    minutes += Math.max(
+      1,
+      Math.round((Date.now() - new Date(openEnterTimestamp).getTime()) / 60000),
+    );
+  }
+
+  return minutes;
+};
+
+const getDailySummary = (
+  items: ActivityItem[],
+  expenses: ExpenseEntry[],
+  timeline: PlaceTimelineEvent[],
+) => {
+  const todayKey = getDateKey(new Date());
+  const todayItems = items.filter(
+    (item) => getDateKey(new Date(item.createdAt)) === todayKey,
+  );
+  const memoriesCaptured = todayItems.filter(
+    (item) => item.type === "memory" || item.type === "note" || item.kind === "note",
+  ).length;
+  const tasksCompleted = todayItems.filter(
+    (item) =>
+      (item.type === "task" || item.kind === "task") &&
+      String(item.status || "").toLowerCase() === "completed",
+  ).length;
+  const spentToday = expenses
+    .filter(
+      (expense) =>
+        expense.type === "expense" &&
+        getDateKey(new Date(expense.timestamp)) === todayKey,
+    )
+    .reduce((total, expense) => total + expense.amount, 0);
+  const placesVisited = new Set(
+    timeline
+      .filter(
+        (event) =>
+          event.eventType === "enter" &&
+          getDateKey(new Date(event.timestamp)) === todayKey,
+      )
+      .map((event) => event.placeId),
+  ).size;
+  const projectCounts = todayItems.reduce<Record<string, number>>((counts, item) => {
+    if (item.projectName) {
+      counts[item.projectName] = (counts[item.projectName] || 0) + 1;
+    }
+
+    return counts;
+  }, {});
+  const topProject = Object.entries(projectCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const sentence = topProject
+    ? `Most of your activity today was related to ${topProject}.`
+    : spentToday > 0
+      ? `You logged ${formatCurrency(spentToday)} in expenses today.`
+      : todayItems.length > 0
+        ? "Your captures today are building a useful daily trail."
+        : "No major activity yet today. One quick capture will start the summary.";
+
+  return {
+    memoriesCaptured,
+    placesVisited,
+    sentence,
+    spentToday,
+    tasksCompleted,
+  };
+};
+
+const getExpenseSummary = (expenses: ExpenseEntry[]) => {
+  const now = new Date();
+  const todayKey = getDateKey(now);
+  const monthKey = getMonthKey(now);
+  const previousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const previousMonthKey = getMonthKey(previousMonth);
+  const expenseItems = expenses.filter((expense) => expense.type === "expense");
+  const todaySpend = expenseItems
+    .filter((expense) => getDateKey(new Date(expense.timestamp)) === todayKey)
+    .reduce((total, expense) => total + expense.amount, 0);
+  const monthSpend = expenseItems
+    .filter((expense) => getMonthKey(new Date(expense.timestamp)) === monthKey)
+    .reduce((total, expense) => total + expense.amount, 0);
+  const previousMonthSpend = expenseItems
+    .filter((expense) => getMonthKey(new Date(expense.timestamp)) === previousMonthKey)
+    .reduce((total, expense) => total + expense.amount, 0);
+  const categoryTotals = expenseItems
+    .filter((expense) => getMonthKey(new Date(expense.timestamp)) === monthKey)
+    .reduce<Record<string, number>>((totals, expense) => {
+      const category = expense.category || "general";
+      totals[category] = (totals[category] || 0) + expense.amount;
+      return totals;
+    }, {});
+  const topCategory = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1])[0]?.[0] || "None";
+  const trendPercent = previousMonthSpend
+    ? Math.round(((monthSpend - previousMonthSpend) / previousMonthSpend) * 100)
+    : 0;
+
+  return {
+    monthSpend,
+    todaySpend,
+    topCategory,
+    trendPercent,
+  };
+};
+
+const getLocationSummary = (
+  places: SavedPlace[],
+  timeline: PlaceTimelineEvent[],
+  reminders: LocationReminder[],
+  workHours: WorkHoursSummary | null,
+  debug: LocationDebugState | null,
+) => {
+  const home = places.find((place) => place.type === "home");
+  const office = places.find((place) => place.type === "office");
+  const lastEnter = [...timeline]
+    .filter((event) => event.eventType === "enter")
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+  const currentLocation =
+    debug?.lastTimelineEvent?.eventType === "enter"
+      ? debug.lastTimelineEvent.placeName
+      : lastEnter?.placeName || "Unknown";
+  const activeLocationReminders = reminders.filter(
+    (reminder) => reminder.status === "pending",
+  ).length;
+
+  return {
+    activeLocationReminders,
+    currentLocation,
+    homeMinutes: getPlaceMinutesForToday(timeline, home),
+    officeMinutes: workHours?.todayMinutes || getPlaceMinutesForToday(timeline, office),
+    savedPlaces: places.length,
+  };
 };
 
 const getRelativeTime = (value: string) => {
@@ -123,6 +388,15 @@ const getTodayActivityCount = (items: ActivityItem[]) => {
 };
 
 type MetricFilter = "today" | "notes" | "tasks" | null;
+
+type DashboardInsightCardProps = {
+  accentColor?: string;
+  children: ReactNode;
+  icon: keyof typeof Ionicons.glyphMap;
+  onPress: () => void;
+  subtitle?: string;
+  title: string;
+};
 
 const getMetricFilteredActivity = (
   items: ActivityItem[],
@@ -188,12 +462,43 @@ const getAiInsight = (
   return options[slot % options.length];
 };
 
+function DashboardInsightCard({
+  accentColor = colors.primary,
+  children,
+  icon,
+  onPress,
+  subtitle,
+  title,
+}: DashboardInsightCardProps) {
+  return (
+    <Pressable style={styles.dashboardCard} onPress={onPress}>
+      <View style={styles.dashboardCardHeader}>
+        <View style={[styles.dashboardIcon, { backgroundColor: `${accentColor}18` }]}>
+          <Ionicons color={accentColor} name={icon} size={18} />
+        </View>
+        <View style={styles.dashboardTitleBlock}>
+          <Text style={styles.dashboardTitle}>{title}</Text>
+          {subtitle ? <Text style={styles.dashboardSubtitle}>{subtitle}</Text> : null}
+        </View>
+        <Ionicons color={colors.textSoft} name="arrow-forward" size={18} />
+      </View>
+      {children}
+    </Pressable>
+  );
+}
+
 export default function HomeScreen() {
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [desktopActivity, setDesktopActivity] = useState<DesktopActivity[]>([]);
+  const [expenses, setExpenses] = useState<ExpenseEntry[]>([]);
+  const [locationDebug, setLocationDebug] = useState<LocationDebugState | null>(null);
+  const [locationReminders, setLocationReminders] = useState<LocationReminder[]>([]);
   const [memories, setMemories] = useState<Memory[]>([]);
+  const [places, setPlaces] = useState<SavedPlace[]>([]);
+  const [placeTimeline, setPlaceTimeline] = useState<PlaceTimelineEvent[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectCount, setProjectCount] = useState(0);
+  const [workHours, setWorkHours] = useState<WorkHoursSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -214,8 +519,15 @@ export default function HomeScreen() {
     ? filteredActivity
     : filteredActivity.slice(0, 4);
   const activitySectionTitle = getMetricFilterTitle(metricFilter);
-  const weekdayCounts = useMemo(() => getWeekdayCounts(activity), [activity]);
+  const currentWeek = getWeekRange();
+  const weekRangeLabel = getWeekRangeLabel(currentWeek.start, currentWeek.end);
+  const weeklyActivityLabels = getWeekdayLabels(currentWeek.start);
+  const weekdayCounts = useMemo(
+    () => getWeekdayCounts(activity, currentWeek.start, currentWeek.end),
+    [activity, currentWeek.end, currentWeek.start],
+  );
   const maxWeekCount = Math.max(...weekdayCounts, 1);
+  const weeklyActivityTotal = weekdayCounts.reduce((total, count) => total + count, 0);
   const todayCount = useMemo(() => getTodayActivityCount(activity), [activity]);
   const noteCount = useMemo(
     () =>
@@ -254,10 +566,31 @@ export default function HomeScreen() {
     1,
   );
 
+  const dailySummary = useMemo(
+    () => getDailySummary(activity, expenses, placeTimeline),
+    [activity, expenses, placeTimeline],
+  );
+  const expenseSummary = useMemo(
+    () => getExpenseSummary(expenses),
+    [expenses],
+  );
+  const locationSummary = useMemo(
+    () =>
+      getLocationSummary(
+        places,
+        placeTimeline,
+        locationReminders,
+        workHours,
+        locationDebug,
+      ),
+    [locationDebug, locationReminders, placeTimeline, places, workHours],
+  );
+
   const hasHydratedCacheRef = useRef(false);
   const isSyncingRef = useRef(false);
   const hasCacheRef = useRef(false);
   const lastSyncedAtRef = useRef<number | null>(null);
+  const lastSeenHomeMutationRef = useRef(getHomeMutationRevision());
 
   const applyHomeData = useCallback(
     (nextData: {
@@ -296,6 +629,31 @@ export default function HomeScreen() {
     },
     [activity, applyHomeData, desktopActivity, memories, projects],
   );
+
+  const loadDashboardData = useCallback(async () => {
+    const [
+      nextExpenses,
+      nextPlaces,
+      nextTimeline,
+      nextReminders,
+      nextDebug,
+      nextWorkHours,
+    ] = await Promise.all([
+      listExpenses().catch(() => []),
+      listPlaces().catch(() => []),
+      getTimelineByRange("today").catch(() => []),
+      listLocationReminders().catch(() => []),
+      getLocationDebugState().catch(() => null),
+      getWorkHoursSummary().catch(() => null),
+    ]);
+
+    setExpenses(nextExpenses);
+    setPlaces(nextPlaces);
+    setPlaceTimeline(nextTimeline);
+    setLocationReminders(nextReminders);
+    setLocationDebug(nextDebug);
+    setWorkHours(nextWorkHours);
+  }, []);
 
   const syncHomeData = useCallback(
     async (options?: { refresh?: boolean; silent?: boolean }) => {
@@ -362,10 +720,14 @@ export default function HomeScreen() {
       }
 
       if (hasHydratedCacheRef.current) {
-        if (isHomeCacheFresh(lastSyncedAtRef.current)) {
+        const mutationRevision = getHomeMutationRevision();
+        const hasExternalMutation = mutationRevision !== lastSeenHomeMutationRef.current;
+
+        if (!hasExternalMutation && isHomeCacheFresh(lastSyncedAtRef.current)) {
           return;
         }
 
+        lastSeenHomeMutationRef.current = mutationRevision;
         await syncHomeData({ silent: hasCache });
         return;
       }
@@ -404,7 +766,8 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       loadMemories();
-    }, [loadMemories]),
+      void loadDashboardData();
+    }, [loadDashboardData, loadMemories]),
   );
 
   const submitComposer = async () => {
@@ -419,6 +782,69 @@ export default function HomeScreen() {
       setError("");
 
       const quickReminder = parseQuickReminder(trimmedContent, projects);
+      const locationReminder = await parseLocationReminderRequest(trimmedContent);
+
+      if (locationReminder?.missingPlace) {
+        Alert.alert(
+          "Save place first",
+          locationReminder.placeName
+            ? `I found a location reminder, but ${locationReminder.placeName} is not saved yet. Add it from Location.`
+            : "I found a location reminder, but the place is not saved yet. Add it from Location.",
+          [
+            { text: "Later", style: "cancel" },
+            { text: "Open Location", onPress: () => router.push("/(tabs)/location") },
+          ],
+        );
+        return;
+      }
+
+      if (locationReminder && !locationReminder.missingPlace) {
+        const locationSettings = await readLocationSettings();
+
+        if (!locationSettings.locationReminders) {
+          Alert.alert(
+            "Location reminders are off",
+            "Turn them on from Location settings before creating geofence reminders.",
+            [
+              { text: "Cancel", style: "cancel" },
+              { text: "Open Location", onPress: () => router.push("/(tabs)/location") },
+            ],
+          );
+          return;
+        }
+
+        const description = locationReminder.description || trimmedContent;
+        const metadata = await generateMetadata(description);
+        const memory = await createMemory({
+          title: metadata.title || `Location reminder: ${description}`,
+          content: description,
+          category: "reminder",
+          tags: metadata.tags.length ? metadata.tags : ["reminder", "location"],
+          importance: metadata.importance,
+          kind: "note",
+          notificationEnabled: true,
+          reminderType: "location",
+          triggerType: locationReminder.triggerType,
+          placeId: locationReminder.place.id,
+          placeName: locationReminder.place.name,
+          latitude: locationReminder.place.latitude,
+          longitude: locationReminder.place.longitude,
+          radiusMeters: locationReminder.place.radiusMeters,
+          status: "pending",
+        });
+
+        await createLocationReminder({
+          description,
+          memoryId: memory._id,
+          place: locationReminder.place,
+          title: memory.title,
+          triggerType: locationReminder.triggerType,
+        });
+        await applyOptimisticMemory(memory);
+        setComposerText("");
+        void syncHomeData({ silent: true });
+        return;
+      }
 
       if (quickReminder) {
         const metadata = await generateMetadata(quickReminder.content);
@@ -641,9 +1067,129 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        <AppUsageLinkCard />
+        <View style={styles.dashboardStack}>
+          <DashboardInsightCard
+            accentColor={colors.primary}
+            icon="sparkles-outline"
+            title="Today's Summary"
+            subtitle="Daily dashboard"
+            onPress={() => router.push("/summary/daily")}
+          >
+            <View style={styles.summaryGrid}>
+              <View style={styles.summaryMetric}>
+                <Text style={styles.summaryMetricValue}>
+                  {dailySummary.memoriesCaptured}
+                </Text>
+                <Text style={styles.summaryMetricLabel}>memories</Text>
+              </View>
+              <View style={styles.summaryMetric}>
+                <Text style={styles.summaryMetricValue}>
+                  {dailySummary.tasksCompleted}
+                </Text>
+                <Text style={styles.summaryMetricLabel}>tasks completed</Text>
+              </View>
+              <View style={styles.summaryMetric}>
+                <Text style={styles.summaryMetricValue}>
+                  {formatCurrency(dailySummary.spentToday)}
+                </Text>
+                <Text style={styles.summaryMetricLabel}>spent</Text>
+              </View>
+              <View style={styles.summaryMetric}>
+                <Text style={styles.summaryMetricValue}>
+                  {dailySummary.placesVisited}
+                </Text>
+                <Text style={styles.summaryMetricLabel}>places visited</Text>
+              </View>
+            </View>
+            <Text style={styles.dashboardInsightText}>{dailySummary.sentence}</Text>
+          </DashboardInsightCard>
 
-        {desktopActivity.length ? (
+          <DashboardInsightCard
+            accentColor={colors.success}
+            icon="wallet-outline"
+            title="Expenses"
+            subtitle={`Top category: ${expenseSummary.topCategory}`}
+            onPress={() => router.push("/(tabs)/expenses")}
+          >
+            <View style={styles.expenseDashboardRow}>
+              <View>
+                <Text style={styles.expenseAmount}>
+                  {formatCurrency(expenseSummary.todaySpend)} today
+                </Text>
+                <Text style={styles.expenseMonthText}>
+                  {formatCurrency(expenseSummary.monthSpend)} this month
+                </Text>
+              </View>
+              <View
+                style={[
+                  styles.trendPill,
+                  expenseSummary.trendPercent <= 0 && styles.trendPillDown,
+                ]}
+              >
+                <Ionicons
+                  color={
+                    expenseSummary.trendPercent <= 0
+                      ? colors.success
+                      : colors.reminderTag
+                  }
+                  name={
+                    expenseSummary.trendPercent <= 0
+                      ? "arrow-down"
+                      : "arrow-up"
+                  }
+                  size={13}
+                />
+                <Text
+                  style={[
+                    styles.trendText,
+                    expenseSummary.trendPercent <= 0 && styles.trendTextDown,
+                  ]}
+                >
+                  {Math.abs(expenseSummary.trendPercent)}% vs last month
+                </Text>
+              </View>
+            </View>
+          </DashboardInsightCard>
+
+          <DashboardInsightCard
+            accentColor={colors.projectTag}
+            icon="location-outline"
+            title="Location Intelligence"
+            subtitle={`Current: ${locationSummary.currentLocation}`}
+            onPress={() => router.push("/(tabs)/location")}
+          >
+            <View style={styles.locationDashboardGrid}>
+              <View style={styles.locationDashboardMetric}>
+                <Text style={styles.locationDashboardValue}>
+                  {formatDuration(locationSummary.officeMinutes)}
+                </Text>
+                <Text style={styles.locationDashboardLabel}>Office today</Text>
+              </View>
+              <View style={styles.locationDashboardMetric}>
+                <Text style={styles.locationDashboardValue}>
+                  {formatDuration(locationSummary.homeMinutes)}
+                </Text>
+                <Text style={styles.locationDashboardLabel}>Home today</Text>
+              </View>
+            </View>
+            <View style={styles.locationFooterRow}>
+              <Text style={styles.locationFooterText}>
+                {locationSummary.savedPlaces} saved places
+              </Text>
+              {locationSummary.activeLocationReminders ? (
+                <Text style={styles.locationReminderText}>
+                  {locationSummary.activeLocationReminders} active location reminders
+                </Text>
+              ) : (
+                <Text style={styles.locationReminderText}>No active location reminders</Text>
+              )}
+            </View>
+          </DashboardInsightCard>
+        </View>
+
+        {SHOW_APP_USAGE_SURFACE ? <AppUsageLinkCard /> : null}
+
+        {SHOW_DESKTOP_ACTIVITY_SURFACE && desktopActivity.length ? (
           <View style={styles.desktopSection}>
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionTitle}>Desktop activity</Text>
@@ -786,19 +1332,22 @@ export default function HomeScreen() {
         <View style={styles.panel}>
           <View style={styles.panelHeader}>
             <Text style={styles.panelTitle}>Weekly activity</Text>
-            <Text style={styles.panelCaption}>Last 7 days</Text>
+            <Text style={styles.panelCaption}>{weekRangeLabel}</Text>
           </View>
 
           <View style={styles.chartWrap}>
             {weekdayCounts.map((count, index) => {
-              const height = activity.length
+              const height = weeklyActivityTotal
                 ? Math.max(18, Math.round((count / maxWeekCount) * 94))
                 : 18;
 
               return (
-                <View key={weekdayLabels[index]} style={styles.barColumn}>
+                <View key={`${weeklyActivityLabels[index].weekday}-${weeklyActivityLabels[index].day}`} style={styles.barColumn}>
                   <View style={[styles.bar, { height }]} />
-                  <Text style={styles.barLabel}>{weekdayLabels[index]}</Text>
+                  <View style={styles.barLabelStack}>
+                    <Text style={styles.barLabel}>{weeklyActivityLabels[index].weekday}</Text>
+                    <Text style={styles.barDateLabel}>{weeklyActivityLabels[index].day}</Text>
+                  </View>
                 </View>
               );
             })}
@@ -1102,6 +1651,111 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginTop: 4,
   },
+  dashboardCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 24,
+    borderWidth: 1,
+    padding: 18,
+    ...subtleShadow,
+  },
+  dashboardCardHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 14,
+  },
+  dashboardIcon: {
+    alignItems: "center",
+    borderRadius: 999,
+    height: 40,
+    justifyContent: "center",
+    width: 40,
+  },
+  dashboardInsightText: {
+    color: colors.textMuted,
+    fontSize: 14,
+    fontWeight: "700",
+    lineHeight: 21,
+    marginTop: 14,
+  },
+  dashboardStack: {
+    gap: 16,
+    marginBottom: 22,
+  },
+  dashboardSubtitle: {
+    color: colors.textSoft,
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 3,
+  },
+  dashboardTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  dashboardTitleBlock: {
+    flex: 1,
+  },
+  expenseAmount: {
+    color: colors.text,
+    fontSize: 22,
+    fontWeight: "900",
+    lineHeight: 28,
+  },
+  expenseDashboardRow: {
+    alignItems: "flex-end",
+    flexDirection: "row",
+    gap: 12,
+    justifyContent: "space-between",
+  },
+  expenseMonthText: {
+    color: colors.textMuted,
+    fontSize: 14,
+    fontWeight: "800",
+    marginTop: 5,
+  },
+  locationDashboardGrid: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  locationDashboardLabel: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 5,
+  },
+  locationDashboardMetric: {
+    backgroundColor: colors.backgroundSoft,
+    borderColor: colors.border,
+    borderRadius: 18,
+    borderWidth: 1,
+    flex: 1,
+    padding: 14,
+  },
+  locationDashboardValue: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: "900",
+  },
+  locationFooterRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    justifyContent: "space-between",
+    marginTop: 14,
+  },
+  locationFooterText: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  locationReminderText: {
+    color: colors.projectTag,
+    fontSize: 12,
+    fontWeight: "900",
+  },
   panel: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
@@ -1110,6 +1764,86 @@ const styles = StyleSheet.create({
     marginBottom: 22,
     padding: 18,
     ...subtleShadow,
+  },
+  summaryGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  summaryMetric: {
+    backgroundColor: colors.backgroundSoft,
+    borderColor: colors.border,
+    borderRadius: 18,
+    borderWidth: 1,
+    flexBasis: "47%",
+    flexGrow: 1,
+    padding: 14,
+  },
+  summaryMetricLabel: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 5,
+  },
+  summaryMetricValue: {
+    color: colors.text,
+    fontSize: 22,
+    fontWeight: "900",
+  },
+  trendPill: {
+    alignItems: "center",
+    backgroundColor: colors.dangerSurface,
+    borderRadius: 999,
+    flexDirection: "row",
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  trendPillDown: {
+    backgroundColor: colors.successSurface,
+  },
+  trendText: {
+    color: colors.reminderTag,
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  trendTextDown: {
+    color: colors.success,
+  },
+  locationCopy: {
+    flex: 1,
+  },
+  locationIcon: {
+    alignItems: "center",
+    backgroundColor: colors.accentSurface,
+    borderRadius: 999,
+    height: 38,
+    justifyContent: "center",
+    width: 38,
+  },
+  locationPanel: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 22,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 18,
+    padding: 16,
+    ...subtleShadow,
+  },
+  locationText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 18,
+    marginTop: 3,
+  },
+  locationTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "900",
   },
   panelHeader: {
     alignItems: "center",
@@ -1349,25 +2083,35 @@ const styles = StyleSheet.create({
   chartWrap: {
     alignItems: "flex-end",
     flexDirection: "row",
-    gap: 14,
     minHeight: 126,
     paddingTop: 12,
   },
   barColumn: {
     alignItems: "center",
     flex: 1,
-    gap: 10,
+    gap: 8,
+    minWidth: 0,
   },
   bar: {
     backgroundColor: colors.text,
     borderRadius: 999,
     minHeight: 18,
-    width: 24,
+    width: 22,
+  },
+  barDateLabel: {
+    color: colors.textMuted,
+    fontSize: 10,
+    fontWeight: "800",
   },
   barLabel: {
     color: colors.textSoft,
-    fontSize: 12,
-    fontWeight: "700",
+    fontSize: 10,
+    fontWeight: "800",
+    lineHeight: 12,
+  },
+  barLabelStack: {
+    alignItems: "center",
+    minHeight: 26,
   },
   sectionHeader: {
     alignItems: "center",

@@ -33,6 +33,19 @@ type ActiveWindowModule = {
   } | null>;
 };
 
+const resolvePackagedGetWindowsModule = () => {
+  const platformModule =
+    process.platform === "darwin"
+      ? "macos.js"
+      : process.platform === "linux"
+        ? "linux.js"
+        : "windows.js";
+
+  return pathToFileURL(
+    path.join(process.resourcesPath, "app.asar.unpacked", "node_modules", "get-windows", "lib", platformModule),
+  ).href;
+};
+
 let activeWindowLoader:
   | (() => Promise<{
       owner?: { name?: string | null } | null;
@@ -46,9 +59,7 @@ const getActiveWindow = async () => {
     try {
       const module = (app.isPackaged
         ? ((await import(
-            pathToFileURL(
-              path.join(process.resourcesPath, "app.asar.unpacked", "node_modules", "get-windows", "index.js"),
-            ).href
+            resolvePackagedGetWindowsModule(),
           )) as ActiveWindowModule)
         : ((await import("get-windows")) as ActiveWindowModule));
       activeWindowLoader = module.activeWindow ?? module.default ?? null;

@@ -29,7 +29,15 @@ import {
   scheduleMemoryReminder,
   scheduleTestMemoryNotification,
 } from "../services/notifications";
+import {
+  createLocationReminder,
+  listPlaces,
+  readLocationSettings,
+  type LocationTriggerType,
+  type SavedPlace,
+} from "../services/locationIntelligence";
 import { colors, subtleShadow } from "../styles/theme";
+import { markHomeCacheStale } from "../utils/homeCache";
 
 type SaveMode = {
   id: "personal" | "task" | "reminder" | "project";
@@ -150,6 +158,11 @@ export default function AddScreen() {
   const [isGeneratingMetadata, setIsGeneratingMetadata] = useState(false);
   const [userEditedTitle, setUserEditedTitle] = useState(false);
   const [reminderAt, setReminderAt] = useState(getDefaultReminderAt);
+  const [reminderKind, setReminderKind] = useState<"time" | "location">("time");
+  const [locationTriggerType, setLocationTriggerType] =
+    useState<LocationTriggerType>("enter");
+  const [places, setPlaces] = useState<SavedPlace[]>([]);
+  const [selectedPlaceId, setSelectedPlaceId] = useState("");
   const [activePicker, setActivePicker] = useState<"date" | "time" | null>(
     null,
   );
@@ -197,6 +210,25 @@ export default function AddScreen() {
       mounted = false;
     };
   }, [projectIdParam]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadPlaces = async () => {
+      const nextPlaces = await listPlaces();
+
+      if (mounted) {
+        setPlaces(nextPlaces);
+        setSelectedPlaceId((current) => current || nextPlaces[0]?.id || "");
+      }
+    };
+
+    void loadPlaces();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     const nextMode = getModeById(modeParam);
@@ -382,12 +414,28 @@ export default function AddScreen() {
 
       const fallbackMetadata = getFallbackMetadata();
       const parsedTags = parseTags(tags);
-      const reminderAtDate = selectedMode.id === "reminder" ? reminderAt : null;
+      const selectedPlace = places.find((place) => place.id === selectedPlaceId);
+      const reminderAtDate =
+        selectedMode.id === "reminder" && reminderKind === "time" ? reminderAt : null;
       const resolvedMetadata = metadata || fallbackMetadata;
 
       if (reminderAtDate && reminderAtDate.getTime() <= Date.now()) {
         setError("Reminder time must be in the future");
         return;
+      }
+
+      if (selectedMode.id === "reminder" && reminderKind === "location") {
+        if (!selectedPlace) {
+          setError("Save or select a place before creating a location reminder");
+          return;
+        }
+
+        const locationSettings = await readLocationSettings();
+
+        if (!locationSettings.locationReminders) {
+          setError("Enable location reminders from the Location screen first");
+          return;
+        }
       }
 
       const memory = await createMemory({
@@ -403,9 +451,48 @@ export default function AddScreen() {
         projectId: selectedProjectId || undefined,
         reminderAt: reminderAtDate?.toISOString(),
         notificationEnabled: selectedMode.id === "reminder",
+        reminderType: selectedMode.id === "reminder" ? reminderKind : undefined,
+        triggerType:
+          selectedMode.id === "reminder" && reminderKind === "location"
+            ? locationTriggerType
+            : undefined,
+        placeId:
+          selectedMode.id === "reminder" && reminderKind === "location"
+            ? selectedPlace?.id
+            : undefined,
+        placeName:
+          selectedMode.id === "reminder" && reminderKind === "location"
+            ? selectedPlace?.name
+            : undefined,
+        latitude:
+          selectedMode.id === "reminder" && reminderKind === "location"
+            ? selectedPlace?.latitude
+            : undefined,
+        longitude:
+          selectedMode.id === "reminder" && reminderKind === "location"
+            ? selectedPlace?.longitude
+            : undefined,
+        radiusMeters:
+          selectedMode.id === "reminder" && reminderKind === "location"
+            ? selectedPlace?.radiusMeters
+            : undefined,
+        status:
+          selectedMode.id === "reminder" && reminderKind === "location"
+            ? "pending"
+            : undefined,
       });
 
-      if (selectedMode.id === "reminder") {
+      if (selectedMode.id === "reminder" && reminderKind === "location" && selectedPlace) {
+        await createLocationReminder({
+          description: normalizedContent,
+          memoryId: memory._id,
+          place: selectedPlace,
+          title: memory.title,
+          triggerType: locationTriggerType,
+        });
+      }
+
+      if (selectedMode.id === "reminder" && reminderKind === "time") {
         const notificationId = await scheduleMemoryReminder(memory);
 
         if (!notificationId) {
@@ -416,6 +503,7 @@ export default function AddScreen() {
         }
       }
 
+      await markHomeCacheStale();
       router.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to create memory");
@@ -552,66 +640,159 @@ export default function AddScreen() {
 
             {selectedMode.id === "reminder" ? (
               <View style={styles.reminderBox}>
-                <Text style={styles.label}>Reminder date</Text>
-                {Platform.OS === "ios" ? (
-                  <View style={styles.pickerInline}>
-                    <DateTimePicker
-                      accentColor={colors.primary}
-                      display="compact"
-                      minimumDate={new Date()}
-                      mode="date"
-                      onChange={(_event, date) => setReminderDatePart(date)}
-                      themeVariant="light"
-                      value={reminderAt}
-                    />
-                  </View>
-                ) : (
+                <Text style={styles.label}>Reminder type</Text>
+                <View style={styles.segmentRow}>
                   <Pressable
-                    accessibilityRole="button"
-                    style={styles.pickerButton}
-                    onPress={() => setActivePicker("date")}
+                    style={[styles.segmentButton, reminderKind === "time" && styles.segmentButtonSelected]}
+                    onPress={() => setReminderKind("time")}
                   >
-                    <Text style={styles.pickerButtonText}>
-                      {reminderDateFormatter.format(reminderAt)}
+                    <Text
+                      style={[
+                        styles.segmentButtonText,
+                        reminderKind === "time" && styles.segmentButtonTextSelected,
+                      ]}
+                    >
+                      Time
                     </Text>
                   </Pressable>
-                )}
-
-                <Text style={styles.label}>Reminder time</Text>
-                {Platform.OS === "ios" ? (
-                  <View style={styles.pickerInline}>
-                    <DateTimePicker
-                      accentColor={colors.primary}
-                      display="compact"
-                      mode="time"
-                      onChange={(_event, date) => setReminderTimePart(date)}
-                      themeVariant="light"
-                      value={reminderAt}
-                    />
-                  </View>
-                ) : (
                   <Pressable
-                    accessibilityRole="button"
-                    style={styles.pickerButton}
-                    onPress={() => setActivePicker("time")}
+                    style={[
+                      styles.segmentButton,
+                      reminderKind === "location" && styles.segmentButtonSelected,
+                    ]}
+                    onPress={() => setReminderKind("location")}
                   >
-                    <Text style={styles.pickerButtonText}>
-                      {reminderTimeFormatter.format(reminderAt)}
+                    <Text
+                      style={[
+                        styles.segmentButtonText,
+                        reminderKind === "location" && styles.segmentButtonTextSelected,
+                      ]}
+                    >
+                      Location
                     </Text>
                   </Pressable>
-                )}
+                </View>
 
-                {Platform.OS !== "ios" && activePicker ? (
-                  <DateTimePicker
-                    display={activePicker === "date" ? "calendar" : "clock"}
-                    minimumDate={
-                      activePicker === "date" ? new Date() : undefined
-                    }
-                    mode={activePicker}
-                    onChange={handleAndroidPickerChange}
-                    value={reminderAt}
-                  />
-                ) : null}
+                {reminderKind === "time" ? (
+                  <>
+                    <Text style={styles.label}>Reminder date</Text>
+                    {Platform.OS === "ios" ? (
+                      <View style={styles.pickerInline}>
+                        <DateTimePicker
+                          accentColor={colors.primary}
+                          display="compact"
+                          minimumDate={new Date()}
+                          mode="date"
+                          onChange={(_event, date) => setReminderDatePart(date)}
+                          themeVariant="light"
+                          value={reminderAt}
+                        />
+                      </View>
+                    ) : (
+                      <Pressable
+                        accessibilityRole="button"
+                        style={styles.pickerButton}
+                        onPress={() => setActivePicker("date")}
+                      >
+                        <Text style={styles.pickerButtonText}>
+                          {reminderDateFormatter.format(reminderAt)}
+                        </Text>
+                      </Pressable>
+                    )}
+
+                    <Text style={styles.label}>Reminder time</Text>
+                    {Platform.OS === "ios" ? (
+                      <View style={styles.pickerInline}>
+                        <DateTimePicker
+                          accentColor={colors.primary}
+                          display="compact"
+                          mode="time"
+                          onChange={(_event, date) => setReminderTimePart(date)}
+                          themeVariant="light"
+                          value={reminderAt}
+                        />
+                      </View>
+                    ) : (
+                      <Pressable
+                        accessibilityRole="button"
+                        style={styles.pickerButton}
+                        onPress={() => setActivePicker("time")}
+                      >
+                        <Text style={styles.pickerButtonText}>
+                          {reminderTimeFormatter.format(reminderAt)}
+                        </Text>
+                      </Pressable>
+                    )}
+
+                    {Platform.OS !== "ios" && activePicker ? (
+                      <DateTimePicker
+                        display={activePicker === "date" ? "calendar" : "clock"}
+                        minimumDate={
+                          activePicker === "date" ? new Date() : undefined
+                        }
+                        mode={activePicker}
+                        onChange={handleAndroidPickerChange}
+                        value={reminderAt}
+                      />
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.label}>Trigger</Text>
+                    <View style={styles.segmentRow}>
+                      {(["enter", "exit"] as const).map((trigger) => (
+                        <Pressable
+                          key={trigger}
+                          style={[
+                            styles.segmentButton,
+                            locationTriggerType === trigger && styles.segmentButtonSelected,
+                          ]}
+                          onPress={() => setLocationTriggerType(trigger)}
+                        >
+                          <Text
+                            style={[
+                              styles.segmentButtonText,
+                              locationTriggerType === trigger &&
+                                styles.segmentButtonTextSelected,
+                            ]}
+                          >
+                            {trigger === "enter" ? "Arrive" : "Leave"}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+
+                    <Text style={styles.label}>Place</Text>
+                    {places.length ? (
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+                        {places.map((place) => {
+                          const selected = selectedPlaceId === place.id;
+
+                          return (
+                            <Pressable
+                              key={place.id}
+                              style={[styles.chip, selected && styles.selectedChip]}
+                              onPress={() => setSelectedPlaceId(place.id)}
+                            >
+                              <Text
+                                style={[
+                                  styles.chipText,
+                                  selected && styles.selectedChipText,
+                                ]}
+                              >
+                                {place.name}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </ScrollView>
+                    ) : (
+                      <Text style={styles.locationHelp}>
+                        No saved places yet. Add Home, Office, or Mall from the Location screen first.
+                      </Text>
+                    )}
+                  </>
+                )}
 
                 {/* <Pressable
                   accessibilityRole="button"
@@ -919,6 +1100,12 @@ const styles = StyleSheet.create({
   reminderBox: {
     marginTop: 6,
   },
+  locationHelp: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 19,
+  },
   pickerInline: {
     alignItems: "flex-start",
     backgroundColor: colors.background,
@@ -989,6 +1176,32 @@ const styles = StyleSheet.create({
   },
   selectedChipText: {
     color: colors.white,
+  },
+  segmentButton: {
+    alignItems: "center",
+    backgroundColor: colors.backgroundSoft,
+    borderColor: colors.border,
+    borderRadius: 999,
+    borderWidth: 1,
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  segmentButtonSelected: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  segmentButtonText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  segmentButtonTextSelected: {
+    color: colors.white,
+  },
+  segmentRow: {
+    flexDirection: "row",
+    gap: 8,
   },
   inlineLoader: {
     marginVertical: 16,

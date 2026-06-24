@@ -13,6 +13,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { generateMetadata } from '../../services/ai';
 import { deleteMemory, getMemory, Memory, updateMemory } from '../../services/api';
 import { cardShadow, colors, subtleShadow } from '../../styles/theme';
+import { markHomeCacheStale } from '../../utils/homeCache';
 
 const formatDateTime = (value: string) =>
   new Intl.DateTimeFormat(undefined, {
@@ -112,6 +113,7 @@ export default function DetailScreen() {
             setDeleting(true);
             setError('');
             await deleteMemory(id);
+            await markHomeCacheStale();
             router.replace('/');
           } catch (err) {
             setError(err instanceof Error ? err.message : 'Unable to delete memory');

@@ -4,6 +4,8 @@ import { createRoot } from "react-dom/client";
 import type { CompanionConfig, DashboardStats } from "../../shared/types";
 import "./styles.css";
 
+const SHOW_DESKTOP_DASHBOARD = false;
+
 const formatMinutes = (minutes: number) => {
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
@@ -159,6 +161,90 @@ function App() {
 
   if (loading || !stats) {
     return <main className="shell loading">Loading MemoryOS Companion...</main>;
+  }
+
+  if (!SHOW_DESKTOP_DASHBOARD) {
+    return (
+      <main className="shell">
+        <header className="hero simple-hero">
+          <div>
+            <p className="eyebrow">MemoryOS Companion</p>
+            <h1>Companion settings</h1>
+            <p className="subtitle">
+              Desktop activity tracking is temporarily hidden from the app UI. The underlying code is still kept in the project for later.
+            </p>
+          </div>
+          <div className="status-card">
+            <span>Status</span>
+            <strong>Hidden</strong>
+            <p>{config?.apiKey ? "Configuration is saved locally." : "Configuration still needs an API key."}</p>
+          </div>
+        </header>
+
+        <section className="panel settings-panel">
+          <div className="panel-header">
+            <h2>Companion Settings</h2>
+            <span>{config?.apiKey ? "Configured" : "Needs API key"}</span>
+          </div>
+          {draftConfig ? (
+            <div className="settings-grid">
+              <label className="field">
+                <span>API URL</span>
+                <input
+                  type="url"
+                  value={draftConfig.apiUrl}
+                  onChange={(event) =>
+                    setDraftConfig({ ...draftConfig, apiUrl: event.target.value })
+                  }
+                  placeholder="https://memory-green-kappa.vercel.app"
+                />
+              </label>
+              <label className="field">
+                <span>API Key</span>
+                <input
+                  type="password"
+                  value={draftConfig.apiKey}
+                  onChange={(event) =>
+                    setDraftConfig({ ...draftConfig, apiKey: event.target.value })
+                  }
+                  placeholder="Enter production x-api-key"
+                />
+              </label>
+              <label className="field">
+                <span>Dashboard URL</span>
+                <input
+                  type="url"
+                  value={draftConfig.dashboardUrl}
+                  onChange={(event) =>
+                    setDraftConfig({ ...draftConfig, dashboardUrl: event.target.value })
+                  }
+                  placeholder="https://memory-green-kappa.vercel.app"
+                />
+              </label>
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={draftConfig.launchAtLogin}
+                  onChange={(event) =>
+                    setDraftConfig({ ...draftConfig, launchAtLogin: event.target.checked })
+                  }
+                />
+                <span>Launch at login</span>
+              </label>
+            </div>
+          ) : null}
+          <div className="settings-actions">
+            <button disabled={!draftConfig || savingConfig} onClick={() => void saveConfig()}>
+              {savingConfig ? "Saving..." : "Save settings"}
+            </button>
+            <p className="settings-copy">
+              Packaged app builds use saved local settings instead of your repo `.env`.
+            </p>
+          </div>
+          {configMessage ? <p className="settings-message">{configMessage}</p> : null}
+        </section>
+      </main>
+    );
   }
 
   return (

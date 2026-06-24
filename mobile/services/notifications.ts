@@ -73,6 +73,52 @@ const ensureReminderChannel = async () => {
   return true;
 };
 
+export const scheduleLocationReminderNotification = async ({
+  body,
+  reminderId,
+  title = 'MemoryOS Reminder',
+}: {
+  body: string;
+  reminderId: string;
+  title?: string;
+}) => {
+  const Notifications = await getNotifications();
+
+  if (!Notifications) {
+    return null;
+  }
+
+  const hasPermission = await ensureNotificationPermissions();
+
+  if (!hasPermission) {
+    return null;
+  }
+
+  const hasChannel = await ensureReminderChannel();
+
+  if (!hasChannel) {
+    return null;
+  }
+
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      title,
+      body,
+      data: {
+        reminderId,
+        source: 'location-reminder'
+      },
+      sound: true
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+      seconds: 1,
+      repeats: false,
+      channelId: REMINDER_CHANNEL_ID
+    }
+  });
+};
+
 export const scheduleMemoryReminder = async (memory: Memory) => {
   const Notifications = await getNotifications();
 

@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { colors } from '../styles/theme';
+import '../services/locationIntelligence';
 
 export default function RootLayout() {
   return (
@@ -26,6 +27,8 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="add" options={{ title: 'Add Memory' }} />
         <Stack.Screen name="app-usage" options={{ title: 'App Usage' }} />
+        <Stack.Screen name="location" options={{ headerShown: false }} />
+        <Stack.Screen name="summary/daily" options={{ headerShown: false }} />
         <Stack.Screen name="activity/[type]/[id]" options={{ title: 'Details' }} />
         <Stack.Screen name="memories/[id]" options={{ title: 'Memory' }} />
         <Stack.Screen name="projects/[id]" options={{ title: 'Project' }} />

@@ -26,6 +26,15 @@ const allowedUpdateFields = [
   'projectId',
   'reminderAt',
   'notificationEnabled',
+  'reminderType',
+  'triggerType',
+  'placeId',
+  'placeName',
+  'latitude',
+  'longitude',
+  'radiusMeters',
+  'status',
+  'triggeredAt',
   'importance'
 ] as const;
 

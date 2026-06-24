@@ -25,6 +25,22 @@ type MetadataResponse = {
   importance: number;
 };
 
+export type CaptureClassificationType =
+  | 'Memory'
+  | 'Task'
+  | 'Reminder'
+  | 'Expense'
+  | 'Project Note'
+  | 'Work Log';
+
+export type CaptureClassification = {
+  type: CaptureClassificationType;
+  title: string;
+  category: string;
+  tags: string[];
+  confidence: number;
+};
+
 const PROMPT = `You are a metadata generation engine.
 
 Generate metadata for this content.
@@ -108,6 +124,50 @@ const validateMetadata = (value: unknown): MetadataResponse | null => {
   };
 };
 
+const captureTypes = new Set<CaptureClassificationType>([
+  'Memory',
+  'Task',
+  'Reminder',
+  'Expense',
+  'Project Note',
+  'Work Log'
+]);
+
+const validateCaptureClassification = (
+  value: unknown,
+  fallbackTitle: string
+): CaptureClassification | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const type = typeof record.type === 'string' ? record.type.trim() : '';
+  const title = typeof record.title === 'string' ? record.title.trim() : fallbackTitle;
+  const category = typeof record.category === 'string' ? record.category.trim().toLowerCase() : 'general';
+  const rawTags = Array.isArray(record.tags) ? record.tags : [];
+  const confidence =
+    typeof record.confidence === 'number' ? record.confidence : Number.NaN;
+
+  if (!captureTypes.has(type as CaptureClassificationType)) {
+    return null;
+  }
+
+  return {
+    type: type as CaptureClassificationType,
+    title: title || fallbackTitle,
+    category: category || 'general',
+    tags: rawTags
+      .filter((tag): tag is string => typeof tag === 'string')
+      .map(normalizeTag)
+      .filter(Boolean)
+      .slice(0, 6),
+    confidence: Number.isFinite(confidence)
+      ? Math.min(1, Math.max(0, confidence))
+      : 0.7
+  };
+};
+
 const requestModel = async (content: string, model: (typeof MODELS)[number]) => {
   const apiKey = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY;
 
@@ -184,3 +244,148 @@ export const generateMetadata = async (content: string): Promise<MetadataRespons
 };
 
 export const getFallbackMetadata = () => FALLBACK_METADATA;
+
+const getFallbackCaptureClassification = (content: string): CaptureClassification => {
+  const normalized = content.toLowerCase();
+  const title = content.trim().slice(0, 64) || 'Quick Capture';
+
+  if (/(₹|rs\.?|inr)\s*\d+|\bspent\b|\bpaid\b/.test(normalized)) {
+    return {
+      type: 'Expense',
+      title,
+      category: normalized.includes('zomato') || normalized.includes('swiggy') ? 'food' : 'general',
+      tags: ['expense'],
+      confidence: 0.72
+    };
+  }
+
+  if (/\b(need|remind|remember|when i|tomorrow|today|later)\b/.test(normalized)) {
+    return {
+      type: 'Reminder',
+      title,
+      category: 'reminder',
+      tags: ['reminder'],
+      confidence: 0.68
+    };
+  }
+
+  if (/\b(todo|task|call|follow up|finish|fix)\b/.test(normalized)) {
+    return {
+      type: 'Task',
+      title,
+      category: 'task',
+      tags: ['task'],
+      confidence: 0.66
+    };
+  }
+
+  if (/\b(finished|completed|shipped|implemented|built)\b/.test(normalized)) {
+    return {
+      type: 'Work Log',
+      title,
+      category: 'work',
+      tags: ['work-log'],
+      confidence: 0.66
+    };
+  }
+
+  if (/\b(project|sdk|feature|api|bug|client)\b/.test(normalized)) {
+    return {
+      type: 'Project Note',
+      title,
+      category: 'projects',
+      tags: ['project-note'],
+      confidence: 0.64
+    };
+  }
+
+  return {
+    type: 'Memory',
+    title,
+    category: 'personal',
+    tags: ['memory'],
+    confidence: 0.6
+  };
+};
+
+export const classifyCapture = async (content: string): Promise<CaptureClassification> => {
+  const trimmedContent = content.trim();
+  const fallback = getFallbackCaptureClassification(trimmedContent);
+
+  if (!trimmedContent) {
+    return fallback;
+  }
+
+  const prompt = `You classify fast captures for a personal memory app.
+
+Return ONLY JSON.
+
+Schema:
+{
+  "type": "Memory | Task | Reminder | Expense | Project Note | Work Log",
+  "title": "",
+  "category": "",
+  "tags": [],
+  "confidence": 0.0
+}
+
+Rules:
+- Expense: money spent or received.
+- Reminder: needs date, time, place, or future action reminder.
+- Task: actionable work or todo.
+- Project Note: project/client/product context or decisions.
+- Work Log: completed work/status update.
+- Memory: general note or personal memory.
+- title must be concise.
+- tags must be lowercase.`;
+
+  for (const model of MODELS) {
+    try {
+      const apiKey = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY;
+
+      if (!apiKey) {
+        throw new Error('EXPO_PUBLIC_OPENROUTER_API_KEY is not set');
+      }
+
+      const response = await fetch(OPENROUTER_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: prompt },
+            { role: 'user', content: `Capture:\n\n${trimmedContent}` }
+          ],
+          temperature: 0.1
+        })
+      });
+
+      if (!response.ok) {
+        continue;
+      }
+
+      const body = (await response.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      const rawContent = body.choices?.[0]?.message?.content;
+
+      if (!rawContent) {
+        continue;
+      }
+
+      const parsed = JSON.parse(extractJson(rawContent));
+      const classification = validateCaptureClassification(parsed, fallback.title);
+
+      if (classification) {
+        return classification;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return fallback;
+};

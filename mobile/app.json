@@ -10,7 +10,15 @@
     "newArchEnabled": true,
     "plugins": [
       "expo-router",
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow MemoryOS to use your location for saved places, geofence reminders, and place timeline.",
+          "locationAlwaysPermission": "Allow MemoryOS to trigger location reminders when the app is closed.",
+          "locationWhenInUsePermission": "Allow MemoryOS to save places using your current location."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
@@ -22,7 +30,11 @@
       },
       "permissions": [
         "android.permission.PACKAGE_USAGE_STATS",
-        "android.permission.QUERY_ALL_PACKAGES"
+        "android.permission.QUERY_ALL_PACKAGES",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.POST_NOTIFICATIONS"
       ],
       "package": "com.anonymous.memorymobile"
     },

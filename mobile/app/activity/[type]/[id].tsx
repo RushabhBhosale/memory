@@ -17,6 +17,7 @@ import {
   type ActivityType
 } from '../../../services/api';
 import { colors, subtleShadow } from '../../../styles/theme';
+import { markHomeCacheStale } from '../../../utils/homeCache';
 
 const formatDateTime = (value: string) =>
   new Intl.DateTimeFormat(undefined, {
@@ -123,6 +124,7 @@ export default function ActivityDetailScreen() {
             setDeleting(true);
             setError('');
             await deleteActivityItem(type, id);
+            await markHomeCacheStale();
             router.replace('/');
           } catch (err) {
             setError(err instanceof Error ? err.message : `Unable to delete ${label}`);

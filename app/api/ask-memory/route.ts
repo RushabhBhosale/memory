@@ -413,6 +413,16 @@ const getRelevantHighlights = (items: ActivityItem[]) =>
       .filter(Boolean)
   );
 
+const buildGroundedFallbackAnswer = (items: ActivityItem[]): AnswerPayload => {
+  const availableTitles = items.map((item) => item.title).filter(Boolean);
+
+  return {
+    answer: `I found ${items.length} saved item${items.length === 1 ? '' : 's'} related to that.`,
+    summary: getRelevantHighlights(items).slice(0, 5),
+    relevantTitles: availableTitles.slice(0, 6)
+  };
+};
+
 const validateAnswerPayload = (
   value: unknown,
   availableTitles: string[]
@@ -511,6 +521,13 @@ ${JSON.stringify(sourcePayload, null, 2)}`;
       const answer = validateAnswerPayload(parsed, availableTitles);
 
       if (answer) {
+        if (
+          answer.answer === NO_RESULTS_ANSWER &&
+          (answer.summary.length > 0 || answer.relevantTitles.length > 0 || items.length > 0)
+        ) {
+          return buildGroundedFallbackAnswer(items);
+        }
+
         return answer;
       }
     } catch {
@@ -518,11 +535,7 @@ ${JSON.stringify(sourcePayload, null, 2)}`;
     }
   }
 
-  return {
-    answer: `I found ${items.length} saved item${items.length === 1 ? '' : 's'} related to that.`,
-    summary: items.slice(0, 4).map((item) => item.title),
-    relevantTitles: availableTitles.slice(0, 6)
-  };
+  return buildGroundedFallbackAnswer(items);
 };
 
 const findActivities = async (query: string, plan: SearchPlan) => {

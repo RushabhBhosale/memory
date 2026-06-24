@@ -7,8 +7,11 @@ const HOME_PROJECTS_KEY = "home:projects";
 const HOME_TASKS_KEY = "home:tasks";
 const HOME_LAST_SYNCED_AT_KEY = "home:lastSyncedAt";
 const HOME_DESKTOP_ACTIVITY_KEY = "home:desktopActivity";
+const HOME_MUTATION_REVISION_KEY = "home:mutationRevision";
 
 export const HOME_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
+
+let homeMutationRevision = 0;
 
 export type HomeCacheData = {
   activity: ActivityItem[];
@@ -76,3 +79,14 @@ export const writeHomeCache = async (data: {
 
 export const isHomeCacheFresh = (lastSyncedAt: number | null) =>
   Boolean(lastSyncedAt && Date.now() - lastSyncedAt < HOME_CACHE_MAX_AGE_MS);
+
+export const getHomeMutationRevision = () => homeMutationRevision;
+
+export const markHomeCacheStale = async () => {
+  homeMutationRevision = Math.max(Date.now(), homeMutationRevision + 1);
+
+  await Promise.all([
+    AsyncStorage.setItem(HOME_LAST_SYNCED_AT_KEY, "0"),
+    AsyncStorage.setItem(HOME_MUTATION_REVISION_KEY, String(homeMutationRevision)),
+  ]).catch(() => undefined);
+};
