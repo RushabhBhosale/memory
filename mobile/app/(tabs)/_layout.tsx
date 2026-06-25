@@ -83,6 +83,12 @@ function FloatingTabBar({
   onCapturePress,
 }: FloatingTabBarProps) {
   const insets = useSafeAreaInsets();
+  const focusedRouteName = state.routes[state.index]?.name;
+
+  if (focusedRouteName === "search") {
+    return null;
+  }
+
   const visibleRoutes = state.routes.filter((route) =>
     Boolean(tabConfig[route.name]),
   );

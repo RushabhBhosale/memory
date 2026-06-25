@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import { router } from "expo-router";
 import {
   forwardRef,
   useEffect,
@@ -629,7 +630,8 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
               }
 
               if (item.label === "Screenshot Memory") {
-                Alert.alert("Coming soon", "Screenshot capture can be added next.");
+                close();
+                router.push("/screenshots");
                 return;
               }
 

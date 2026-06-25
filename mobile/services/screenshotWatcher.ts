@@ -3,7 +3,6 @@ import { NativeEventEmitter, NativeModules, Platform } from "react-native";
 import {
   createMemory,
   createScreenshotInboxItem,
-  deleteScreenshotInboxItem,
   listScreenshotInbox,
   updateScreenshotInboxItem,
   type ScreenshotInboxItem,
@@ -135,7 +134,7 @@ export const ignoreScreenshot = async (item: ScreenshotInboxItem) => {
 };
 
 export const deleteScreenshot = async (item: ScreenshotInboxItem) => {
-  await deleteScreenshotInboxItem(item._id);
+  await updateScreenshotInboxItem(item._id, { dismissed: true });
 };
 
 export const saveScreenshotToMemory = async (item: ScreenshotInboxItem) => {

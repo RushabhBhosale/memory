@@ -73,6 +73,32 @@ const ensureReminderChannel = async () => {
   return true;
 };
 
+export const getNotificationPermissionStatus = async () => {
+  const Notifications = await getNotifications();
+
+  if (!Notifications) {
+    return 'unavailable';
+  }
+
+  const permissions = await Notifications.getPermissionsAsync();
+
+  if (permissions.granted) {
+    return 'granted';
+  }
+
+  return permissions.status || 'undetermined';
+};
+
+export const requestNotificationPermissions = async () => {
+  const hasPermission = await ensureNotificationPermissions();
+
+  if (hasPermission) {
+    await ensureReminderChannel();
+  }
+
+  return hasPermission;
+};
+
 export const scheduleLocationReminderNotification = async ({
   body,
   reminderId,

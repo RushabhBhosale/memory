@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -387,15 +387,6 @@ const getTodayActivityCount = (items: ActivityItem[]) => {
 
 type MetricFilter = "today" | "notes" | "tasks" | null;
 
-type DashboardInsightCardProps = {
-  accentColor?: string;
-  children: ReactNode;
-  icon: keyof typeof Ionicons.glyphMap;
-  onPress: () => void;
-  subtitle?: string;
-  title: string;
-};
-
 const getMetricFilteredActivity = (
   items: ActivityItem[],
   filter: MetricFilter,
@@ -452,31 +443,6 @@ const getAiInsight = (
 
   return options[slot % options.length];
 };
-
-function DashboardInsightCard({
-  accentColor = colors.primary,
-  children,
-  icon,
-  onPress,
-  subtitle,
-  title,
-}: DashboardInsightCardProps) {
-  return (
-    <Pressable style={styles.dashboardCard} onPress={onPress}>
-      <View style={styles.dashboardCardHeader}>
-        <View style={[styles.dashboardIcon, { backgroundColor: `${accentColor}18` }]}>
-          <Ionicons color={accentColor} name={icon} size={18} />
-        </View>
-        <View style={styles.dashboardTitleBlock}>
-          <Text style={styles.dashboardTitle}>{title}</Text>
-          {subtitle ? <Text style={styles.dashboardSubtitle}>{subtitle}</Text> : null}
-        </View>
-        <Ionicons color={colors.textSoft} name="arrow-forward" size={18} />
-      </View>
-      {children}
-    </Pressable>
-  );
-}
 
 export default function HomeScreen() {
   const [activity, setActivity] = useState<ActivityItem[]>([]);
@@ -931,86 +897,87 @@ export default function HomeScreen() {
               {offlineMessage || "Syncing..."}
             </Text>
           ) : null} */}
-          <Pressable
-            style={styles.headerAction}
-            onPress={() => router.push("/search")}
-          >
-            <Ionicons color={colors.text} name="sparkles-outline" size={18} />
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable
+              style={styles.headerAction}
+              onPress={() => router.push("/settings")}
+            >
+              <Ionicons color={colors.text} name="settings-outline" size={18} />
+            </Pressable>
+            <Pressable
+              style={styles.headerAction}
+              onPress={() => router.push("/search")}
+            >
+              <Ionicons color={colors.text} name="sparkles-outline" size={18} />
+            </Pressable>
+          </View>
         </View>
 
         <View style={styles.heroBlock}>
           <Text style={styles.greeting}>{greeting}</Text>
-          <View style={styles.insightRow}>
-            <Ionicons
-              color={colors.primary}
-              name="sparkles-outline"
-              size={14}
-            />
-            <Text style={styles.insightText}>{aiInsight}</Text>
+          <Text style={styles.heroSentence}>{aiInsight}</Text>
+        </View>
+
+        <View style={styles.composerCard}>
+          <TextInput
+            value={composerText}
+            onChangeText={setComposerText}
+            multiline
+            placeholder="Capture anything..."
+            placeholderTextColor={colors.textSoft}
+            style={styles.composerInput}
+            textAlignVertical="top"
+          />
+
+          <View style={styles.composerFooter}>
+            <Text style={styles.composerHelper}>Notes, tasks, reminders, ideas</Text>
+            <Pressable
+              disabled={savingComposer}
+              style={[
+                styles.sendButton,
+                savingComposer && styles.sendButtonDisabled,
+              ]}
+              onPress={() => void submitComposer()}
+            >
+              {savingComposer ? (
+                <ActivityIndicator color={colors.white} size="small" />
+              ) : (
+                <Ionicons color={colors.white} name="arrow-up" size={18} />
+              )}
+            </Pressable>
           </View>
         </View>
 
-        <View style={styles.composerShell}>
-          <View style={styles.composerGlowA} />
-          <View style={styles.composerGlowB} />
-
-          <View style={styles.composerCard}>
-            <View style={styles.composerHeader}>
-              <View style={styles.composerBadge}>
-                <Ionicons
-                  color={colors.primary}
-                  name="sparkles-outline"
-                  size={13}
-                />
-                <Text style={styles.composerBadgeText}>AI quick capture</Text>
+        <View style={styles.primaryActions}>
+          <Pressable style={styles.primaryAction} onPress={() => router.push("/search")}>
+            <Ionicons color={colors.text} name="sparkles-outline" size={18} />
+            <Text style={styles.primaryActionText}>Ask</Text>
+          </Pressable>
+          <Pressable style={styles.primaryAction} onPress={() => router.push("/screenshots")}>
+            <Ionicons color={colors.text} name="images-outline" size={18} />
+            <Text style={styles.primaryActionText}>Screens</Text>
+            {screenshotInboxSummary.pending ? (
+              <View style={styles.actionBadge}>
+                <Text style={styles.actionBadgeText}>{screenshotInboxSummary.pending}</Text>
               </View>
-            </View>
-
-            <TextInput
-              value={composerText}
-              onChangeText={setComposerText}
-              multiline
-              placeholder="Log a memory, work update, reminder, or idea..."
-              placeholderTextColor={colors.textSoft}
-              style={styles.composerInput}
-              textAlignVertical="top"
-            />
-
-            <View style={styles.composerFooter}>
-              <View style={styles.composerHints}>
-                <View style={styles.hintPill}>
-                  <Text style={styles.hintText}>Auto title</Text>
-                </View>
-                <View style={styles.hintPill}>
-                  <Text style={styles.hintText}>Smart tags</Text>
-                </View>
-              </View>
-
-              <Pressable
-                disabled={savingComposer}
-                style={[
-                  styles.sendButton,
-                  savingComposer && styles.sendButtonDisabled,
-                ]}
-                onPress={() => void submitComposer()}
-              >
-                {savingComposer ? (
-                  <ActivityIndicator color={colors.white} size="small" />
-                ) : (
-                  <Ionicons color={colors.white} name="arrow-up" size={18} />
-                )}
-              </Pressable>
-            </View>
-          </View>
+            ) : null}
+          </Pressable>
+          <Pressable style={styles.primaryAction} onPress={() => router.push("/(tabs)/expenses")}>
+            <Ionicons color={colors.text} name="wallet-outline" size={18} />
+            <Text style={styles.primaryActionText}>Spend</Text>
+          </Pressable>
+          <Pressable style={styles.primaryAction} onPress={() => router.push("/(tabs)/location")}>
+            <Ionicons color={colors.text} name="location-outline" size={18} />
+            <Text style={styles.primaryActionText}>Places</Text>
+          </Pressable>
         </View>
 
-        <View style={styles.metricsRow}>
+        <View style={styles.overviewGrid}>
           <Pressable
             accessibilityRole="button"
             style={[
-              styles.metricCardLarge,
-              metricFilter === "today" && styles.metricCardSelected,
+              styles.overviewCard,
+              metricFilter === "today" && styles.overviewCardSelected,
             ]}
             onPress={() =>
               setMetricFilter((current) =>
@@ -1018,189 +985,125 @@ export default function HomeScreen() {
               )
             }
           >
-            <Text style={styles.metricEyebrow}>Today</Text>
-            <Text style={styles.metricValue}>{todayCount}</Text>
-            <Text style={styles.metricLabel}>items captured</Text>
+            <View style={styles.overviewTopRow}>
+              <Text style={styles.overviewLabel}>Today</Text>
+              <Ionicons color={colors.textSoft} name="calendar-outline" size={15} />
+            </View>
+            <Text style={styles.overviewValue}>{todayCount}</Text>
+            <Text style={styles.overviewHint}>items captured</Text>
           </Pressable>
-
-          <View style={styles.metricStack}>
-            <Pressable
-              accessibilityRole="button"
-              style={[
-                styles.metricCardSmall,
-                metricFilter === "notes" && styles.metricCardSelected,
-              ]}
-              onPress={() =>
-                setMetricFilter((current) =>
-                  current === "notes" ? null : "notes",
-                )
-              }
-            >
-              <Text style={styles.metricMiniValue}>{noteCount}</Text>
-              <Text style={styles.metricMiniLabel}>notes</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              style={[
-                styles.metricCardSmall,
-                metricFilter === "tasks" && styles.metricCardSelected,
-              ]}
-              onPress={() =>
-                setMetricFilter((current) =>
-                  current === "tasks" ? null : "tasks",
-                )
-              }
-            >
-              <Text style={styles.metricMiniValue}>{taskCount}</Text>
-              <Text style={styles.metricMiniLabel}>tasks</Text>
-            </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            style={styles.overviewCard}
+            onPress={() =>
+              router.push({
+                pathname: "/activity-list/[filter]",
+                params: { filter: "notes" },
+              })
+            }
+          >
+            <View style={styles.overviewTopRow}>
+              <Text style={styles.overviewLabel}>Notes</Text>
+              <Ionicons color={colors.textSoft} name="document-text-outline" size={15} />
+            </View>
+            <Text style={styles.overviewValue}>{noteCount}</Text>
+            <Text style={styles.overviewHint}>saved context</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            style={styles.overviewCard}
+            onPress={() =>
+              router.push({
+                pathname: "/activity-list/[filter]",
+                params: { filter: "tasks" },
+              })
+            }
+          >
+            <View style={styles.overviewTopRow}>
+              <Text style={styles.overviewLabel}>Tasks</Text>
+              <Ionicons color={colors.textSoft} name="checkbox-outline" size={15} />
+            </View>
+            <Text style={styles.overviewValue}>{taskCount}</Text>
+            <Text style={styles.overviewHint}>in memory</Text>
+          </Pressable>
+          <View style={styles.overviewCard}>
+            <View style={styles.overviewTopRow}>
+              <Text style={styles.overviewLabel}>Spent</Text>
+              <Ionicons color={colors.textSoft} name="wallet-outline" size={15} />
+            </View>
+            <Text adjustsFontSizeToFit minimumFontScale={0.72} numberOfLines={1} style={styles.overviewValue}>
+              {formatCurrency(dailySummary.spentToday)}
+            </Text>
+            <Text style={styles.overviewHint}>today</Text>
           </View>
         </View>
 
-        <View style={styles.dashboardStack}>
-          {screenshotInboxSummary.shouldShow ? (
-            <DashboardInsightCard
-              accentColor={colors.secondary}
-              icon="images-outline"
-              title="Screenshot Inbox"
-              subtitle={`${screenshotInboxSummary.pending} pending screenshots`}
-              onPress={() => router.push("/screenshots")}
-            >
-              <View style={styles.screenshotInboxRow}>
-                <View>
-                  <Text style={styles.screenshotInboxValue}>
-                    {screenshotInboxSummary.pending} pending
-                  </Text>
-                  <Text style={styles.screenshotInboxLabel}>
-                    waiting to become memories
-                  </Text>
-                </View>
-                <View style={styles.screenshotProcessedPill}>
-                  <Text style={styles.screenshotProcessedText}>
-                    {screenshotInboxSummary.processedToday} processed today
-                  </Text>
-                </View>
-              </View>
-            </DashboardInsightCard>
-          ) : null}
+        <View style={styles.todayPanel}>
+          <View style={styles.todayPanelHeader}>
+            <View style={styles.todayPanelTopRow}>
+              <Text style={styles.panelTitle}>Today</Text>
+              <Pressable style={styles.panelLinkButton} onPress={() => router.push("/summary/daily")}>
+                <Text style={styles.panelLinkText}>Open</Text>
+              </Pressable>
+            </View>
+            <Text numberOfLines={3} style={styles.panelCaption}>
+              {dailySummary.sentence}
+            </Text>
+          </View>
 
-          <DashboardInsightCard
-            accentColor={colors.primary}
-            icon="sparkles-outline"
-            title="Today's Summary"
-            subtitle="Daily dashboard"
-            onPress={() => router.push("/summary/daily")}
-          >
-            <View style={styles.summaryGrid}>
-              <View style={styles.summaryMetric}>
-                <Text style={styles.summaryMetricValue}>
-                  {dailySummary.memoriesCaptured}
-                </Text>
-                <Text style={styles.summaryMetricLabel}>memories</Text>
+          <View style={styles.todayRows}>
+            <Pressable style={styles.todayRow} onPress={() => router.push("/summary/daily")}>
+              <View style={[styles.todayIcon, { backgroundColor: colors.accentSurface }]}>
+                <Ionicons color={colors.primary} name="sparkles-outline" size={17} />
               </View>
-              <View style={styles.summaryMetric}>
-                <Text style={styles.summaryMetricValue}>
-                  {dailySummary.tasksCompleted}
+              <View style={styles.todayCopy}>
+                <Text style={styles.todayTitle}>Daily summary</Text>
+                <Text numberOfLines={2} style={styles.todayMeta}>
+                  {dailySummary.memoriesCaptured} memories, {dailySummary.tasksCompleted} tasks, {dailySummary.placesVisited} places
                 </Text>
-                <Text style={styles.summaryMetricLabel}>tasks completed</Text>
               </View>
-              <View style={styles.summaryMetric}>
-                <Text style={styles.summaryMetricValue}>
-                  {formatCurrency(dailySummary.spentToday)}
-                </Text>
-                <Text style={styles.summaryMetricLabel}>spent</Text>
-              </View>
-              <View style={styles.summaryMetric}>
-                <Text style={styles.summaryMetricValue}>
-                  {dailySummary.placesVisited}
-                </Text>
-                <Text style={styles.summaryMetricLabel}>places visited</Text>
-              </View>
-            </View>
-            <Text style={styles.dashboardInsightText}>{dailySummary.sentence}</Text>
-          </DashboardInsightCard>
+              <Ionicons color={colors.textSoft} name="chevron-forward" size={18} />
+            </Pressable>
 
-          <DashboardInsightCard
-            accentColor={colors.success}
-            icon="wallet-outline"
-            title="Expenses"
-            subtitle={`Top category: ${expenseSummary.topCategory}`}
-            onPress={() => router.push("/(tabs)/expenses")}
-          >
-            <View style={styles.expenseDashboardRow}>
-              <View>
-                <Text style={styles.expenseAmount}>
-                  {formatCurrency(expenseSummary.todaySpend)} today
-                </Text>
-                <Text style={styles.expenseMonthText}>
-                  {formatCurrency(expenseSummary.monthSpend)} this month
+            <Pressable style={styles.todayRow} onPress={() => router.push("/screenshots")}>
+              <View style={[styles.todayIcon, { backgroundColor: "#EEF5FF" }]}>
+                <Ionicons color={colors.secondary} name="images-outline" size={17} />
+              </View>
+              <View style={styles.todayCopy}>
+                <Text style={styles.todayTitle}>Screenshot inbox</Text>
+                <Text numberOfLines={2} style={styles.todayMeta}>
+                  {screenshotInboxSummary.pending} pending, {screenshotInboxSummary.processedToday} processed today
                 </Text>
               </View>
-              <View
-                style={[
-                  styles.trendPill,
-                  expenseSummary.trendPercent <= 0 && styles.trendPillDown,
-                ]}
-              >
-                <Ionicons
-                  color={
-                    expenseSummary.trendPercent <= 0
-                      ? colors.success
-                      : colors.reminderTag
-                  }
-                  name={
-                    expenseSummary.trendPercent <= 0
-                      ? "arrow-down"
-                      : "arrow-up"
-                  }
-                  size={13}
-                />
-                <Text
-                  style={[
-                    styles.trendText,
-                    expenseSummary.trendPercent <= 0 && styles.trendTextDown,
-                  ]}
-                >
-                  {Math.abs(expenseSummary.trendPercent)}% vs last month
-                </Text>
-              </View>
-            </View>
-          </DashboardInsightCard>
+              <Ionicons color={colors.textSoft} name="chevron-forward" size={18} />
+            </Pressable>
 
-          <DashboardInsightCard
-            accentColor={colors.secondary}
-            icon="location-outline"
-            title="Location Intelligence"
-            subtitle={`Current: ${locationSummary.currentLocation}`}
-            onPress={() => router.push("/(tabs)/location")}
-          >
-            <View style={styles.locationDashboardGrid}>
-              <View style={styles.locationDashboardMetric}>
-                <Text style={styles.locationDashboardValue}>
-                  {formatDuration(locationSummary.officeMinutes)}
-                </Text>
-                <Text style={styles.locationDashboardLabel}>Office today</Text>
+            <Pressable style={styles.todayRow} onPress={() => router.push("/(tabs)/expenses")}>
+              <View style={[styles.todayIcon, { backgroundColor: colors.successSurface }]}>
+                <Ionicons color={colors.success} name="wallet-outline" size={17} />
               </View>
-              <View style={styles.locationDashboardMetric}>
-                <Text style={styles.locationDashboardValue}>
-                  {formatDuration(locationSummary.homeMinutes)}
+              <View style={styles.todayCopy}>
+                <Text style={styles.todayTitle}>Expenses</Text>
+                <Text numberOfLines={2} style={styles.todayMeta}>
+                  {formatCurrency(expenseSummary.monthSpend)} this month, top category {expenseSummary.topCategory}
                 </Text>
-                <Text style={styles.locationDashboardLabel}>Home today</Text>
               </View>
-            </View>
-            <View style={styles.locationFooterRow}>
-              <Text style={styles.locationFooterText}>
-                {locationSummary.savedPlaces} saved places
-              </Text>
-              {locationSummary.activeLocationReminders ? (
-                <Text style={styles.locationReminderText}>
-                  {locationSummary.activeLocationReminders} active location reminders
+              <Ionicons color={colors.textSoft} name="chevron-forward" size={18} />
+            </Pressable>
+
+            <Pressable style={styles.todayRow} onPress={() => router.push("/(tabs)/location")}>
+              <View style={[styles.todayIcon, { backgroundColor: "#EFF6FF" }]}>
+                <Ionicons color={colors.secondary} name="location-outline" size={17} />
+              </View>
+              <View style={styles.todayCopy}>
+                <Text style={styles.todayTitle}>Location</Text>
+                <Text numberOfLines={2} style={styles.todayMeta}>
+                  {locationSummary.currentLocation} · {formatDuration(locationSummary.officeMinutes)} office · {locationSummary.activeLocationReminders} reminders
                 </Text>
-              ) : (
-                <Text style={styles.locationReminderText}>No active location reminders</Text>
-              )}
-            </View>
-          </DashboardInsightCard>
+              </View>
+              <Ionicons color={colors.textSoft} name="chevron-forward" size={18} />
+            </Pressable>
+          </View>
         </View>
 
         {SHOW_APP_USAGE_SURFACE ? <AppUsageLinkCard /> : null}
@@ -1434,8 +1337,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   content: {
-    paddingHorizontal: 22,
-    paddingTop: 18,
+    paddingHorizontal: 16,
+    paddingTop: 12,
     paddingBottom: 118,
   },
   headerRow: {
@@ -1481,111 +1384,53 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: 40,
   },
+  headerActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
   heroBlock: {
-    marginBottom: 18,
+    marginBottom: 16,
   },
   greeting: {
     color: colors.text,
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: "900",
-    lineHeight: 38,
+    lineHeight: 34,
   },
-  insightRow: {
-    alignItems: "center",
-    alignSelf: "flex-start",
-    backgroundColor: colors.accentSurface,
-    borderRadius: 999,
-    flexDirection: "row",
-    gap: 8,
-    marginTop: 12,
-    maxWidth: "96%",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  insightText: {
+  heroSentence: {
     color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: "700",
-    lineHeight: 18,
-  },
-  composerShell: {
-    marginBottom: 18,
-    position: "relative",
-  },
-  composerGlowA: {
-    backgroundColor: "#F3EAFF",
-    borderRadius: 28,
-    bottom: 8,
-    left: 8,
-    position: "absolute",
-    right: 8,
-    top: 8,
-  },
-  composerGlowB: {
-    backgroundColor: "#EDF5FF",
-    borderRadius: 28,
-    bottom: 0,
-    left: 18,
-    opacity: 0.8,
-    position: "absolute",
-    right: 18,
-    top: 18,
+    fontSize: 14,
+    fontWeight: "600",
+    lineHeight: 21,
+    marginTop: 6,
   },
   composerCard: {
     backgroundColor: colors.surface,
-    borderColor: "#EDF0F5",
-    borderRadius: 28,
+    borderColor: colors.borderStrong,
+    borderRadius: 18,
     borderWidth: 1,
-    minHeight: 204,
-    padding: 18,
-    position: "relative",
-    ...subtleShadow,
-  },
-  composerHeader: {
-    marginBottom: 14,
-  },
-  composerBadge: {
-    alignItems: "center",
-    alignSelf: "flex-start",
-    backgroundColor: colors.accentSurface,
-    borderRadius: 999,
-    flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  composerBadgeText: {
-    color: colors.primary,
-    fontSize: 12,
-    fontWeight: "800",
+    marginBottom: 10,
+    minHeight: 122,
+    padding: 14,
   },
   composerInput: {
     color: colors.text,
     flex: 1,
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: "600",
-    lineHeight: 27,
-    minHeight: 94,
+    lineHeight: 24,
+    minHeight: 68,
     padding: 0,
   },
   composerFooter: {
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 14,
+    marginTop: 10,
   },
-  composerHints: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  hintPill: {
-    backgroundColor: "#F5F7FB",
-    borderRadius: 999,
-    paddingHorizontal: 11,
-    paddingVertical: 8,
-  },
-  hintText: {
-    color: colors.textMuted,
+  composerHelper: {
+    color: colors.textSoft,
+    flex: 1,
     fontSize: 12,
     fontWeight: "800",
   },
@@ -1600,172 +1445,158 @@ const styles = StyleSheet.create({
   sendButtonDisabled: {
     opacity: 0.72,
   },
-  metricsRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginBottom: 18,
-  },
-  metricCardLarge: {
-    backgroundColor: "#F8FBFF",
-    borderColor: "#E7EEF8",
-    borderRadius: 24,
+  primaryActions: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 18,
     borderWidth: 1,
-    flex: 1.2,
-    minHeight: 142,
-    padding: 18,
-    ...subtleShadow,
+    flexDirection: "row",
+    gap: 4,
+    marginBottom: 10,
+    padding: 5,
   },
-  metricEyebrow: {
-    color: colors.textMuted,
-    fontSize: 13,
+  primaryAction: {
+    alignItems: "center",
+    borderRadius: 13,
+    flex: 1,
+    gap: 6,
+    justifyContent: "center",
+    minHeight: 64,
+    paddingHorizontal: 6,
+    position: "relative",
+  },
+  primaryActionText: {
+    color: colors.text,
+    fontSize: 12,
     fontWeight: "800",
   },
-  metricValue: {
-    color: colors.text,
-    fontSize: 40,
+  actionBadge: {
+    alignItems: "center",
+    backgroundColor: colors.primary,
+    borderColor: colors.white,
+    borderRadius: 999,
+    borderWidth: 2,
+    height: 22,
+    justifyContent: "center",
+    minWidth: 22,
+    position: "absolute",
+    right: 8,
+    top: 7,
+  },
+  actionBadgeText: {
+    color: colors.white,
+    fontSize: 10,
     fontWeight: "900",
-    lineHeight: 46,
-    marginTop: 18,
   },
-  metricLabel: {
+  overviewGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginBottom: 12,
+  },
+  overviewCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 16,
+    borderWidth: 1,
+    flexBasis: "47%",
+    flexGrow: 1,
+    minHeight: 96,
+    padding: 13,
+  },
+  overviewCardSelected: {
+    backgroundColor: colors.accentSurface,
+    borderColor: "#E4D7FF",
+  },
+  overviewTopRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  overviewLabel: {
     color: colors.textMuted,
-    fontSize: 14,
-    fontWeight: "700",
-    marginTop: 6,
+    fontSize: 12,
+    fontWeight: "900",
+    textTransform: "uppercase",
   },
-  metricStack: {
-    flex: 1,
-    gap: 12,
+  overviewValue: {
+    color: colors.text,
+    fontSize: 25,
+    fontWeight: "900",
+    lineHeight: 30,
+    marginTop: 13,
   },
-  metricCardSmall: {
+  overviewHint: {
+    color: colors.textSoft,
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 2,
+  },
+  todayPanel: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
     borderRadius: 20,
     borderWidth: 1,
-    flex: 1,
-    justifyContent: "center",
-    paddingHorizontal: 16,
-    ...subtleShadow,
+    marginBottom: 18,
+    padding: 16,
   },
-  metricCardSelected: {
-    borderColor: colors.primary,
-    borderWidth: 2,
-  },
-  metricMiniValue: {
-    color: colors.text,
-    fontSize: 24,
-    fontWeight: "900",
-  },
-  metricMiniLabel: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: "700",
-    marginTop: 4,
-  },
-  dashboardCard: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 24,
-    borderWidth: 1,
-    padding: 18,
-    ...subtleShadow,
-  },
-  dashboardCardHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 12,
-    marginBottom: 14,
-  },
-  dashboardIcon: {
-    alignItems: "center",
-    borderRadius: 999,
-    height: 40,
-    justifyContent: "center",
-    width: 40,
-  },
-  dashboardInsightText: {
-    color: colors.textMuted,
-    fontSize: 14,
-    fontWeight: "700",
-    lineHeight: 21,
-    marginTop: 14,
-  },
-  dashboardStack: {
-    gap: 16,
-    marginBottom: 22,
-  },
-  dashboardSubtitle: {
-    color: colors.textSoft,
-    fontSize: 12,
-    fontWeight: "800",
-    marginTop: 3,
-  },
-  dashboardTitle: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: "900",
-  },
-  dashboardTitleBlock: {
-    flex: 1,
-  },
-  expenseAmount: {
-    color: colors.text,
-    fontSize: 22,
-    fontWeight: "900",
-    lineHeight: 28,
-  },
-  expenseDashboardRow: {
-    alignItems: "flex-end",
-    flexDirection: "row",
-    gap: 12,
-    justifyContent: "space-between",
-  },
-  expenseMonthText: {
-    color: colors.textMuted,
-    fontSize: 14,
-    fontWeight: "800",
-    marginTop: 5,
-  },
-  locationDashboardGrid: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  locationDashboardLabel: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "800",
-    marginTop: 5,
-  },
-  locationDashboardMetric: {
+  panelLinkButton: {
     backgroundColor: colors.backgroundSoft,
     borderColor: colors.border,
-    borderRadius: 18,
+    borderRadius: 999,
     borderWidth: 1,
-    flex: 1,
-    padding: 14,
+    flexShrink: 0,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
-  locationDashboardValue: {
+  panelLinkText: {
     color: colors.text,
-    fontSize: 20,
-    fontWeight: "900",
-  },
-  locationFooterRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    justifyContent: "space-between",
-    marginTop: 14,
-  },
-  locationFooterText: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  locationReminderText: {
-    color: colors.secondary,
     fontSize: 12,
     fontWeight: "900",
+  },
+  todayPanelHeader: {
+    marginBottom: 14,
+  },
+  todayPanelTopRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  todayRows: {
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    marginTop: 14,
+  },
+  todayRow: {
+    alignItems: "center",
+    borderBottomColor: colors.border,
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 66,
+    paddingVertical: 12,
+  },
+  todayIcon: {
+    alignItems: "center",
+    borderRadius: 999,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
+  },
+  todayCopy: {
+    flex: 1,
+  },
+  todayTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  todayMeta: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 17,
+    marginTop: 3,
   },
   panel: {
     backgroundColor: colors.surface,
@@ -1776,119 +1607,16 @@ const styles = StyleSheet.create({
     padding: 18,
     ...subtleShadow,
   },
-  summaryGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  summaryMetric: {
-    backgroundColor: colors.backgroundSoft,
-    borderColor: colors.border,
-    borderRadius: 18,
-    borderWidth: 1,
-    flexBasis: "47%",
-    flexGrow: 1,
-    padding: 14,
-  },
-  screenshotInboxLabel: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: "800",
-    marginTop: 5,
-  },
-  screenshotInboxRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 12,
-    justifyContent: "space-between",
-  },
-  screenshotInboxValue: {
-    color: colors.text,
-    fontSize: 22,
-    fontWeight: "900",
-  },
-  screenshotProcessedPill: {
-    backgroundColor: "#EEF5FF",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  screenshotProcessedText: {
-    color: colors.secondary,
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  summaryMetricLabel: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "800",
-    marginTop: 5,
-  },
-  summaryMetricValue: {
-    color: colors.text,
-    fontSize: 22,
-    fontWeight: "900",
-  },
-  trendPill: {
-    alignItems: "center",
-    backgroundColor: colors.dangerSurface,
-    borderRadius: 999,
-    flexDirection: "row",
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  trendPillDown: {
-    backgroundColor: colors.successSurface,
-  },
-  trendText: {
-    color: colors.reminderTag,
-    fontSize: 11,
-    fontWeight: "900",
-  },
-  trendTextDown: {
-    color: colors.success,
-  },
-  locationCopy: {
-    flex: 1,
-  },
-  locationIcon: {
-    alignItems: "center",
-    backgroundColor: colors.accentSurface,
-    borderRadius: 999,
-    height: 38,
-    justifyContent: "center",
-    width: 38,
-  },
-  locationPanel: {
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 22,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 12,
-    marginBottom: 18,
-    padding: 16,
-    ...subtleShadow,
-  },
-  locationText: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 18,
-    marginTop: 3,
-  },
-  locationTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: "900",
-  },
   panelHeader: {
-    alignItems: "center",
+    alignItems: "flex-start",
     flexDirection: "row",
+    gap: 12,
     justifyContent: "space-between",
     marginBottom: 14,
+  },
+  panelHeaderCopy: {
+    flex: 1,
+    minWidth: 0,
   },
   panelTitle: {
     color: colors.text,
@@ -1897,8 +1625,11 @@ const styles = StyleSheet.create({
   },
   panelCaption: {
     color: colors.textSoft,
+    flexShrink: 1,
     fontSize: 13,
     fontWeight: "700",
+    lineHeight: 18,
+    marginTop: 3,
   },
   desktopSection: {
     marginBottom: 22,

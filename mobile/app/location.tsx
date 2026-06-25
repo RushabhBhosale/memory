@@ -8,7 +8,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
@@ -38,7 +37,6 @@ import {
   openLocationSettings,
   readLocationSettings,
   requestLocationPermissionFlow,
-  saveLocationSettings,
   savePlace,
   syncLocationGeofences,
   type LocationDebugState,
@@ -279,38 +277,6 @@ export default function LocationScreen() {
     }
   };
 
-  const toggleSetting = async (key: keyof LocationSettings, value: boolean) => {
-    if (!settings) {
-      return;
-    }
-
-    const nextSettings = { ...settings, [key]: value };
-    setSettings(nextSettings);
-
-    if (value && (key === "locationReminders" || key === "placeTimeline")) {
-      const permission = await requestLocationPermissionFlow();
-
-      if (permission.foreground.status !== "granted") {
-        Alert.alert(
-          "Location permission denied",
-          "Location features remain opt-in.",
-        );
-      } else if (permission.background?.status !== "granted") {
-        Alert.alert(
-          "Allow background location",
-          "Android requires background location for geofences to trigger while the app is closed or locked.",
-          [
-            { text: "Later", style: "cancel" },
-            { text: "Open Settings", onPress: openLocationSettings },
-          ],
-        );
-      }
-    }
-
-    await saveLocationSettings(nextSettings);
-    await loadLocationData();
-  };
-
   const refreshGeofences = async () => {
     await syncLocationGeofences();
     await loadLocationData();
@@ -393,50 +359,6 @@ export default function LocationScreen() {
           >
             <Ionicons color={colors.primary} name="locate-outline" size={20} />
           </Pressable>
-        </View>
-
-        <View style={styles.panel}>
-          <Text style={styles.panelTitle}>Settings</Text>
-          <SettingRow
-            label="Enable location reminders"
-            value={settings.locationReminders}
-            onValueChange={(value) =>
-              void toggleSetting("locationReminders", value)
-            }
-          />
-          <SettingRow
-            label="Enable place timeline"
-            value={settings.placeTimeline}
-            onValueChange={(value) =>
-              void toggleSetting("placeTimeline", value)
-            }
-          />
-          <SettingRow
-            label="Frequent place suggestions"
-            value={settings.frequentPlaceSuggestions}
-            onValueChange={(value) =>
-              void toggleSetting("frequentPlaceSuggestions", value)
-            }
-          />
-          <SettingRow
-            label="Home arrival summary"
-            value={settings.homeArrivalSummary}
-            onValueChange={(value) =>
-              void toggleSetting("homeArrivalSummary", value)
-            }
-          />
-          <SettingRow
-            label="Work hours tracking"
-            value={settings.workHoursTracking}
-            onValueChange={(value) =>
-              void toggleSetting("workHoursTracking", value)
-            }
-          />
-          <Text style={styles.helpText}>
-            For OnePlus, Oppo, Vivo, and Xiaomi phones, disable battery
-            optimization for MemoryOS so Android keeps geofence triggers
-            reliable.
-          </Text>
         </View>
 
         <View style={styles.panel}>
@@ -788,23 +710,6 @@ export default function LocationScreen() {
   );
 }
 
-function SettingRow({
-  label,
-  onValueChange,
-  value,
-}: {
-  label: string;
-  onValueChange: (value: boolean) => void;
-  value: boolean;
-}) {
-  return (
-    <View style={styles.settingRow}>
-      <Text style={styles.settingLabel}>{label}</Text>
-      <Switch onValueChange={onValueChange} value={value} />
-    </View>
-  );
-}
-
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.metricCard}>
@@ -1120,21 +1025,6 @@ const styles = StyleSheet.create({
   },
   selectedChipText: {
     color: colors.white,
-  },
-  settingLabel: {
-    color: colors.text,
-    flex: 1,
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  settingRow: {
-    alignItems: "center",
-    borderTopColor: colors.border,
-    borderTopWidth: 1,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 12,
-    paddingTop: 12,
   },
   timelineDot: {
     backgroundColor: colors.primary,
