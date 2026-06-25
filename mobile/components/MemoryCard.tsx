@@ -31,20 +31,13 @@ const getKindLabel = (memory: ActivityItem | Memory) => {
     case 'work_done':
       return 'Work';
     case 'requirement':
-      return 'Project';
+      return 'Note';
     case 'credential':
       return 'Vault';
     default:
       return 'Personal';
   }
 };
-
-const getProjectName = (memory: ActivityItem | Memory) =>
-  'projectName' in memory && memory.projectName
-    ? memory.projectName
-    : memory.projectId && typeof memory.projectId === 'object'
-      ? memory.projectId.name
-      : '';
 
 const getKindTone = (memory: ActivityItem | Memory) => {
   switch (getActivityType(memory)) {
@@ -53,7 +46,7 @@ const getKindTone = (memory: ActivityItem | Memory) => {
     case 'meeting':
       return colors.reminderTag;
     case 'note':
-      return colors.projectTag;
+      return colors.personalTag;
     default:
       break;
   }
@@ -63,7 +56,7 @@ const getKindTone = (memory: ActivityItem | Memory) => {
     case 'work_done':
       return colors.workTag;
     case 'requirement':
-      return colors.projectTag;
+      return colors.personalTag;
     case 'credential':
       return colors.success;
     default:
@@ -89,7 +82,7 @@ const getKindIcon = (memory: ActivityItem | Memory) => {
     case 'work_done':
       return 'briefcase-outline';
     case 'requirement':
-      return 'folder-open-outline';
+      return 'document-text-outline';
     case 'credential':
       return 'key-outline';
     default:
@@ -97,12 +90,8 @@ const getKindIcon = (memory: ActivityItem | Memory) => {
   }
 };
 
-const getCategoryTone = (memory: ActivityItem | Memory, projectName: string) => {
+const getCategoryTone = (memory: ActivityItem | Memory) => {
   const category = memory.category.toLowerCase();
-
-  if (projectName) {
-    return colors.projectTag;
-  }
 
   if (category.includes('work') || memory.kind === 'task' || memory.kind === 'work_done') {
     return colors.workTag;
@@ -112,27 +101,16 @@ const getCategoryTone = (memory: ActivityItem | Memory, projectName: string) => 
     return memory.kind === 'credential' ? colors.success : colors.reminderTag;
   }
 
-  if (category.includes('project') || memory.kind === 'requirement') {
-    return colors.projectTag;
-  }
-
   return colors.personalTag;
 };
 
-const getCategoryLabel = (memory: ActivityItem | Memory, projectName: string) => {
-  if (projectName) {
-    return projectName;
-  }
-
-  return memory.category || 'general';
-};
+const getCategoryLabel = (memory: ActivityItem | Memory) => memory.category || 'general';
 
 const getToneSurface = (tone: string) => `${tone}1F`;
 
 export function MemoryCard({ memory }: MemoryCardProps) {
-  const projectName = getProjectName(memory);
   const kindTone = getKindTone(memory);
-  const categoryTone = getCategoryTone(memory, projectName);
+  const categoryTone = getCategoryTone(memory);
   const activityType = getActivityType(memory);
   const kindIcon = getKindIcon(memory);
 
@@ -177,7 +155,7 @@ export function MemoryCard({ memory }: MemoryCardProps) {
         </View>
         <View style={[styles.tagPill, { backgroundColor: getToneSurface(categoryTone) }]}>
           <Text style={[styles.tagText, { color: categoryTone }]}>
-            {getCategoryLabel(memory, projectName)}
+            {getCategoryLabel(memory)}
           </Text>
         </View>
         {memory.tags.slice(0, 1).map((tag) => (

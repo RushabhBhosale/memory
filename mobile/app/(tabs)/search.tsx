@@ -22,7 +22,6 @@ import { getRecentSearches, saveRecentSearch } from '../../utils/searchHistory';
 const QUICK_CHIPS = [
   { label: 'Today', query: 'What did I work on today?' },
   { label: 'This Week', query: 'What happened this week?' },
-  { label: 'Current Project', query: 'What is my current project activity?' },
   { label: 'Recent Logs', query: 'Show my recent logs.' },
   { label: 'Upcoming Reminders', query: 'Any reminders due tomorrow?' }
 ] as const;
@@ -137,7 +136,7 @@ export default function SearchScreen() {
           <Text style={styles.heroTitle}>Search your second brain</Text>
           <Text style={styles.heroSubtitle}>
             Ask natural questions and get answers grounded in your saved memories, logs, meetings,
-            tasks, reminders, and project notes.
+            tasks, reminders, and notes.
           </Text>
 
           <View style={styles.searchDock}>
@@ -265,12 +264,6 @@ export default function SearchScreen() {
                 <View style={styles.statCard}>
                   <Text style={styles.statValue}>{response.count}</Text>
                   <Text style={styles.statLabel}>Items found</Text>
-                </View>
-                <View style={styles.statCard}>
-                  <Text numberOfLines={1} style={styles.statValueSmall}>
-                    {response.projects[0] || 'General'}
-                  </Text>
-                  <Text style={styles.statLabel}>Primary project</Text>
                 </View>
               </View>
             </View>

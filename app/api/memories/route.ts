@@ -39,8 +39,9 @@ const buildCreatePayload = (body: Record<string, unknown>) => {
   const incomingTitle = getString(body.title);
   const sourceTitle = getString(body.sourceTitle);
   const sourceUrl = getString(body.sourceUrl);
+  const screenshotUri = getString(body.screenshotUri);
   const type = normalizeType(body.type);
-  const titleSource = content || sourceTitle || sourceUrl;
+  const titleSource = content || sourceTitle || sourceUrl || screenshotUri;
 
   if (!incomingTitle && !titleSource) {
     return null;
@@ -50,6 +51,7 @@ const buildCreatePayload = (body: Record<string, unknown>) => {
     ...body,
     title: incomingTitle || getFallbackTitle(titleSource, type || 'memory'),
     content,
+    screenshotUri,
     category: normalizeMemoryCategory(
       getString(body.category) ||
         (type === 'reminder'

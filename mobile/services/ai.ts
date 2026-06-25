@@ -30,7 +30,6 @@ export type CaptureClassificationType =
   | 'Task'
   | 'Reminder'
   | 'Expense'
-  | 'Project Note'
   | 'Work Log';
 
 export type CaptureClassification = {
@@ -39,6 +38,12 @@ export type CaptureClassification = {
   category: string;
   tags: string[];
   confidence: number;
+};
+
+export type ScreenshotAnalysis = {
+  title: string;
+  category: string;
+  tags: string[];
 };
 
 const PROMPT = `You are a metadata generation engine.
@@ -129,7 +134,6 @@ const captureTypes = new Set<CaptureClassificationType>([
   'Task',
   'Reminder',
   'Expense',
-  'Project Note',
   'Work Log'
 ]);
 
@@ -289,12 +293,12 @@ const getFallbackCaptureClassification = (content: string): CaptureClassificatio
     };
   }
 
-  if (/\b(project|sdk|feature|api|bug|client)\b/.test(normalized)) {
+  if (/\b(sdk|feature|api|bug|client)\b/.test(normalized)) {
     return {
-      type: 'Project Note',
+      type: 'Work Log',
       title,
-      category: 'projects',
-      tags: ['project-note'],
+      category: 'work',
+      tags: ['work-note'],
       confidence: 0.64
     };
   }
@@ -322,7 +326,7 @@ Return ONLY JSON.
 
 Schema:
 {
-  "type": "Memory | Task | Reminder | Expense | Project Note | Work Log",
+  "type": "Memory | Task | Reminder | Expense | Work Log",
   "title": "",
   "category": "",
   "tags": [],
@@ -333,8 +337,7 @@ Rules:
 - Expense: money spent or received.
 - Reminder: needs date, time, place, or future action reminder.
 - Task: actionable work or todo.
-- Project Note: project/client/product context or decisions.
-- Work Log: completed work/status update.
+- Work Log: completed work, status update, client/product context, or technical notes.
 - Memory: general note or personal memory.
 - title must be concise.
 - tags must be lowercase.`;
@@ -381,6 +384,136 @@ Rules:
 
       if (classification) {
         return classification;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return fallback;
+};
+
+const screenshotCategories = new Set([
+  'work',
+  'expense',
+  'travel',
+  'reminder',
+  'development',
+  'meeting',
+  'personal',
+  'finance'
+]);
+
+const getFallbackScreenshotAnalysis = (text: string): ScreenshotAnalysis => {
+  const normalized = text.toLowerCase();
+  const title = text.trim().split(/\n+/)[0]?.slice(0, 72) || 'Screenshot Memory';
+
+  if (/(₹|rs\.?|inr)\s*\d+|\breceipt\b|\bpaid\b|\btotal\b/.test(normalized)) {
+    return { title, category: 'expense', tags: ['screenshot', 'expense'] };
+  }
+
+  if (/\bflight|ticket|boarding|hotel|reservation\b/.test(normalized)) {
+    return { title, category: 'travel', tags: ['screenshot', 'travel'] };
+  }
+
+  if (/\berror|exception|stack|vscode|sdk|api|build failed\b/.test(normalized)) {
+    return { title, category: 'development', tags: ['screenshot', 'development'] };
+  }
+
+  if (/\bmeet|calendar|invite|zoom|google meet\b/.test(normalized)) {
+    return { title, category: 'meeting', tags: ['screenshot', 'meeting'] };
+  }
+
+  if (/\bremind|tomorrow|deadline|due\b/.test(normalized)) {
+    return { title, category: 'reminder', tags: ['screenshot', 'reminder'] };
+  }
+
+  if (/\bbank|upi|account|statement|credit|debit\b/.test(normalized)) {
+    return { title, category: 'finance', tags: ['screenshot', 'finance'] };
+  }
+
+  return { title, category: 'personal', tags: ['screenshot', 'personal'] };
+};
+
+export const analyzeScreenshot = async (text: string): Promise<ScreenshotAnalysis> => {
+  const trimmedText = text.trim();
+  const fallback = getFallbackScreenshotAnalysis(trimmedText);
+
+  if (!trimmedText) {
+    return fallback;
+  }
+
+  const apiKey = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY;
+
+  if (!apiKey) {
+    return fallback;
+  }
+
+  const prompt = `You analyze OCR text from screenshots for a personal memory app.
+
+Return ONLY JSON.
+
+Schema:
+{
+  "title": "",
+  "category": "Work | Expense | Travel | Reminder | Development | Meeting | Personal | Finance",
+  "tags": []
+}
+
+Rules:
+- title must be concise and useful for search.
+- tags must be lowercase.
+- choose the best category.`;
+
+  for (const model of MODELS) {
+    try {
+      const response = await fetch(OPENROUTER_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: prompt },
+            { role: 'user', content: `OCR text:\n\n${trimmedText}` }
+          ],
+          temperature: 0.1
+        })
+      });
+
+      if (!response.ok) {
+        continue;
+      }
+
+      const body = (await response.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      const rawContent = body.choices?.[0]?.message?.content;
+
+      if (!rawContent) {
+        continue;
+      }
+
+      const parsed = JSON.parse(extractJson(rawContent)) as Record<string, unknown>;
+      const category =
+        typeof parsed.category === 'string' ? parsed.category.trim().toLowerCase() : fallback.category;
+      const tags = Array.isArray(parsed.tags)
+        ? parsed.tags
+            .filter((tag): tag is string => typeof tag === 'string')
+            .map(normalizeTag)
+            .filter(Boolean)
+            .slice(0, 6)
+        : fallback.tags;
+      const title = typeof parsed.title === 'string' ? parsed.title.trim() : fallback.title;
+
+      if (title && screenshotCategories.has(category)) {
+        return {
+          title,
+          category,
+          tags: tags.length ? tags : fallback.tags
+        };
       }
     } catch {
       continue;

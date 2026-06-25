@@ -8,6 +8,7 @@ export type MemoryDocument = Document & {
   source: string;
   sourceTitle?: string;
   sourceUrl?: string;
+  screenshotUri?: string;
   capturedAt?: Date;
   kind: 'note' | 'task' | 'work_done' | 'requirement' | 'credential';
   projectId?: mongoose.Types.ObjectId;
@@ -60,6 +61,11 @@ const memorySchema = new Schema<MemoryDocument>(
       trim: true
     },
     sourceUrl: {
+      type: String,
+      default: '',
+      trim: true
+    },
+    screenshotUri: {
       type: String,
       default: '',
       trim: true
@@ -154,7 +160,7 @@ memorySchema.index({ title: 1 });
 memorySchema.index({ tags: 1 });
 memorySchema.index({ projectId: 1 });
 memorySchema.index({ createdAt: -1 });
-memorySchema.index({ title: 'text', content: 'text', tags: 'text' });
+memorySchema.index({ title: 'text', content: 'text', tags: 'text', screenshotUri: 'text' });
 
 const Memory =
   (mongoose.models.Memory as Model<MemoryDocument> | undefined) ??

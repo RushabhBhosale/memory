@@ -23,11 +23,9 @@ import {
   listActivity,
   listDesktopActivity,
   listMemories,
-  listProjects,
   type ActivityItem,
   type DesktopActivity,
   type Memory,
-  type Project,
 } from "../../services/api";
 import {
   listExpenses,
@@ -52,6 +50,10 @@ import {
   type SavedPlace,
   type WorkHoursSummary,
 } from "../../services/locationIntelligence";
+import {
+  listScreenshots,
+  type ScreenshotInboxItem,
+} from "../../services/screenshotWatcher";
 import { colors, subtleShadow } from "../../styles/theme";
 import {
   isHomeCacheFresh,
@@ -257,17 +259,7 @@ const getDailySummary = (
       )
       .map((event) => event.placeId),
   ).size;
-  const projectCounts = todayItems.reduce<Record<string, number>>((counts, item) => {
-    if (item.projectName) {
-      counts[item.projectName] = (counts[item.projectName] || 0) + 1;
-    }
-
-    return counts;
-  }, {});
-  const topProject = Object.entries(projectCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
-  const sentence = topProject
-    ? `Most of your activity today was related to ${topProject}.`
-    : spentToday > 0
+  const sentence = spentToday > 0
       ? `You logged ${formatCurrency(spentToday)} in expenses today.`
       : todayItems.length > 0
         ? "Your captures today are building a useful daily trail."
@@ -347,6 +339,22 @@ const getLocationSummary = (
   };
 };
 
+const getScreenshotInboxSummary = (screenshots: ScreenshotInboxItem[]) => {
+  const todayKey = getDateKey(new Date());
+  const pending = screenshots.filter((item) => !item.processed && !item.dismissed).length;
+  const processedToday = screenshots.filter(
+    (item) =>
+      item.processed &&
+      getDateKey(new Date(item.updatedAt || item.capturedAt)) === todayKey,
+  ).length;
+
+  return {
+    pending,
+    processedToday,
+    shouldShow: pending > 0 || processedToday > 0,
+  };
+};
+
 const getRelativeTime = (value: string) => {
   const date = new Date(value);
   const today = getDateKey(new Date());
@@ -359,19 +367,9 @@ const getRelativeTime = (value: string) => {
   return "Earlier";
 };
 
-const getPromptQuestion = (items: ActivityItem[], projectCount: number) => {
-  const latest = items[0];
-
-  if (latest?.projectName) {
-    return `What changed most recently in ${latest.projectName}?`;
-  }
-
+const getPromptQuestion = (items: ActivityItem[]) => {
   if (items.some((item) => item.type === "task")) {
     return "What unfinished work have I logged recently?";
-  }
-
-  if (projectCount > 0) {
-    return "Which project has the most recent activity?";
   }
 
   return "What should I review from this week?";
@@ -437,26 +435,19 @@ const getMetricFilterTitle = (filter: MetricFilter) => {
 
 const getAiInsight = (
   items: ActivityItem[],
-  projectCount: number,
   todayCount: number,
   taskCount: number,
   slot: number,
 ) => {
-  const latest = items[0];
-  const latestProject = latest?.projectName;
   const options = [
-    latestProject
-      ? `${latestProject} is leading your recent activity.`
-      : "Your recent activity is building a useful trail.",
+    "Your recent activity is building a useful trail.",
     taskCount > 0
       ? `${taskCount} task${taskCount === 1 ? "" : "s"} are active in your recent memory.`
       : "Your recent saves are more notes than tasks right now.",
     todayCount > 0
       ? `You've already captured ${todayCount} item${todayCount === 1 ? "" : "s"} today.`
       : "No captures yet today. A quick note will start the thread.",
-    projectCount > 0
-      ? `${projectCount} project${projectCount === 1 ? "" : "s"} are currently in motion.`
-      : "Your memory is mostly general context right now.",
+    "Your memory is mostly general context right now.",
   ];
 
   return options[slot % options.length];
@@ -496,8 +487,7 @@ export default function HomeScreen() {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [places, setPlaces] = useState<SavedPlace[]>([]);
   const [placeTimeline, setPlaceTimeline] = useState<PlaceTimelineEvent[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [projectCount, setProjectCount] = useState(0);
+  const [screenshots, setScreenshots] = useState<ScreenshotInboxItem[]>([]);
   const [workHours, setWorkHours] = useState<WorkHoursSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -542,17 +532,16 @@ export default function HomeScreen() {
     [activity],
   );
   const askQuestion = useMemo(
-    () => getPromptQuestion(activity, projectCount),
-    [activity, projectCount],
+    () => getPromptQuestion(activity),
+    [activity],
   );
   const insightSlot = getInsightSlot();
   const aiInsight = useMemo(
     () =>
-      getAiInsight(activity, projectCount, todayCount, taskCount, insightSlot),
-    [activity, insightSlot, projectCount, taskCount, todayCount],
+      getAiInsight(activity, todayCount, taskCount, insightSlot),
+    [activity, insightSlot, taskCount, todayCount],
   );
   const latestDesktopActivity = desktopActivity[0] ?? null;
-  const latestDesktopProject = latestDesktopActivity?.projectBreakdown[0]?.projectName;
   const latestDesktopApp = latestDesktopActivity?.appBreakdown[0]?.appName;
   const latestDesktopTotalMinutes = latestDesktopActivity
     ? Math.max(
@@ -585,6 +574,10 @@ export default function HomeScreen() {
       ),
     [locationDebug, locationReminders, placeTimeline, places, workHours],
   );
+  const screenshotInboxSummary = useMemo(
+    () => getScreenshotInboxSummary(screenshots),
+    [screenshots],
+  );
 
   const hasHydratedCacheRef = useRef(false);
   const isSyncingRef = useRef(false);
@@ -597,13 +590,10 @@ export default function HomeScreen() {
       activity: ActivityItem[];
       desktopActivity: DesktopActivity[];
       memories: Memory[];
-      projects: Project[];
     }) => {
       setActivity(nextData.activity);
       setDesktopActivity(nextData.desktopActivity);
       setMemories(nextData.memories);
-      setProjects(nextData.projects);
-      setProjectCount(nextData.projects.length);
     },
     [],
   );
@@ -618,7 +608,6 @@ export default function HomeScreen() {
         activity: [activityItem, ...activity].slice(0, 300),
         desktopActivity,
         memories: [memory, ...memories],
-        projects,
       };
 
       applyHomeData(nextData);
@@ -627,7 +616,7 @@ export default function HomeScreen() {
       lastSyncedAtRef.current = Date.now();
       await writeHomeCache(nextData).catch(() => undefined);
     },
-    [activity, applyHomeData, desktopActivity, memories, projects],
+    [activity, applyHomeData, desktopActivity, memories],
   );
 
   const loadDashboardData = useCallback(async () => {
@@ -638,6 +627,7 @@ export default function HomeScreen() {
       nextReminders,
       nextDebug,
       nextWorkHours,
+      nextScreenshots,
     ] = await Promise.all([
       listExpenses().catch(() => []),
       listPlaces().catch(() => []),
@@ -645,6 +635,7 @@ export default function HomeScreen() {
       listLocationReminders().catch(() => []),
       getLocationDebugState().catch(() => null),
       getWorkHoursSummary().catch(() => null),
+      listScreenshots().catch(() => []),
     ]);
 
     setExpenses(nextExpenses);
@@ -653,6 +644,7 @@ export default function HomeScreen() {
     setLocationReminders(nextReminders);
     setLocationDebug(nextDebug);
     setWorkHours(nextWorkHours);
+    setScreenshots(nextScreenshots);
   }, []);
 
   const syncHomeData = useCallback(
@@ -675,17 +667,15 @@ export default function HomeScreen() {
         setError("");
         setOfflineMessage("");
 
-        const [nextActivity, nextDesktopActivity, nextMemories, nextProjects] = await Promise.all([
+        const [nextActivity, nextDesktopActivity, nextMemories] = await Promise.all([
           listActivity({ limit: 300 }),
           listDesktopActivity({ limit: 30 }),
           listMemories(),
-          listProjects(),
         ]);
         const nextData = {
           activity: nextActivity,
           desktopActivity: nextDesktopActivity,
           memories: nextMemories,
-          projects: nextProjects,
         };
 
         applyHomeData(nextData);
@@ -781,7 +771,36 @@ export default function HomeScreen() {
       setSavingComposer(true);
       setError("");
 
-      const quickReminder = parseQuickReminder(trimmedContent, projects);
+      const quickReminder = parseQuickReminder(trimmedContent);
+
+      if (quickReminder) {
+        const metadata = await generateMetadata(quickReminder.content);
+        const memory = await createMemory({
+          title: metadata.title || `Reminder: ${quickReminder.content}`,
+          content: quickReminder.content,
+          category: "reminder",
+          tags: metadata.tags.length ? metadata.tags : ["reminder"],
+          importance: metadata.importance,
+          kind: "note",
+          reminderAt: quickReminder.reminderAt.toISOString(),
+          notificationEnabled: true,
+        });
+
+        const notificationId = await scheduleMemoryReminder(memory);
+
+        if (!notificationId) {
+          Alert.alert(
+            "Reminder saved",
+            "The reminder was saved, but the phone did not schedule a notification. Check notification permission and try a development build if Expo Go blocks it.",
+          );
+        }
+
+        await applyOptimisticMemory(memory);
+        setComposerText("");
+        void syncHomeData({ silent: true });
+        return;
+      }
+
       const locationReminder = await parseLocationReminderRequest(trimmedContent);
 
       if (locationReminder?.missingPlace) {
@@ -840,35 +859,6 @@ export default function HomeScreen() {
           title: memory.title,
           triggerType: locationReminder.triggerType,
         });
-        await applyOptimisticMemory(memory);
-        setComposerText("");
-        void syncHomeData({ silent: true });
-        return;
-      }
-
-      if (quickReminder) {
-        const metadata = await generateMetadata(quickReminder.content);
-        const memory = await createMemory({
-          title: metadata.title || `Reminder: ${quickReminder.content}`,
-          content: quickReminder.content,
-          category: "reminder",
-          tags: metadata.tags.length ? metadata.tags : ["reminder"],
-          importance: metadata.importance,
-          kind: "note",
-          projectId: quickReminder.projectId,
-          reminderAt: quickReminder.reminderAt.toISOString(),
-          notificationEnabled: true,
-        });
-
-        const notificationId = await scheduleMemoryReminder(memory);
-
-        if (!notificationId) {
-          Alert.alert(
-            "Reminder saved",
-            "The reminder was saved, but the phone did not schedule a notification. Check notification permission and try a development build if Expo Go blocks it.",
-          );
-        }
-
         await applyOptimisticMemory(memory);
         setComposerText("");
         void syncHomeData({ silent: true });
@@ -1068,6 +1058,32 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.dashboardStack}>
+          {screenshotInboxSummary.shouldShow ? (
+            <DashboardInsightCard
+              accentColor={colors.secondary}
+              icon="images-outline"
+              title="Screenshot Inbox"
+              subtitle={`${screenshotInboxSummary.pending} pending screenshots`}
+              onPress={() => router.push("/screenshots")}
+            >
+              <View style={styles.screenshotInboxRow}>
+                <View>
+                  <Text style={styles.screenshotInboxValue}>
+                    {screenshotInboxSummary.pending} pending
+                  </Text>
+                  <Text style={styles.screenshotInboxLabel}>
+                    waiting to become memories
+                  </Text>
+                </View>
+                <View style={styles.screenshotProcessedPill}>
+                  <Text style={styles.screenshotProcessedText}>
+                    {screenshotInboxSummary.processedToday} processed today
+                  </Text>
+                </View>
+              </View>
+            </DashboardInsightCard>
+          ) : null}
+
           <DashboardInsightCard
             accentColor={colors.primary}
             icon="sparkles-outline"
@@ -1152,7 +1168,7 @@ export default function HomeScreen() {
           </DashboardInsightCard>
 
           <DashboardInsightCard
-            accentColor={colors.projectTag}
+            accentColor={colors.secondary}
             icon="location-outline"
             title="Location Intelligence"
             subtitle={`Current: ${locationSummary.currentLocation}`}
@@ -1254,11 +1270,6 @@ export default function HomeScreen() {
                 </View>
 
                 <View style={styles.desktopHighlightsRow}>
-                  {latestDesktopProject ? (
-                    <View style={styles.desktopHighlightPill}>
-                      <Text style={styles.desktopHighlightText}>Top project: {latestDesktopProject}</Text>
-                    </View>
-                  ) : null}
                   {latestDesktopApp ? (
                     <View style={styles.desktopHighlightPill}>
                       <Text style={styles.desktopHighlightText}>Top app: {latestDesktopApp}</Text>
@@ -1400,8 +1411,8 @@ export default function HomeScreen() {
 
           <Text style={styles.askQuestion}>{askQuestion}</Text>
           <Text style={styles.askDescription}>
-            Search across memories, tasks, meetings, reminders, and project
-            notes with natural language.
+            Search across memories, tasks, reminders, notes, and daily context
+            with natural language.
           </Text>
 
           <View style={styles.askPromptRow}>
@@ -1752,7 +1763,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   locationReminderText: {
-    color: colors.projectTag,
+    color: colors.secondary,
     fontSize: 12,
     fontWeight: "900",
   },
@@ -1778,6 +1789,34 @@ const styles = StyleSheet.create({
     flexBasis: "47%",
     flexGrow: 1,
     padding: 14,
+  },
+  screenshotInboxLabel: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: "800",
+    marginTop: 5,
+  },
+  screenshotInboxRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+    justifyContent: "space-between",
+  },
+  screenshotInboxValue: {
+    color: colors.text,
+    fontSize: 22,
+    fontWeight: "900",
+  },
+  screenshotProcessedPill: {
+    backgroundColor: "#EEF5FF",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  screenshotProcessedText: {
+    color: colors.secondary,
+    fontSize: 12,
+    fontWeight: "900",
   },
   summaryMetricLabel: {
     color: colors.textMuted,

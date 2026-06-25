@@ -37,16 +37,13 @@ const getKindLabel = (memory: Memory) => {
     case 'work_done':
       return 'Work';
     case 'requirement':
-      return 'Project';
+      return 'Note';
     case 'credential':
       return 'Vault';
     default:
       return 'Personal';
   }
 };
-
-const getProjectName = (memory: Memory) =>
-  memory.projectId && typeof memory.projectId === 'object' ? memory.projectId.name : '';
 
 const getKindTone = (memory: Memory) => {
   if (memory.category === 'reminder') {
@@ -58,7 +55,7 @@ const getKindTone = (memory: Memory) => {
     case 'work_done':
       return colors.workTag;
     case 'requirement':
-      return colors.projectTag;
+      return colors.personalTag;
     case 'credential':
       return colors.success;
     default:
@@ -180,7 +177,6 @@ export default function DetailScreen() {
     );
   }
 
-  const projectName = getProjectName(memory);
   const kindTone = getKindTone(memory);
 
   return (
@@ -196,11 +192,6 @@ export default function DetailScreen() {
           <View style={styles.tagPill}>
             <Text style={styles.tagText}>{memory.category}</Text>
           </View>
-          {projectName ? (
-            <View style={[styles.tagPill, { backgroundColor: `${colors.projectTag}1F` }]}>
-              <Text style={[styles.tagText, { color: colors.projectTag }]}>{projectName}</Text>
-            </View>
-          ) : null}
           {memory.tags.map((tag) => (
             <View key={tag} style={styles.tagPill}>
               <Text style={styles.tagText}>{tag}</Text>

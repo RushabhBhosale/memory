@@ -225,9 +225,9 @@ export default function CalendarScreen() {
 
     return activity.filter((item) => {
       const searchable =
-        `${item.title || ""} ${item.content || ""} ${item.projectName || ""} ${
-          item.category || ""
-        } ${item.tags.join(" ")}`.toLowerCase();
+        `${item.title || ""} ${item.content || ""} ${item.category || ""} ${item.tags.join(
+          " ",
+        )}`.toLowerCase();
 
       return (
         matchesFilter(item, activeFilter) &&
@@ -472,7 +472,7 @@ export default function CalendarScreen() {
             <TextInput
               value={searchText}
               onChangeText={setSearchText}
-              placeholder="Search titles, content, projects, tags..."
+              placeholder="Search titles, content, categories, tags..."
               placeholderTextColor={colors.textSoft}
               style={styles.searchInput}
             />

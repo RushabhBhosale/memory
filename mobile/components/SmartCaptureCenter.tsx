@@ -28,7 +28,7 @@ import {
   type CaptureClassification,
   type CaptureClassificationType,
 } from "../services/ai";
-import { createMemory, listProjects, type CreateMemoryInput, type Project } from "../services/api";
+import { createMemory, type CreateMemoryInput } from "../services/api";
 import { addManualExpense } from "../services/expenses";
 import {
   createLocationReminder,
@@ -42,7 +42,7 @@ import { colors, subtleShadow } from "../styles/theme";
 import { markHomeCacheStale } from "../utils/homeCache";
 
 type CaptureMode = "quick" | "confirm" | "menu" | "expense" | "manual";
-type ManualCaptureType = "memory" | "task" | "reminder" | "location" | "project";
+type ManualCaptureType = "memory" | "task" | "reminder" | "location";
 
 export type SmartCaptureCenterHandle = {
   openMenu: () => void;
@@ -70,7 +70,6 @@ const menuItems: Array<{
     icon: "camera-outline",
     label: "Screenshot Memory",
   },
-  { icon: "folder-outline", label: "Project Note", type: "project" },
 ];
 
 const manualTypeConfig: Record<
@@ -99,14 +98,6 @@ const manualTypeConfig: Record<
     kind: "note",
     label: "Memory",
     placeholder: "Write the memory",
-  },
-  project: {
-    category: "projects",
-    helper: "Project context",
-    icon: "folder-outline",
-    kind: "requirement",
-    label: "Project Note",
-    placeholder: "Thomas changed the Lefu SDK key",
   },
   reminder: {
     category: "reminder",
@@ -169,8 +160,6 @@ const getCaptureKind = (type: CaptureClassificationType) => {
   switch (type) {
     case "Task":
       return "task";
-    case "Project Note":
-      return "requirement";
     case "Work Log":
       return "work_done";
     default:
@@ -186,8 +175,6 @@ const getCaptureCategory = (classification: CaptureClassification) => {
       return "reminder";
     case "Task":
       return "task";
-    case "Project Note":
-      return "projects";
     case "Work Log":
       return "work";
     default:
@@ -221,8 +208,6 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
   const [manualType, setManualType] = useState<ManualCaptureType>("memory");
   const [manualText, setManualText] = useState("");
   const [priority, setPriority] = useState(3);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState("");
   const [places, setPlaces] = useState<SavedPlace[]>([]);
   const [selectedPlaceId, setSelectedPlaceId] = useState("");
   const [reminderAt, setReminderAt] = useState(getDefaultReminderAt);
@@ -264,17 +249,12 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
     let mounted = true;
 
     const loadCaptureOptions = async () => {
-      const [nextProjects, nextPlaces] = await Promise.all([
-        listProjects().catch(() => []),
-        listPlaces().catch(() => []),
-      ]);
+      const nextPlaces = await listPlaces().catch(() => []);
 
       if (!mounted) {
         return;
       }
 
-      setProjects(nextProjects);
-      setSelectedProjectId((current) => current || nextProjects[0]?._id || "");
       setPlaces(nextPlaces);
       setSelectedPlaceId((current) => current || nextPlaces[0]?.id || "");
     };
@@ -496,7 +476,6 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
       return;
     }
 
-    const selectedProject = projects.find((project) => project._id === selectedProjectId);
     const selectedPlace = places.find((place) => place.id === selectedPlaceId);
     const usesPlaceContext =
       manualType === "location" || (manualType === "reminder" && reminderKind === "location");
@@ -531,7 +510,6 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
         tags: [config.category, manualType],
         importance: manualType === "task" ? priority : 3,
         kind: config.kind,
-        projectId: manualType === "project" || manualType === "task" ? selectedProject?._id : undefined,
         reminderAt:
           manualType === "reminder" && reminderKind === "time" ? reminderAt.toISOString() : undefined,
         notificationEnabled: manualType === "reminder",
@@ -667,37 +645,6 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
       </View>
     </>
   );
-
-  const renderProjectPicker = () => {
-    if (manualType !== "project" && manualType !== "task") {
-      return null;
-    }
-
-    return (
-      <>
-        <Text style={styles.label}>Project</Text>
-        {projects.length ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-            {projects.map((project) => {
-              const selected = selectedProjectId === project._id;
-
-              return (
-                <Pressable
-                  key={project._id}
-                  style={[styles.chip, selected && styles.selectedChip]}
-                  onPress={() => setSelectedProjectId(project._id)}
-                >
-                  <Text style={[styles.chipText, selected && styles.selectedChipText]}>{project.name}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        ) : (
-          <Text style={styles.helpText}>No projects yet. It will save without a project.</Text>
-        )}
-      </>
-    );
-  };
 
   const renderPriorityPicker = () => {
     if (manualType !== "task") {
@@ -888,7 +835,6 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
         />
         {renderReminderFields()}
         {manualType === "location" ? renderPlacePicker() : null}
-        {renderProjectPicker()}
         {renderPriorityPicker()}
         <View style={styles.actionRow}>
           <Pressable style={styles.secondaryButton} onPress={() => setMode("menu")}>

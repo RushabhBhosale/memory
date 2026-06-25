@@ -1,9 +1,10 @@
 export const ALLOWED_CATEGORIES = [
   'personal',
-  'projects',
   'coding',
+  'development',
   'errors',
   'commands',
+  'expense',
   'finance',
   'travel',
   'jobs',
@@ -13,6 +14,7 @@ export const ALLOWED_CATEGORIES = [
   'interview',
   'reminder',
   'task',
+  'work',
   'general'
 ] as const;
 

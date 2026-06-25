@@ -1,5 +1,3 @@
-import type { Project } from "../services/api";
-
 type ReminderTime = {
   hour: number;
   minute: number;
@@ -7,7 +5,6 @@ type ReminderTime = {
 
 export type QuickReminder = {
   content: string;
-  projectId?: string;
   reminderAt: Date;
 };
 
@@ -87,45 +84,19 @@ const buildReminderDate = (input: string) => {
   return reminderAt;
 };
 
-const normalizeProjectName = (value: string) =>
-  value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-
-const findProjectMention = (input: string, projects: Project[]) => {
-  const match = input.match(/\bfor\s+([a-z0-9][a-z0-9\s_-]*)\s*$/i);
-  const projectHint = normalizeProjectName(match?.[1] || "");
-
-  if (!projectHint) {
-    return null;
-  }
-
-  return (
-    projects.find((project) => {
-      const projectName = normalizeProjectName(project.name);
-      return projectName === projectHint || projectName.includes(projectHint);
-    }) || null
-  );
-};
-
-const cleanReminderContent = (input: string, project?: Project | null) => {
-  let content = input
+const cleanReminderContent = (input: string) => {
+  const content = input
     .replace(/^remind\s+me\s*(?:to|that|of|about)?\s*/i, "")
     .replace(/\b(?:today|tomorrow)\b/gi, "")
     .replace(/\b(?:at\s*)?\d{1,2}(?::[0-5]\d)?\s*(?:am|pm)\b/gi, "")
-    .replace(/\bat\s+(?:[01]?\d|2[0-3]):[0-5]\d\b/gi, "");
-
-  if (project) {
-    content = content.replace(/\bfor\s+[a-z0-9][a-z0-9\s_-]*\s*$/i, "");
-  }
-
-  content = content.replace(/\s+/g, " ").trim();
+    .replace(/\bat\s+(?:[01]?\d|2[0-3]):[0-5]\d\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return content || input.trim();
 };
 
-export const parseQuickReminder = (input: string, projects: Project[] = []): QuickReminder | null => {
+export const parseQuickReminder = (input: string): QuickReminder | null => {
   if (!/\bremind\s+me\b/i.test(input)) {
     return null;
   }
@@ -136,11 +107,8 @@ export const parseQuickReminder = (input: string, projects: Project[] = []): Qui
     return null;
   }
 
-  const project = findProjectMention(input, projects);
-
   return {
-    content: cleanReminderContent(input, project),
-    projectId: project?._id,
+    content: cleanReminderContent(input),
     reminderAt,
   };
 };

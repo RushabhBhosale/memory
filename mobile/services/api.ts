@@ -1,7 +1,5 @@
 export type MemoryKind = 'note' | 'task' | 'work_done' | 'requirement' | 'credential';
 
-export type ProjectStatus = 'active' | 'paused' | 'completed' | 'archived';
-
 export type ActivityType = 'memory' | 'task' | 'note' | 'meeting';
 export type SaveItemType = 'memory' | 'log' | 'task' | 'note' | 'meeting' | 'reminder';
 export type DesktopActivity = {
@@ -13,21 +11,9 @@ export type DesktopActivity = {
   productiveMinutes: number;
   idleMinutes: number;
   productivityScore: number;
-  projectBreakdown: Array<{ projectName: string; durationMinutes: number }>;
   appBreakdown: Array<{ appName: string; durationMinutes: number }>;
   source: string;
   deviceLabel?: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type Project = {
-  _id: string;
-  name: string;
-  description: string;
-  status: ProjectStatus;
-  tags: string[];
-  source: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -39,8 +25,9 @@ export type Memory = {
   category: string;
   tags: string[];
   source: string;
+  screenshotUri?: string;
+  capturedAt?: string;
   kind: MemoryKind;
-  projectId?: string | Project;
   reminderAt?: string;
   notificationEnabled?: boolean;
   reminderType?: 'time' | 'location';
@@ -58,7 +45,6 @@ export type Memory = {
 };
 
 export type ActivityItem = Memory & {
-  projectName?: string;
   status?: string;
   type: ActivityType;
 };
@@ -66,7 +52,6 @@ export type ActivityItem = Memory & {
 export type AskMemoryPlan = {
   keywords: string[];
   types: SaveItemType[];
-  project: string | null;
   timeframe: 'today' | 'tomorrow' | 'this_week' | 'this_month' | 'upcoming' | 'all_time';
 };
 
@@ -74,7 +59,6 @@ export type AskMemoryResponse = {
   answer: string;
   count: number;
   plan: AskMemoryPlan;
-  projects: string[];
   sources: ActivityItem[];
   summary: string[];
 };
@@ -86,7 +70,6 @@ export type CreateMemoryInput = {
   type?: SaveItemType;
   tags?: string[];
   kind?: MemoryKind;
-  projectId?: string;
   reminderAt?: string;
   notificationEnabled?: boolean;
   reminderType?: 'time' | 'location';
@@ -99,12 +82,9 @@ export type CreateMemoryInput = {
   status?: 'pending' | 'triggered' | 'completed';
   triggeredAt?: string;
   importance?: number;
-};
-
-export type CreateProjectInput = {
-  name: string;
-  description?: string;
-  tags?: string[];
+  capturedAt?: string;
+  screenshotUri?: string;
+  source?: string;
 };
 
 type ListResponse = {
@@ -125,24 +105,59 @@ type SingleResponse = {
   data: Memory;
 };
 
-type ProjectListResponse = {
-  count: number;
-  data: Project[];
-};
-
-type SingleProjectResponse = {
-  data: Project;
-};
-
-type ProjectMemoriesResponse = {
-  count: number;
-  project: Project;
-  data: ActivityItem[];
-};
-
 type DesktopActivityListResponse = {
   count: number;
   data: DesktopActivity[];
+};
+
+export type ScreenshotInboxItem = {
+  _id: string;
+  imageUri: string;
+  capturedAt: string;
+  processed: boolean;
+  dismissed: boolean;
+  extractedText: string;
+  generatedTitle: string;
+  generatedTags: string[];
+  generatedCategory: string;
+  memoryId?: string;
+  source: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ScreenshotInboxInput = {
+  imageUri: string;
+  capturedAt: string;
+  processed?: boolean;
+  dismissed?: boolean;
+  extractedText?: string;
+  generatedTitle?: string;
+  generatedTags?: string[];
+  generatedCategory?: string;
+  source?: string;
+};
+
+export type ScreenshotInboxUpdate = Partial<
+  Pick<
+    ScreenshotInboxItem,
+    | 'dismissed'
+    | 'extractedText'
+    | 'generatedCategory'
+    | 'generatedTags'
+    | 'generatedTitle'
+    | 'memoryId'
+    | 'processed'
+  >
+>;
+
+type ScreenshotInboxListResponse = {
+  count: number;
+  data: ScreenshotInboxItem[];
+};
+
+type ScreenshotInboxSingleResponse = {
+  data: ScreenshotInboxItem;
 };
 
 const getApiRoot = (value: string) => {
@@ -181,7 +196,7 @@ export const getApiConfig = () => {
     locationPlacesUrl: `${apiRoot}/api/location/places`,
     locationTimelineUrl: `${apiRoot}/api/location/timeline`,
     memoriesUrl: `${apiRoot}/api/memories`,
-    projectsUrl: `${apiRoot}/api/projects`
+    screenshotsUrl: `${apiRoot}/api/screenshots`
   };
 };
 
@@ -336,15 +351,16 @@ export const updateMemory = async (id: string, input: Partial<CreateMemoryInput>
   return response.data;
 };
 
-export const listProjects = async () => {
-  const { projectsUrl } = getApiConfig();
-  const response = await request<ProjectListResponse>(projectsUrl, '');
+export const listScreenshotInbox = async (params?: { includeDismissed?: boolean }) => {
+  const { screenshotsUrl } = getApiConfig();
+  const query = params?.includeDismissed ? '?includeDismissed=true' : '';
+  const response = await request<ScreenshotInboxListResponse>(screenshotsUrl, query);
   return response.data;
 };
 
-export const createProject = async (input: CreateProjectInput) => {
-  const { projectsUrl } = getApiConfig();
-  const response = await request<SingleProjectResponse>(projectsUrl, '', {
+export const createScreenshotInboxItem = async (input: ScreenshotInboxInput) => {
+  const { screenshotsUrl } = getApiConfig();
+  const response = await request<ScreenshotInboxSingleResponse>(screenshotsUrl, '', {
     method: 'POST',
     body: JSON.stringify(input)
   });
@@ -352,14 +368,27 @@ export const createProject = async (input: CreateProjectInput) => {
   return response.data;
 };
 
-export const getProject = async (id: string) => {
-  const { projectsUrl } = getApiConfig();
-  const response = await request<SingleProjectResponse>(projectsUrl, `/${id}`);
+export const updateScreenshotInboxItem = async (id: string, input: ScreenshotInboxUpdate) => {
+  const { screenshotsUrl } = getApiConfig();
+  const response = await request<ScreenshotInboxSingleResponse>(
+    screenshotsUrl,
+    `/${encodeURIComponent(id)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input)
+    }
+  );
+
   return response.data;
 };
 
-export const listProjectMemories = async (id: string) => {
-  const { projectsUrl } = getApiConfig();
-  const response = await request<ProjectMemoriesResponse>(projectsUrl, `/${id}/memories`);
-  return response.data;
+export const deleteScreenshotInboxItem = async (id: string) => {
+  const { screenshotsUrl } = getApiConfig();
+  await request<{ message: string; data: ScreenshotInboxItem }>(
+    screenshotsUrl,
+    `/${encodeURIComponent(id)}`,
+    {
+      method: 'DELETE'
+    }
+  );
 };

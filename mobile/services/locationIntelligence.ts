@@ -734,10 +734,11 @@ export const findNearestPlace = async (coords: { latitude: number; longitude: nu
 
 export const parseLocationReminderRequest = async (input: string) => {
   const normalized = input.toLowerCase();
+  const hasAtLocationCue = /\bat\s+(?!\d{1,2}(?::[0-5]\d)?\s*(?:am|pm)?\b)[a-z0-9][a-z0-9 -]*/i.test(input);
   const triggerType: LocationTriggerType | null =
     /\b(?:leave|leaving|left|exit|go out of)\b/.test(normalized)
       ? "exit"
-      : /\b(?:reach|reaching|arrive|arriving|go to|get to|near|at)\b/.test(normalized)
+      : /\b(?:reach|reaching|arrive|arriving|go to|get to|near)\b/.test(normalized) || hasAtLocationCue
         ? "enter"
         : null;
 
@@ -756,7 +757,8 @@ export const parseLocationReminderRequest = async (input: string) => {
       missingPlace: true as const,
       placeName:
         normalized.match(/\b(?:home|office|gym|mall)\b/)?.[0] ||
-        normalized.match(/\b(?:reach|go to|leave|at|near)\s+([a-z0-9 -]+)/)?.[1]?.trim() ||
+        normalized.match(/\b(?:reach|go to|leave|near)\s+([a-z0-9 -]+)/)?.[1]?.trim() ||
+        normalized.match(/\bat\s+(?!\d{1,2}(?::[0-5]\d)?\s*(?:am|pm)?\b)([a-z0-9 -]+)/)?.[1]?.trim() ||
         "",
       triggerType,
     };
@@ -765,7 +767,8 @@ export const parseLocationReminderRequest = async (input: string) => {
   return {
     description: input
       .replace(/\b(?:when i|when)\b/i, "")
-      .replace(/\b(?:reach|go to|get to|arrive at|leave|near|at)\b\s+[a-z0-9 -]+,?/i, "")
+      .replace(/\b(?:reach|go to|get to|arrive at|leave|near)\b\s+[a-z0-9 -]+,?/i, "")
+      .replace(/\bat\s+(?!\d{1,2}(?::[0-5]\d)?\s*(?:am|pm)?\b)[a-z0-9 -]+,?/i, "")
       .replace(/\bremind me to\b/i, "")
       .trim()
       .replace(/^[,.\s]+/, "") || input.trim(),

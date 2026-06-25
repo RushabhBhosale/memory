@@ -21,9 +21,7 @@ import { ALLOWED_CATEGORIES } from "../constants/memoryCategories";
 import { generateMetadata, getFallbackMetadata } from "../services/ai";
 import {
   createMemory,
-  listProjects,
   type MemoryKind,
-  type Project,
 } from "../services/api";
 import {
   scheduleMemoryReminder,
@@ -40,7 +38,7 @@ import { colors, subtleShadow } from "../styles/theme";
 import { markHomeCacheStale } from "../utils/homeCache";
 
 type SaveMode = {
-  id: "personal" | "task" | "reminder" | "project";
+  id: "personal" | "task" | "reminder";
   label: string;
   helper: string;
   kind: MemoryKind;
@@ -73,14 +71,6 @@ const saveModes: SaveMode[] = [
     fallbackCategory: "reminder",
     color: colors.reminderTag,
   },
-  {
-    id: "project",
-    label: "Project",
-    helper: "Requirement or context",
-    kind: "requirement",
-    fallbackCategory: "projects",
-    color: colors.projectTag,
-  },
 ];
 
 const parseTags = (value: string) =>
@@ -97,8 +87,7 @@ const getModeById = (id?: string) =>
 
 const reminderMode = getModeById("reminder");
 
-const shouldShowExtraFields = (modeId?: string, projectId?: string) =>
-  Boolean(projectId || modeId === "task" || modeId === "project");
+const shouldShowExtraFields = (modeId?: string) => modeId === "task";
 
 const reminderDateFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
@@ -140,11 +129,9 @@ const mergeTimePart = (current: Date, nextTime: Date) =>
 export default function AddScreen() {
   const params = useLocalSearchParams<{
     draft?: string;
-    projectId?: string;
     mode?: string;
   }>();
   const draftParam = getParamValue(params.draft);
-  const projectIdParam = getParamValue(params.projectId);
   const modeParam = getParamValue(params.mode);
   const initialMode = getModeById(modeParam);
 
@@ -166,50 +153,14 @@ export default function AddScreen() {
   const [activePicker, setActivePicker] = useState<"date" | "time" | null>(
     null,
   );
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState(
-    projectIdParam || "",
-  );
-  const [projectsLoading, setProjectsLoading] = useState(true);
   const [showMore, setShowMore] = useState(
-    shouldShowExtraFields(modeParam, projectIdParam),
+    shouldShowExtraFields(modeParam),
   );
   const [saving, setSaving] = useState(false);
   const [testingNotification, setTestingNotification] = useState(false);
   const [error, setError] = useState("");
 
   const generationIdRef = useRef(0);
-
-  useEffect(() => {
-    let mounted = true;
-
-    const loadProjects = async () => {
-      try {
-        const nextProjects = await listProjects();
-
-        if (mounted) {
-          setProjects(nextProjects);
-          setSelectedProjectId(
-            (current: string) => current || projectIdParam || "",
-          );
-        }
-      } catch {
-        if (mounted) {
-          setProjects([]);
-        }
-      } finally {
-        if (mounted) {
-          setProjectsLoading(false);
-        }
-      }
-    };
-
-    loadProjects();
-
-    return () => {
-      mounted = false;
-    };
-  }, [projectIdParam]);
 
   useEffect(() => {
     let mounted = true;
@@ -239,10 +190,10 @@ export default function AddScreen() {
       setCategory(nextMode.fallbackCategory);
     }
 
-    if (shouldShowExtraFields(modeParam, projectIdParam)) {
+    if (shouldShowExtraFields(modeParam)) {
       setShowMore(true);
     }
-  }, [modeParam, metadataSource, projectIdParam]);
+  }, [modeParam, metadataSource]);
 
   useEffect(() => {
     if (draftParam) {
@@ -389,7 +340,7 @@ export default function AddScreen() {
     setSelectedMode(nextMode);
     setCategory(nextMode.fallbackCategory);
 
-    if (nextMode.id === "task" || nextMode.id === "project") {
+    if (nextMode.id === "task") {
       setShowMore(true);
     }
   };
@@ -448,7 +399,6 @@ export default function AddScreen() {
         tags: parsedTags.length ? parsedTags : resolvedMetadata.tags,
         importance,
         kind: selectedMode.kind,
-        projectId: selectedProjectId || undefined,
         reminderAt: reminderAtDate?.toISOString(),
         notificationEnabled: selectedMode.id === "reminder",
         reminderType: selectedMode.id === "reminder" ? reminderKind : undefined,
@@ -886,56 +836,6 @@ export default function AddScreen() {
                 })}
               </View>
 
-              <Text style={styles.label}>Project</Text>
-              {projectsLoading ? (
-                <ActivityIndicator
-                  color={colors.primary}
-                  style={styles.inlineLoader}
-                />
-              ) : (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.chipRow}
-                >
-                  <Pressable
-                    style={[
-                      styles.chip,
-                      !selectedProjectId && styles.selectedChip,
-                    ]}
-                    onPress={() => setSelectedProjectId("")}
-                  >
-                    <Text
-                      style={[
-                        styles.chipText,
-                        !selectedProjectId && styles.selectedChipText,
-                      ]}
-                    >
-                      None
-                    </Text>
-                  </Pressable>
-                  {projects.map((project) => {
-                    const selected = project._id === selectedProjectId;
-
-                    return (
-                      <Pressable
-                        key={project._id}
-                        style={[styles.chip, selected && styles.selectedChip]}
-                        onPress={() => setSelectedProjectId(project._id)}
-                      >
-                        <Text
-                          style={[
-                            styles.chipText,
-                            selected && styles.selectedChipText,
-                          ]}
-                        >
-                          {project.name}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
-              )}
             </View>
           ) : null}
 

@@ -6,6 +6,7 @@
   <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions"/>
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
   <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
+  <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
   <uses-permission android:name="android.permission.READ_SMS"/>
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" tools:replace="android:maxSdkVersion"/>
   <uses-permission android:name="android.permission.RECEIVE_SMS"/>
@@ -45,5 +46,6 @@
       </intent-filter>
     </receiver>
     <receiver android:name=".ExpenseActionReceiver" android:exported="false"/>
+    <receiver android:name=".ScreenshotActionReceiver" android:exported="false"/>
   </application>
 </manifest>

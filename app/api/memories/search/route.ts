@@ -106,6 +106,7 @@ const getSearchText = (memory: SearchableMemory) =>
     memory.content,
     memory.category,
     memory.kind,
+    (memory as { screenshotUri?: string }).screenshotUri,
     getProjectField(memory.projectId, 'name'),
     getProjectField(memory.projectId, 'description'),
     ...(Array.isArray(memory.tags) ? memory.tags : [])

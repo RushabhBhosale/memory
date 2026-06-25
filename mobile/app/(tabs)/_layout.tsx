@@ -197,7 +197,6 @@ export default function TabsLayout() {
         <Tabs.Screen name="expenses" options={{ title: "Expenses" }} />
         <Tabs.Screen name="calendar" options={{ title: "History" }} />
         <Tabs.Screen name="vault" options={{ title: "Vault" }} />
-        <Tabs.Screen name="projects" options={{ href: null }} />
         <Tabs.Screen name="location" options={{ href: null }} />
       </Tabs>
       <SmartCaptureCenter ref={captureRef} />

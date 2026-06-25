@@ -207,6 +207,43 @@ export const scheduleTestMemoryNotification = async () => {
   });
 };
 
+export const scheduleScreenshotSavedNotification = async (title: string) => {
+  const Notifications = await getNotifications();
+
+  if (!Notifications) {
+    return null;
+  }
+
+  const hasPermission = await ensureNotificationPermissions();
+
+  if (!hasPermission) {
+    return null;
+  }
+
+  const hasChannel = await ensureReminderChannel();
+
+  if (!hasChannel) {
+    return null;
+  }
+
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      title: 'Screenshot saved to Memory',
+      body: title,
+      data: {
+        source: 'screenshot'
+      },
+      sound: true
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+      seconds: 1,
+      repeats: false,
+      channelId: REMINDER_CHANNEL_ID
+    }
+  });
+};
+
 export const scheduleUpcomingMemoryReminders = async (memories: Memory[]) => {
   const reminders = memories.filter((memory) => memory.reminderAt && memory.notificationEnabled);
 

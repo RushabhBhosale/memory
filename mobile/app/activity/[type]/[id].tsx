@@ -50,27 +50,11 @@ const getActivityTone = (item: ActivityItem) => {
     case 'meeting':
       return colors.reminderTag;
     case 'note':
-      return colors.projectTag;
+      return colors.personalTag;
     default:
       return item.category === 'reminder' ? colors.reminderTag : colors.personalTag;
   }
 };
-
-const getProjectId = (item: ActivityItem) => {
-  if (!item.projectId) {
-    return '';
-  }
-
-  if (typeof item.projectId === 'string') {
-    return item.projectId;
-  }
-
-  return item.projectId._id;
-};
-
-const getProjectName = (item: ActivityItem) =>
-  item.projectName ||
-  (item.projectId && typeof item.projectId === 'object' ? item.projectId.name : '');
 
 const getParam = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value || '';
@@ -165,8 +149,6 @@ export default function ActivityDetailScreen() {
   }
 
   const tone = getActivityTone(item);
-  const projectName = getProjectName(item);
-  const projectId = getProjectId(item);
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
@@ -181,11 +163,6 @@ export default function ActivityDetailScreen() {
           {item.status ? (
             <View style={styles.tagPill}>
               <Text style={styles.tagText}>{item.status}</Text>
-            </View>
-          ) : null}
-          {projectName ? (
-            <View style={[styles.tagPill, { backgroundColor: `${colors.projectTag}1F` }]}>
-              <Text style={[styles.tagText, { color: colors.projectTag }]}>{projectName}</Text>
             </View>
           ) : null}
           {item.tags.map((tag) => (
@@ -224,20 +201,6 @@ export default function ActivityDetailScreen() {
       </View>
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-      {projectId ? (
-        <Pressable
-          style={styles.primaryButton}
-          onPress={() =>
-            router.push({
-              pathname: '/projects/[id]',
-              params: { id: projectId }
-            })
-          }
-        >
-          <Text style={styles.primaryButtonText}>Open project</Text>
-        </Pressable>
-      ) : null}
 
       <Pressable
         disabled={deleting}
