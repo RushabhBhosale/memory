@@ -1,4 +1,4 @@
-export type ActivityType = 'memory' | 'task' | 'note' | 'meeting';
+export type ActivityType = 'memory' | 'task' | 'note' | 'meeting' | 'expense';
 
 type RawRecord = Record<string, unknown>;
 
@@ -136,11 +136,43 @@ export const toMeetingActivity = (meeting: RawRecord) => ({
   type: 'meeting' as const
 });
 
+export const toExpenseActivity = (expense: RawRecord) => {
+  const transactionType = toStringValue(expense.type, 'expense') === 'income' ? 'income' : 'expense';
+  const amount = toNumberValue(expense.amount, 0);
+  const currency = toStringValue(expense.currency, 'INR');
+  const merchant = toStringValue(expense.merchant, 'Unknown Merchant');
+  const timestamp = toIsoString(expense.timestamp) || toIsoString(expense.createdAt) || new Date().toISOString();
+  const category = toStringValue(expense.category, 'general');
+
+  return {
+    ...getCommonActivityFields({
+      ...expense,
+      createdAt: timestamp,
+      tags: ['expense', transactionType, category]
+    }),
+    amount,
+    category,
+    content: `${transactionType === 'income' ? 'Received' : 'Spent'} ${currency} ${amount} ${
+      transactionType === 'income' ? 'from' : 'at'
+    } ${merchant}`,
+    currency,
+    deviceExpenseId: toStringValue(expense.deviceExpenseId),
+    kind: 'note',
+    merchant,
+    originalSmsPreview: toStringValue(expense.originalSmsPreview),
+    timestamp,
+    title: `${transactionType === 'income' ? 'Income' : 'Expense'}: ${merchant}`,
+    transactionType,
+    type: 'expense' as const
+  };
+};
+
 export type ActivityItem =
   | ReturnType<typeof toMemoryActivity>
   | ReturnType<typeof toTaskActivity>
   | ReturnType<typeof toNoteActivity>
-  | ReturnType<typeof toMeetingActivity>;
+  | ReturnType<typeof toMeetingActivity>
+  | ReturnType<typeof toExpenseActivity>;
 
 export const sortActivityItems = (items: ActivityItem[]) =>
   [...items].sort(

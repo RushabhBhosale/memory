@@ -15,6 +15,7 @@ import {
 import MapView, {
   Circle,
   Marker,
+  Polyline,
   type MapPressEvent,
   type Region,
 } from "react-native-maps";
@@ -31,7 +32,6 @@ import {
   getFrequentPlaceSuggestions,
   getLocationDebugState,
   getTimelineByRange,
-  getWorkHoursSummary,
   listLocationReminders,
   listPlaces,
   openLocationSettings,
@@ -45,7 +45,6 @@ import {
   type PlaceTimelineEvent,
   type PlaceType,
   type SavedPlace,
-  type WorkHoursSummary,
 } from "../services/locationIntelligence";
 import { colors, subtleShadow } from "../styles/theme";
 
@@ -66,10 +65,6 @@ const DEFAULT_MAP_REGION: Region = {
   longitudeDelta: 0.01,
 };
 const radiusOptions = [50, 75, 100, 150];
-const hasGoogleMapsApiKey = Boolean(
-  process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
-);
-
 const timeFormatter = new Intl.DateTimeFormat(undefined, {
   hour: "numeric",
   minute: "2-digit",
@@ -104,7 +99,6 @@ export default function LocationScreen() {
   const [timeline, setTimeline] = useState<PlaceTimelineEvent[]>([]);
   const [settings, setSettings] = useState<LocationSettings | null>(null);
   const [debug, setDebug] = useState<LocationDebugState>(emptyDebug);
-  const [workHours, setWorkHours] = useState<WorkHoursSummary | null>(null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [range, setRange] = useState<TimelineRange>("today");
   const [loading, setLoading] = useState(true);
@@ -120,10 +114,33 @@ export default function LocationScreen() {
     String(DEFAULT_RADIUS_METERS),
   );
   const mapRef = useRef<MapView | null>(null);
+  const timelineMapRef = useRef<MapView | null>(null);
 
   const pendingReminders = useMemo(
     () => reminders.filter((reminder) => reminder.status === "pending"),
     [reminders],
+  );
+  const timelineRouteEvents = useMemo(() => {
+    const enterEvents = timeline.filter((event) => event.eventType === "enter");
+    const routeEvents = enterEvents.length ? enterEvents : timeline;
+
+    return [...routeEvents]
+      .filter(
+        (event) =>
+          Number.isFinite(event.latitude) && Number.isFinite(event.longitude),
+      )
+      .sort(
+        (a, b) =>
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+      );
+  }, [timeline]);
+  const timelineCoordinates = useMemo(
+    () =>
+      timelineRouteEvents.map((event) => ({
+        latitude: event.latitude,
+        longitude: event.longitude,
+      })),
+    [timelineRouteEvents],
   );
 
   const loadLocationData = useCallback(async () => {
@@ -135,7 +152,6 @@ export default function LocationScreen() {
         nextTimeline,
         nextSettings,
         nextDebug,
-        nextWorkHours,
         nextSuggestions,
       ] = await Promise.all([
         listPlaces(),
@@ -143,7 +159,6 @@ export default function LocationScreen() {
         getTimelineByRange(range),
         readLocationSettings(),
         getLocationDebugState(),
-        getWorkHoursSummary(),
         getFrequentPlaceSuggestions(),
       ]);
 
@@ -152,7 +167,6 @@ export default function LocationScreen() {
       setTimeline(nextTimeline);
       setSettings(nextSettings);
       setDebug(nextDebug);
-      setWorkHours(nextWorkHours);
       setSuggestions(nextSuggestions);
     } finally {
       setLoading(false);
@@ -177,6 +191,24 @@ export default function LocationScreen() {
       longitude: debug.currentLocation?.longitude ?? current.longitude,
     }));
   }, [debug.currentLocation, selectedLocation]);
+
+  useEffect(() => {
+    if (!timelineCoordinates.length) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      timelineMapRef.current?.fitToCoordinates(timelineCoordinates, {
+        animated: true,
+        edgePadding: {
+          bottom: 36,
+          left: 36,
+          right: 36,
+          top: 36,
+        },
+      });
+    });
+  }, [timelineCoordinates]);
 
   const selectLocation = useCallback(
     (
@@ -391,57 +423,45 @@ export default function LocationScreen() {
             placeholderTextColor={colors.textSoft}
             style={styles.input}
           />
-          {hasGoogleMapsApiKey ? (
-            <View style={styles.mapShell}>
-              <MapView
-                ref={mapRef}
-                initialRegion={mapRegion}
-                onPress={selectMapLocation}
-                onRegionChangeComplete={setMapRegion}
-                showsMyLocationButton
-                showsUserLocation
-                style={styles.map}
-              >
-                {selectedLocation ? (
-                  <>
-                    <Marker
-                      coordinate={selectedLocation}
-                      draggable
-                      onDragEnd={(event) =>
-                        selectLocation(event.nativeEvent.coordinate)
-                      }
-                      title={placeName || "Selected place"}
-                    />
-                    <Circle
-                      center={selectedLocation}
-                      fillColor="rgba(139, 92, 246, 0.16)"
-                      radius={Math.max(
-                        50,
-                        Number(radiusMeters) || DEFAULT_RADIUS_METERS,
-                      )}
-                      strokeColor={colors.primary}
-                      strokeWidth={2}
-                    />
-                  </>
-                ) : null}
-              </MapView>
-              <View pointerEvents="none" style={styles.mapHint}>
-                <Text style={styles.mapHintText}>
-                  Tap map or drag pin to choose the exact place
-                </Text>
-              </View>
-            </View>
-          ) : (
-            <View style={styles.mapSetupCard}>
-              <Ionicons color={colors.primary} name="map-outline" size={24} />
-              <Text style={styles.mapSetupTitle}>Map setup needed</Text>
-              <Text style={styles.mapSetupText}>
-                Add EXPO_PUBLIC_GOOGLE_MAPS_API_KEY to mobile/.env, rebuild
-                Android, then the map picker will appear here. You can still
-                save the current phone location with the button below.
+          <View style={styles.mapShell}>
+            <MapView
+              ref={mapRef}
+              initialRegion={mapRegion}
+              onPress={selectMapLocation}
+              onRegionChangeComplete={setMapRegion}
+              showsMyLocationButton
+              showsUserLocation
+              style={styles.map}
+            >
+              {selectedLocation ? (
+                <>
+                  <Marker
+                    coordinate={selectedLocation}
+                    draggable
+                    onDragEnd={(event) =>
+                      selectLocation(event.nativeEvent.coordinate)
+                    }
+                    title={placeName || "Selected place"}
+                  />
+                  <Circle
+                    center={selectedLocation}
+                    fillColor="rgba(139, 92, 246, 0.16)"
+                    radius={Math.max(
+                      50,
+                      Number(radiusMeters) || DEFAULT_RADIUS_METERS,
+                    )}
+                    strokeColor={colors.primary}
+                    strokeWidth={2}
+                  />
+                </>
+              ) : null}
+            </MapView>
+            <View pointerEvents="none" style={styles.mapHint}>
+              <Text style={styles.mapHintText}>
+                Tap map or drag pin to choose the exact place
               </Text>
             </View>
-          )}
+          </View>
           <View style={styles.radiusHeader}>
             <Text style={styles.radiusLabel}>Geofence radius</Text>
             <Text style={styles.radiusValue}>
@@ -610,6 +630,50 @@ export default function LocationScreen() {
               </Pressable>
             ))}
           </View>
+          {timelineCoordinates.length ? (
+            <View style={styles.timelineMapShell}>
+              <MapView
+                ref={timelineMapRef}
+                initialRegion={{
+                  latitude: timelineCoordinates[0].latitude,
+                  latitudeDelta: 0.04,
+                  longitude: timelineCoordinates[0].longitude,
+                  longitudeDelta: 0.04,
+                }}
+                scrollEnabled={false}
+                style={styles.map}
+                zoomEnabled={false}
+              >
+                {timelineCoordinates.length > 1 ? (
+                  <Polyline
+                    coordinates={timelineCoordinates}
+                    strokeColor={colors.primary}
+                    strokeWidth={4}
+                  />
+                ) : null}
+                {timelineRouteEvents.map((event, index) => (
+                  <Marker
+                    key={`${event.id}-route-${index}`}
+                    coordinate={{
+                      latitude: event.latitude,
+                      longitude: event.longitude,
+                    }}
+                    title={event.placeName}
+                    description={formatEventTime(event.timestamp)}
+                    tracksViewChanges={false}
+                  >
+                    <View
+                      style={[
+                        styles.routeMarker,
+                        index === 0 && styles.routeStartMarker,
+                        index === timelineRouteEvents.length - 1 && styles.routeEndMarker,
+                      ]}
+                    />
+                  </Marker>
+                ))}
+              </MapView>
+            </View>
+          ) : null}
           {timeline.length ? (
             timeline.map((event) => (
               <View key={event.id} style={styles.timelineRow}>
@@ -631,36 +695,6 @@ export default function LocationScreen() {
               Timeline events appear after geofence triggers.
             </Text>
           )}
-        </View>
-
-        <View style={styles.panel}>
-          <Text style={styles.panelTitle}>Work Hours</Text>
-          {workHours ? (
-            <View style={styles.workGrid}>
-              <Metric
-                label="Today"
-                value={formatMinutes(workHours.todayMinutes)}
-              />
-              <Metric
-                label="This week"
-                value={formatMinutes(workHours.weekMinutes)}
-              />
-              <Metric
-                label="Arrived"
-                value={
-                  workHours.arrivedAt
-                    ? formatEventTime(workHours.arrivedAt)
-                    : "-"
-                }
-              />
-              <Metric
-                label="Left"
-                value={
-                  workHours.leftAt ? formatEventTime(workHours.leftAt) : "-"
-                }
-              />
-            </View>
-          ) : null}
         </View>
 
         {settings.frequentPlaceSuggestions && suggestions.length ? (
@@ -707,15 +741,6 @@ export default function LocationScreen() {
         </View> */}
       </ScrollView>
     </SafeAreaView>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.metricCard}>
-      <Text style={styles.metricValue}>{value}</Text>
-      <Text style={styles.metricLabel}>{label}</Text>
-    </View>
   );
 }
 
@@ -852,47 +877,6 @@ const styles = StyleSheet.create({
     marginTop: 12,
     overflow: "hidden",
   },
-  mapSetupCard: {
-    alignItems: "center",
-    backgroundColor: colors.accentSurface,
-    borderColor: colors.border,
-    borderRadius: 18,
-    borderWidth: 1,
-    gap: 8,
-    marginTop: 12,
-    padding: 16,
-  },
-  mapSetupText: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 18,
-    textAlign: "center",
-  },
-  mapSetupTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: "900",
-  },
-  metricCard: {
-    backgroundColor: colors.backgroundSoft,
-    borderColor: colors.border,
-    borderRadius: 18,
-    borderWidth: 1,
-    flex: 1,
-    padding: 14,
-  },
-  metricLabel: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "800",
-    marginTop: 5,
-  },
-  metricValue: {
-    color: colors.text,
-    fontSize: 20,
-    fontWeight: "900",
-  },
   panel: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
@@ -1026,6 +1010,24 @@ const styles = StyleSheet.create({
   selectedChipText: {
     color: colors.white,
   },
+  routeMarker: {
+    backgroundColor: colors.white,
+    borderColor: colors.white,
+    borderRadius: 999,
+    borderWidth: 3,
+    height: 12,
+    width: 12,
+  },
+  routeEndMarker: {
+    backgroundColor: colors.primary,
+    height: 14,
+    width: 14,
+  },
+  routeStartMarker: {
+    backgroundColor: colors.success,
+    height: 14,
+    width: 14,
+  },
   timelineDot: {
     backgroundColor: colors.primary,
     borderRadius: 999,
@@ -1051,6 +1053,15 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     width: 64,
   },
+  timelineMapShell: {
+    backgroundColor: colors.backgroundSoft,
+    borderColor: colors.border,
+    borderRadius: 18,
+    borderWidth: 1,
+    height: 220,
+    marginTop: 14,
+    overflow: "hidden",
+  },
   title: {
     color: colors.text,
     fontSize: 32,
@@ -1074,12 +1085,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
-    marginTop: 12,
-  },
-  workGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
     marginTop: 12,
   },
 });

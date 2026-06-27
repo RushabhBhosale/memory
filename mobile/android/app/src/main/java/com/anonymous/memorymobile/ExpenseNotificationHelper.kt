@@ -37,7 +37,7 @@ object ExpenseNotificationHelper {
     val merchant = transaction.optString("merchant", "Unknown Merchant")
     val body =
       if (type == "credit") {
-        "$amount credited. Add as income?"
+        "$amount received from $merchant. Add as income?"
       } else {
         "You spent $amount at $merchant. Add to expenses?"
       }
@@ -76,12 +76,18 @@ object ExpenseNotificationHelper {
     val notification =
       Notification.Builder(context, EXPENSE_CHANNEL_ID)
         .setSmallIcon(android.R.drawable.ic_dialog_info)
-        .setContentTitle("MemoryOS Expense")
+        .setContentTitle(if (type == "credit") "MemoryOS Income" else "MemoryOS Expense")
         .setContentText(body)
         .setStyle(Notification.BigTextStyle().bigText(body))
         .setAutoCancel(true)
         .setContentIntent(contentIntent)
-        .addAction(Notification.Action.Builder(android.R.drawable.ic_menu_add, "Add", addIntent).build())
+        .addAction(
+          Notification.Action.Builder(
+            android.R.drawable.ic_menu_add,
+            if (type == "credit") "Add income" else "Add expense",
+            addIntent
+          ).build()
+        )
         .addAction(Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel, "Ignore", ignoreIntent).build())
         .build()
 
@@ -119,4 +125,3 @@ object ExpenseNotificationHelper {
     return format.format(amount)
   }
 }
-

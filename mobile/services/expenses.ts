@@ -1,4 +1,10 @@
-import { NativeModules, Platform } from "react-native";
+import { NativeEventEmitter, NativeModules, Platform } from "react-native";
+
+import {
+  deleteRemoteExpense,
+  upsertExpense,
+  type RemoteExpenseInput,
+} from "./api";
 
 export type PendingTransactionStatus = "pending" | "confirmed" | "ignored";
 export type PendingTransactionType = "debit" | "credit";
@@ -60,6 +66,7 @@ export type ScanRecentSmsResult = {
 type ExpenseSmsNativeModule = {
   addManualExpense(input: ManualExpenseInput): Promise<ExpenseEntry>;
   confirmTransaction(id: string, updates?: PendingTransactionUpdate): Promise<boolean>;
+  deleteExpense?: (id: string) => Promise<boolean>;
   hasSmsPermissions(): Promise<boolean>;
   ignoreTransaction(id: string): Promise<boolean>;
   listExpenses(): Promise<ExpenseEntry[]>;
@@ -99,12 +106,50 @@ export const listPendingTransactions = async () =>
 
 export const listExpenses = async () => requireAndroidModule().listExpenses();
 
+const toRemoteExpenseInput = (expense: ExpenseEntry): RemoteExpenseInput => ({
+  amount: expense.amount,
+  category: expense.category || "general",
+  currency: expense.currency || "INR",
+  deviceExpenseId: expense.id,
+  merchant: expense.merchant || "Unknown Merchant",
+  originalSmsPreview: expense.originalSmsPreview || "",
+  source: expense.source,
+  timestamp: new Date(expense.timestamp).toISOString(),
+  type: expense.type,
+});
+
+export const syncExpensesToMongo = async (expenses?: ExpenseEntry[]) => {
+  const localExpenses = expenses ?? (await listExpenses());
+
+  await Promise.allSettled(
+    localExpenses.map((expense) => upsertExpense(toRemoteExpenseInput(expense))),
+  );
+
+  return localExpenses;
+};
+
 export const addManualExpense = async (input: ManualExpenseInput) =>
   requireAndroidModule().addManualExpense({
     currency: "INR",
     type: "expense",
     ...input,
   });
+
+export const deleteExpense = async (id: string) => {
+  const module = requireAndroidModule();
+
+  if (!module.deleteExpense) {
+    throw new Error("Delete requires a rebuilt Android app. Reinstall the latest APK and try again.");
+  }
+
+  const deleted = await module.deleteExpense(id);
+
+  if (deleted) {
+    await deleteRemoteExpense(id).catch(() => undefined);
+  }
+
+  return deleted;
+};
 
 export const confirmPendingTransaction = async (
   id: string,
@@ -124,3 +169,12 @@ export const simulateIncomingSms = async (sender: string, messageBody: string) =
 
 export const scanRecentSms = async (limit = 10) =>
   requireAndroidModule().scanRecentSms(limit);
+
+export const subscribeToExpenseChanges = (listener: () => void) => {
+  if (Platform.OS !== "android" || !nativeModule) {
+    return { remove: () => undefined };
+  }
+
+  const emitter = new NativeEventEmitter(NativeModules.ExpenseSmsModule);
+  return emitter.addListener("MemoryOSExpensesChanged", listener);
+};

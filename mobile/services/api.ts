@@ -1,6 +1,6 @@
 export type MemoryKind = 'note' | 'task' | 'work_done' | 'requirement' | 'credential';
 
-export type ActivityType = 'memory' | 'task' | 'note' | 'meeting';
+export type ActivityType = 'memory' | 'task' | 'note' | 'meeting' | 'expense';
 export type SaveItemType = 'memory' | 'log' | 'task' | 'note' | 'meeting' | 'reminder';
 export type DesktopActivity = {
   _id: string;
@@ -45,6 +45,13 @@ export type Memory = {
 };
 
 export type ActivityItem = Memory & {
+  amount?: number;
+  currency?: string;
+  deviceExpenseId?: string;
+  merchant?: string;
+  originalSmsPreview?: string;
+  timestamp?: string;
+  transactionType?: 'expense' | 'income';
   status?: string;
   type: ActivityType;
 };
@@ -160,6 +167,19 @@ type ScreenshotInboxSingleResponse = {
   data: ScreenshotInboxItem;
 };
 
+export type RemoteExpenseInput = {
+  amount: number;
+  category: string;
+  currency: string;
+  deviceExpenseId: string;
+  merchant: string;
+  note?: string;
+  originalSmsPreview?: string;
+  source: 'sms' | 'manual';
+  timestamp: string;
+  type: 'expense' | 'income';
+};
+
 const getApiRoot = (value: string) => {
   const baseUrl = value.replace(/\/$/, '');
 
@@ -193,6 +213,7 @@ export const getApiConfig = () => {
     askMemoryUrl: `${apiRoot}/api/ask-memory`,
     activityUrl: `${apiRoot}/api/activity`,
     desktopActivityUrl: `${apiRoot}/api/desktop-activity`,
+    expensesUrl: `${apiRoot}/api/expenses`,
     locationPlacesUrl: `${apiRoot}/api/location/places`,
     locationTimelineUrl: `${apiRoot}/api/location/timeline`,
     memoriesUrl: `${apiRoot}/api/memories`,
@@ -268,6 +289,27 @@ export const listDesktopActivity = async (params?: { limit?: number }) => {
   );
 
   return response.data;
+};
+
+export const upsertExpense = async (input: RemoteExpenseInput) => {
+  const { expensesUrl } = getApiConfig();
+  const response = await request<{ data: unknown }>(expensesUrl, '', {
+    method: 'POST',
+    body: JSON.stringify(input)
+  });
+
+  return response.data;
+};
+
+export const deleteRemoteExpense = async (deviceExpenseId: string) => {
+  const { expensesUrl } = getApiConfig();
+  await request<{ message: string }>(
+    expensesUrl,
+    `/${encodeURIComponent(deviceExpenseId)}`,
+    {
+      method: 'DELETE'
+    }
+  );
 };
 
 export const getActivityItem = async (type: ActivityType, id: string) => {

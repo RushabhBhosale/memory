@@ -1,8 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
   Alert,
   Pressable,
   RefreshControl,
@@ -29,6 +30,7 @@ import {
 } from "../../services/api";
 import {
   listExpenses,
+  subscribeToExpenseChanges,
   type ExpenseEntry,
 } from "../../services/expenses";
 import {
@@ -613,6 +615,11 @@ export default function HomeScreen() {
     setScreenshots(nextScreenshots);
   }, []);
 
+  const loadExpenses = useCallback(async () => {
+    const nextExpenses = await listExpenses().catch(() => []);
+    setExpenses(nextExpenses);
+  }, []);
+
   const syncHomeData = useCallback(
     async (options?: { refresh?: boolean; silent?: boolean }) => {
       if (isSyncingRef.current) {
@@ -725,6 +732,22 @@ export default function HomeScreen() {
       void loadDashboardData();
     }, [loadDashboardData, loadMemories]),
   );
+
+  useEffect(() => {
+    const expenseSubscription = subscribeToExpenseChanges(() => {
+      void loadExpenses();
+    });
+    const appStateSubscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        void loadExpenses();
+      }
+    });
+
+    return () => {
+      expenseSubscription.remove();
+      appStateSubscription.remove();
+    };
+  }, [loadExpenses]);
 
   const submitComposer = async () => {
     const trimmedContent = composerText.trim();

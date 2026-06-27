@@ -30,6 +30,11 @@ class SmsTransactionReceiver : BroadcastReceiver() {
       }
 
       val pending = ExpenseTransactionStore.addPending(context, parsed)
+      if (pending == null) {
+        Log.i("MemoryExpenseSms", "SMS ignored reason=already_added amount=${parsed.amount} type=${parsed.type}")
+        return
+      }
+
       Log.i(
         "MemoryExpenseSms",
         "Pending transaction created id=${pending.optString("id")} amount=${parsed.amount} merchant=${parsed.merchant} type=${parsed.type}"

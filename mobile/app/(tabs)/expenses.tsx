@@ -16,7 +16,9 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
+  addManualExpense,
   confirmPendingTransaction,
+  deleteExpense,
   hasExpenseSmsPermissions,
   ignorePendingTransaction,
   listExpenses,
@@ -24,7 +26,10 @@ import {
   requestExpenseSmsPermissions,
   scanRecentSms,
   simulateIncomingSms,
+  subscribeToExpenseChanges,
+  syncExpensesToMongo,
   type ExpenseEntry,
+  type ExpenseType,
   type PendingTransaction,
   type PendingTransactionType,
 } from "../../services/expenses";
@@ -66,6 +71,14 @@ type EditingState = {
   type: PendingTransactionType;
 };
 
+type ManualExpenseState = {
+  amount: string;
+  category: string;
+  merchant: string;
+  note: string;
+  type: ExpenseType;
+};
+
 export default function ExpensesScreen() {
   const [pending, setPending] = useState<PendingTransaction[]>([]);
   const [expenses, setExpenses] = useState<ExpenseEntry[]>([]);
@@ -74,6 +87,14 @@ export default function ExpensesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [savingId, setSavingId] = useState("");
   const [editingId, setEditingId] = useState("");
+  const [manualExpense, setManualExpense] = useState<ManualExpenseState>({
+    amount: "",
+    category: "general",
+    merchant: "",
+    note: "",
+    type: "expense",
+  });
+  const [savingManual, setSavingManual] = useState(false);
   const [smsTestText, setSmsTestText] = useState("");
   const [smsTestResult, setSmsTestResult] = useState("");
   const [scanningSms, setScanningSms] = useState(false);
@@ -111,6 +132,7 @@ export default function ExpensesScreen() {
       setHasPermission(permission);
       setPending(nextPending.filter((item) => item.status === "pending").reverse());
       setExpenses(nextExpenses.reverse());
+      void syncExpensesToMongo(nextExpenses).catch(() => undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load expenses");
     } finally {
@@ -122,6 +144,16 @@ export default function ExpensesScreen() {
   useFocusEffect(
     useCallback(() => {
       void loadData();
+    }, [loadData]),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      const subscription = subscribeToExpenseChanges(() => {
+        void loadData();
+      });
+
+      return () => subscription.remove();
     }, [loadData]),
   );
 
@@ -196,6 +228,77 @@ export default function ExpensesScreen() {
     } finally {
       setSavingId("");
     }
+  };
+
+  const saveManualExpense = async () => {
+    const amount = Number.parseFloat(manualExpense.amount);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      Alert.alert("Check amount", "Enter a valid amount.");
+      return;
+    }
+
+    if (!manualExpense.merchant.trim()) {
+      Alert.alert("Merchant required", "Add a name like Cash, Friend, Swiggy, or Salary.");
+      return;
+    }
+
+    try {
+      setSavingManual(true);
+      setError("");
+      await addManualExpense({
+        amount,
+        category: manualExpense.category,
+        merchant: manualExpense.merchant.trim(),
+        note: manualExpense.note.trim(),
+        type: manualExpense.type,
+      });
+      setManualExpense({
+        amount: "",
+        category: "general",
+        merchant: "",
+        note: "",
+        type: "expense",
+      });
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to add expense");
+    } finally {
+      setSavingManual(false);
+    }
+  };
+
+  const removeExpense = (expense: ExpenseEntry) => {
+    Alert.alert(
+      "Delete transaction?",
+      `${expense.merchant} • ${formatCurrency(expense.amount, expense.currency)}`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setSavingId(expense.id);
+              const deleted = await deleteExpense(expense.id);
+
+              if (!deleted) {
+                Alert.alert("Delete failed", "This transaction was not found on this device.");
+                return;
+              }
+
+              await loadData();
+            } catch (err) {
+              const message = err instanceof Error ? err.message : "Unable to delete expense";
+              setError(message);
+              Alert.alert("Delete failed", message);
+            } finally {
+              setSavingId("");
+            }
+          },
+        },
+      ],
+    );
   };
 
   const ignoreTransaction = async (item: PendingTransaction) => {
@@ -334,6 +437,95 @@ export default function ExpensesScreen() {
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <View style={styles.panel}>
+          <Text style={styles.panelTitle}>Add Manually</Text>
+          <Text style={styles.panelText}>
+            Add cash, UPI, income, or anything SMS detection missed.
+          </Text>
+          <View style={styles.manualGrid}>
+            <TextInput
+              keyboardType="decimal-pad"
+              onChangeText={(value) =>
+                setManualExpense((current) => ({ ...current, amount: value }))
+              }
+              placeholder="Amount"
+              style={[styles.input, styles.manualHalfInput]}
+              value={manualExpense.amount}
+            />
+            <TextInput
+              onChangeText={(value) =>
+                setManualExpense((current) => ({ ...current, merchant: value }))
+              }
+              placeholder="Merchant / person"
+              style={[styles.input, styles.manualHalfInput]}
+              value={manualExpense.merchant}
+            />
+          </View>
+          <TextInput
+            onChangeText={(value) =>
+              setManualExpense((current) => ({ ...current, note: value }))
+            }
+            placeholder="Note (optional)"
+            style={styles.input}
+            value={manualExpense.note}
+          />
+          <View style={styles.chipRow}>
+            {categories.map((category) => (
+              <Pressable
+                key={category}
+                style={[
+                  styles.chip,
+                  manualExpense.category === category && styles.selectedChip,
+                ]}
+                onPress={() =>
+                  setManualExpense((current) => ({ ...current, category }))
+                }
+              >
+                <Text
+                  style={[
+                    styles.chipText,
+                    manualExpense.category === category && styles.selectedChipText,
+                  ]}
+                >
+                  {category}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={styles.chipRow}>
+            {(["expense", "income"] as const).map((type) => (
+              <Pressable
+                key={type}
+                style={[
+                  styles.chip,
+                  manualExpense.type === type && styles.selectedChip,
+                ]}
+                onPress={() =>
+                  setManualExpense((current) => ({ ...current, type }))
+                }
+              >
+                <Text
+                  style={[
+                    styles.chipText,
+                    manualExpense.type === type && styles.selectedChipText,
+                  ]}
+                >
+                  {type === "income" ? "Income" : "Expense"}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <Pressable
+            disabled={savingManual}
+            style={styles.primaryButton}
+            onPress={() => void saveManualExpense()}
+          >
+            <Text style={styles.primaryButtonText}>
+              {savingManual ? "Saving..." : "Add transaction"}
+            </Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.panel}>
           <Text style={styles.panelTitle}>Read SMS</Text>
           <Text style={styles.panelText}>
             Read the latest 10 SMS messages or paste one manually. This does not store every SMS;
@@ -390,7 +582,7 @@ export default function ExpensesScreen() {
                     <Text style={styles.amountText}>
                       {formatCurrency(item.amount, item.currency)}
                     </Text>
-                    <Text style={styles.typePill}>{item.type === "credit" ? "Credit" : "Debit"}</Text>
+                    <Text style={styles.typePill}>{item.type === "credit" ? "Income" : "Expense"}</Text>
                   </View>
 
                   {isEditing ? (
@@ -462,7 +654,9 @@ export default function ExpensesScreen() {
                       style={styles.primaryAction}
                       onPress={() => void confirmTransaction(item)}
                     >
-                      <Text style={styles.primaryActionText}>{isSaving ? "Saving..." : "Add"}</Text>
+                      <Text style={styles.primaryActionText}>
+                        {isSaving ? "Saving..." : item.type === "credit" ? "Add income" : "Add expense"}
+                      </Text>
                     </Pressable>
                     <Pressable
                       disabled={isSaving}
@@ -521,6 +715,13 @@ export default function ExpensesScreen() {
                   {expense.type === "income" ? "+" : "-"}
                   {formatCurrency(expense.amount, expense.currency)}
                 </Text>
+                <Pressable
+                  disabled={savingId === expense.id}
+                  style={styles.deleteButton}
+                  onPress={() => removeExpense(expense)}
+                >
+                  <Ionicons color={colors.danger} name="trash-outline" size={18} />
+                </Pressable>
               </View>
             ))
           ) : (
@@ -595,6 +796,13 @@ const styles = StyleSheet.create({
   editBox: {
     gap: 10,
     marginTop: 10,
+  },
+  deleteButton: {
+    alignItems: "center",
+    borderRadius: 999,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
   },
   emptyText: {
     color: colors.textMuted,
@@ -672,6 +880,14 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     paddingHorizontal: 14,
     paddingVertical: 10,
+  },
+  manualGrid: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 10,
+  },
+  manualHalfInput: {
+    flex: 1,
   },
   merchantText: {
     color: colors.text,

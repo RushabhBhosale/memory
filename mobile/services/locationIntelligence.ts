@@ -102,6 +102,9 @@ export const defaultLocationSettings: LocationSettings = {
 
 const nowIso = () => new Date().toISOString();
 
+const getErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : "Unknown location error";
+
 const createId = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -818,7 +821,13 @@ const handleGeofenceEvent = async (data: {
   }
 
   if (settings.placeTimeline || settings.workHoursTracking) {
-    await addTimelineEvent(place, eventType, timestamp, transition.durationMinutes);
+    try {
+      await addTimelineEvent(place, eventType, timestamp, transition.durationMinutes);
+    } catch (error) {
+      await updateDebugState({
+        lastGeofenceTrigger: `${timestamp} ${eventType} ${place.name}: timeline sync failed (${getErrorMessage(error)})`,
+      });
+    }
   }
 
   const matchingReminders = reminders.filter(
@@ -849,7 +858,11 @@ const handleGeofenceEvent = async (data: {
           updateMemory(reminder.memoryId || reminder.id, {
             status: "triggered",
             triggeredAt: timestamp,
-          }),
+          }).catch((error) =>
+            updateDebugState({
+              lastGeofenceTrigger: `${timestamp} ${eventType} ${place.name}: reminder sync failed (${getErrorMessage(error)})`,
+            }),
+          ),
         ),
     );
     await Promise.all(
@@ -876,7 +889,11 @@ const handleGeofenceEvent = async (data: {
     });
   }
 
-  await syncLocationGeofences();
+  await syncLocationGeofences().catch((error) =>
+    updateDebugState({
+      lastGeofenceTrigger: `${timestamp} ${eventType} ${place.name}: geofence refresh failed (${getErrorMessage(error)})`,
+    }),
+  );
 };
 
 export const triggerLocationReminderTest = async (
@@ -906,12 +923,18 @@ export const registerLocationGeofenceTask = () => {
       return;
     }
 
-    await handleGeofenceEvent(
-      data as {
-        eventType?: Location.GeofencingEventType;
-        region?: { identifier?: string };
-      },
-    );
+    try {
+      await handleGeofenceEvent(
+        data as {
+          eventType?: Location.GeofencingEventType;
+          region?: { identifier?: string };
+        },
+      );
+    } catch (eventError) {
+      await updateDebugState({
+        lastGeofenceTrigger: `Geofence task skipped: ${getErrorMessage(eventError)}`,
+      });
+    }
   });
 };
 

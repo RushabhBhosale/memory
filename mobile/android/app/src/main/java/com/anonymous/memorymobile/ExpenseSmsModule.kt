@@ -12,6 +12,7 @@ import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.modules.core.PermissionAwareActivity
 import com.facebook.react.modules.core.PermissionListener
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -20,6 +21,16 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
   private var permissionPromise: Promise? = null
 
   override fun getName(): String = "ExpenseSmsModule"
+
+  @ReactMethod
+  fun addListener(eventName: String) {
+    // Required by React Native NativeEventEmitter.
+  }
+
+  @ReactMethod
+  fun removeListeners(count: Double) {
+    // Required by React Native NativeEventEmitter.
+  }
 
   @ReactMethod
   fun hasSmsPermissions(promise: Promise) {
@@ -55,8 +66,20 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
+  fun deleteExpense(id: String, promise: Promise) {
+    val deleted = ExpenseTransactionStore.deleteExpense(reactContext, id)
+    if (deleted) {
+      emitExpensesChanged()
+    }
+    promise.resolve(deleted)
+  }
+
+  @ReactMethod
   fun confirmTransaction(id: String, updates: ReadableMap?, promise: Promise) {
     val updated = ExpenseTransactionStore.confirmPending(reactContext, id, updates?.toJson())
+    if (updated != null) {
+      emitExpensesChanged()
+    }
     promise.resolve(updated != null)
   }
 
@@ -93,6 +116,7 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
         originalPreview = if (input.hasKey("note")) input.getString("note") ?: "" else "",
         timestamp = System.currentTimeMillis()
       )
+    emitExpensesChanged()
     promise.resolve(expense.toWritableMap())
   }
 
@@ -112,6 +136,18 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
     }
 
     val pending = ExpenseTransactionStore.addPending(reactContext, parsed)
+
+    if (pending == null) {
+      emitExpensesChanged()
+      promise.resolve(
+        Arguments.createMap().apply {
+          putBoolean("matched", false)
+          putString("reason", "already_added")
+        }
+      )
+      return
+    }
+
     ExpenseNotificationHelper.notifyPendingTransaction(reactContext, pending)
     promise.resolve(
       Arguments.createMap().apply {
@@ -162,6 +198,12 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
 
           matched += 1
           val pending = ExpenseTransactionStore.addPending(reactContext, parsed)
+
+          if (pending == null) {
+            reasonCounts["already_added"] = (reasonCounts["already_added"] ?: 0) + 1
+            continue
+          }
+
           createdOrExisting += 1
           ExpenseNotificationHelper.notifyPendingTransaction(reactContext, pending)
         }
@@ -209,6 +251,12 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
     }
 
     return permissions.toTypedArray()
+  }
+
+  private fun emitExpensesChanged() {
+    reactContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      .emit("MemoryOSExpensesChanged", null)
   }
 }
 

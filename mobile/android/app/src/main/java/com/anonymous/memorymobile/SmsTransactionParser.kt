@@ -22,9 +22,9 @@ object SmsTransactionParser {
   private val blockedKeywords =
     listOf("otp", "verification code", "password", "login", "one time password")
   private val debitKeywords =
-    listOf("debited", "spent", "paid", "purchase", "withdrawn", "txn", "transaction", "upi", "card used")
+    listOf("debited", "spent", "paid", "purchase", "withdrawn", "card used")
   private val creditKeywords =
-    listOf("credited", "received", "deposited", "refund", "cashback", "salary")
+    listOf("credited", "received", "deposited", "refund", "cashback", "salary", "sent you")
   private val amountRegex =
     Regex("(?i)(?:₹|rs\\.?|inr)\\s*([0-9][0-9,]*(?:\\.\\d{1,2})?)")
   private val fallbackAmountRegex =
@@ -64,7 +64,7 @@ object SmsTransactionParser {
         .toDoubleOrNull()
         ?: return SmsTransactionParseResult(null, "invalid_amount")
 
-    val type = if (creditMatch && !debitMatch) "credit" else "debit"
+    val type = if (creditMatch) "credit" else "debit"
     val merchant = extractMerchant(messageBody)
     val confidence = when {
       merchant != "Unknown Merchant" && (debitMatch || creditMatch) -> 0.86

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import {
   sortActivityItems,
+  toExpenseActivity,
   toMeetingActivity,
   toMemoryActivity,
   toNoteActivity,
@@ -10,6 +11,7 @@ import {
 import { validateApiKey } from '@/lib/apiKey';
 import { connectDB } from '@/lib/mongodb';
 import Memory from '@/models/Memory';
+import Expense from '@/models/Expense';
 import '@/models/Project';
 import ProjectMeeting from '@/models/ProjectMeeting';
 import ProjectNote from '@/models/ProjectNote';
@@ -77,7 +79,7 @@ export async function GET(request: Request) {
 
     await connectDB();
 
-    const [memories, tasks, notes, meetings] = await Promise.all([
+    const [memories, tasks, notes, meetings, expenses] = await Promise.all([
       Memory.find({ ...query, ...PRIVATE_MEMORY_FILTER })
         .sort({ createdAt: -1 })
         .limit(limit)
@@ -97,6 +99,19 @@ export async function GET(request: Request) {
         .sort({ createdAt: -1 })
         .limit(limit)
         .populate('projectId', 'name description status')
+        .lean(),
+      Expense.find(
+        from || to
+          ? {
+              timestamp: {
+                ...(from ? { $gte: from } : {}),
+                ...(to ? { $lte: to } : {})
+              }
+            }
+          : {}
+      )
+        .sort({ timestamp: -1 })
+        .limit(limit)
         .lean()
     ]);
 
@@ -104,7 +119,8 @@ export async function GET(request: Request) {
       ...memories.map(toMemoryActivity),
       ...tasks.map(toTaskActivity),
       ...notes.map(toNoteActivity),
-      ...meetings.map(toMeetingActivity)
+      ...meetings.map(toMeetingActivity),
+      ...expenses.map(toExpenseActivity)
     ]).slice(0, limit);
 
     return NextResponse.json({

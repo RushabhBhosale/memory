@@ -27,8 +27,9 @@ type CalendarCell = {
   inMonth: boolean;
 };
 
-const filters = ["All", "Notes", "Meetings", "Credentials", "Tasks"];
+const filters = ["All", "Notes", "Tasks", "Expenses", "Meetings", "Credentials"];
 const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const calendarColumnGap = 4;
 
 const monthFormatter = new Intl.DateTimeFormat("en-US", {
   month: "long",
@@ -44,6 +45,18 @@ const timeFormatter = new Intl.DateTimeFormat("en-US", {
   hour: "numeric",
   minute: "2-digit",
 });
+
+const formatCompactCurrency = (amount: number) => {
+  if (amount >= 100000) {
+    return `₹${(amount / 100000).toFixed(amount >= 1000000 ? 0 : 1)}L`;
+  }
+
+  if (amount >= 1000) {
+    return `₹${(amount / 1000).toFixed(amount >= 10000 ? 0 : 1)}k`;
+  }
+
+  return `₹${Math.round(amount)}`;
+};
 
 const getDateKey = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
@@ -87,7 +100,7 @@ const getMonthCells = (visibleMonth: Date): CalendarCell[] => {
 
 const groupActivityByDay = (items: ActivityItem[]) =>
   items.reduce<Record<string, ActivityItem[]>>((groups, item) => {
-    const key = getDateKey(new Date(item.createdAt));
+    const key = getDateKey(new Date(item.timestamp || item.createdAt));
 
     if (!groups[key]) {
       groups[key] = [];
@@ -108,6 +121,10 @@ const toTitleCase = (value: string) =>
 const getLabel = (item: ActivityItem) => {
   if (item.type === "meeting") {
     return "Meeting";
+  }
+
+  if (item.type === "expense") {
+    return item.transactionType === "income" ? "Income" : "Expense";
   }
 
   if (item.type === "task" || item.kind === "task") {
@@ -135,6 +152,10 @@ const getMarkerColor = (item: ActivityItem) => {
       return colors.secondary;
     case "Credentials":
       return colors.success;
+    case "Expense":
+      return colors.primary;
+    case "Income":
+      return colors.success;
     default:
       return colors.reminderTag;
   }
@@ -161,6 +182,10 @@ const matchesFilter = (item: ActivityItem, filter: string) => {
 
   if (filter === "Tasks") {
     return label === "Task";
+  }
+
+  if (filter === "Expenses") {
+    return item.type === "expense";
   }
 
   return true;
@@ -216,7 +241,7 @@ export default function CalendarScreen() {
   const selectedDate = parseDateKey(selectedDay);
   const previousDayKey = getDateKey(addDays(selectedDate, -1));
   const calendarInnerWidth = screenWidth - 44 - 36;
-  const dayCellSize = Math.floor(calendarInnerWidth / 7);
+  const dayCellSize = Math.floor((calendarInnerWidth - calendarColumnGap * 6) / 7);
   const monthCells = useMemo(() => getMonthCells(visibleMonth), [visibleMonth]);
   const visibleMonthKey = getMonthKey(visibleMonth);
 
@@ -246,12 +271,15 @@ export default function CalendarScreen() {
   const selectedMonthItems = useMemo(
     () =>
       activity.filter((item) =>
-        getDateKey(new Date(item.createdAt)).startsWith(visibleMonthKey),
+        getDateKey(new Date(item.timestamp || item.createdAt)).startsWith(visibleMonthKey),
       ),
     [activity, visibleMonthKey],
   );
 
   const monthTotal = selectedMonthItems.length;
+  const monthSpend = selectedMonthItems
+    .filter((item) => item.type === "expense" && item.transactionType !== "income")
+    .reduce((total, item) => total + (item.amount || 0), 0);
   const daysInVisibleMonth = new Date(
     visibleMonth.getFullYear(),
     visibleMonth.getMonth() + 1,
@@ -273,6 +301,9 @@ export default function CalendarScreen() {
   ).length;
   const credentialCount = selectedMonthItems.filter(
     (item) => getLabel(item) === "Credentials",
+  ).length;
+  const expenseCount = selectedMonthItems.filter(
+    (item) => item.type === "expense",
   ).length;
   const aiInsight = getInsight(
     monthTotal,
@@ -296,7 +327,7 @@ export default function CalendarScreen() {
         const latest = nextActivity[0];
 
         if (latest?.createdAt) {
-          const latestDate = new Date(latest.createdAt);
+          const latestDate = new Date(latest.timestamp || latest.createdAt);
           setSelectedDay(getDateKey(latestDate));
           setVisibleMonth(
             new Date(latestDate.getFullYear(), latestDate.getMonth(), 1),
@@ -546,7 +577,7 @@ export default function CalendarScreen() {
 
           <View style={styles.weekdayRow}>
             {weekdayLabels.map((weekday) => (
-              <Text key={weekday} style={styles.weekdayText}>
+              <Text key={weekday} style={[styles.weekdayText, { width: dayCellSize }]}>
                 {weekday}
               </Text>
             ))}
@@ -555,7 +586,11 @@ export default function CalendarScreen() {
           <View style={styles.calendarGrid}>
             {monthCells.map((cell) => {
               const dateKey = cell.key;
-              const count = groupedActivity[dateKey]?.length || 0;
+              const dayItems = groupedActivity[dateKey] || [];
+              const count = dayItems.length;
+              const daySpend = dayItems
+                .filter((item) => item.type === "expense" && item.transactionType !== "income")
+                .reduce((total, item) => total + (item.amount || 0), 0);
               const isSelected = selectedDay === dateKey;
               const isToday = todayKey === dateKey;
               const isFuture =
@@ -584,9 +619,21 @@ export default function CalendarScreen() {
                     {cell.day}
                   </Text>
 
-                  {count > 0 ? (
+                  {daySpend > 0 ? (
+                    <Text
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.72}
+                      numberOfLines={1}
+                      style={[
+                        styles.daySpendText,
+                        isSelected && styles.selectedDaySpendText,
+                      ]}
+                    >
+                      {formatCompactCurrency(daySpend)}
+                    </Text>
+                  ) : count > 0 ? (
                     <View style={styles.dotRow}>
-                      {(groupedActivity[dateKey] || [])
+                      {dayItems
                         .slice(0, 3)
                         .map((item) => (
                           <View
@@ -639,6 +686,15 @@ export default function CalendarScreen() {
               />
               <Text style={styles.statsName}>Credentials</Text>
               <Text style={styles.statsValue}>{credentialCount}</Text>
+            </View>
+            <View style={styles.statsRow}>
+              <View
+                style={[styles.statsDot, { backgroundColor: colors.primary }]}
+              />
+              <Text style={styles.statsName}>Expenses</Text>
+              <Text style={styles.statsValue}>
+                {expenseCount} · {formatCompactCurrency(monthSpend)}
+              </Text>
             </View>
           </View>
         </View>
@@ -840,11 +896,11 @@ const styles = StyleSheet.create({
   },
   weekdayRow: {
     flexDirection: "row",
+    gap: calendarColumnGap,
     marginBottom: 10,
   },
   weekdayText: {
     color: colors.textSoft,
-    flex: 1,
     fontSize: 12,
     fontWeight: "800",
     textAlign: "center",
@@ -852,14 +908,13 @@ const styles = StyleSheet.create({
   calendarGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 4,
-    justifyContent: "space-between",
+    gap: calendarColumnGap,
+    justifyContent: "flex-start",
   },
   dayCell: {
     alignItems: "center",
     borderRadius: 16,
     justifyContent: "center",
-    marginBottom: 4,
   },
   selectedDayCell: {
     backgroundColor: colors.text,
@@ -882,6 +937,18 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   selectedDayText: {
+    color: colors.white,
+  },
+  daySpendText: {
+    color: colors.primary,
+    fontSize: 10,
+    fontWeight: "900",
+    height: 12,
+    marginTop: 6,
+    maxWidth: "92%",
+    textAlign: "center",
+  },
+  selectedDaySpendText: {
     color: colors.white,
   },
   dotRow: {

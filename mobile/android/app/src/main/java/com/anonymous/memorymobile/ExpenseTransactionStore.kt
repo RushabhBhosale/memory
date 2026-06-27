@@ -42,12 +42,26 @@ object ExpenseTransactionStore {
     return expense
   }
 
-  fun addPending(context: Context, parsed: ParsedSmsTransaction): JSONObject {
+  fun addPending(context: Context, parsed: ParsedSmsTransaction): JSONObject? {
     val now = System.currentTimeMillis()
     val preview = safePreview(parsed.messageBody)
-    val existing = findExistingTransaction(context, parsed.sender, parsed.timestamp, preview)
+    val existingExpenseWasUpdated = updateExistingExpense(context, parsed, preview)
+
+    if (existingExpenseWasUpdated) {
+      return null
+    }
+
+    val existing = findExistingTransaction(context, parsed.sender, preview)
 
     if (existing != null) {
+      existing.put("amount", parsed.amount)
+      existing.put("currency", parsed.currency)
+      existing.put("merchant", parsed.merchant)
+      existing.put("type", parsed.type)
+      existing.put("category", categoryForMerchant(parsed.merchant))
+      existing.put("confidence", parsed.confidence)
+      existing.put("updatedAt", now)
+      updateMatchingPending(context, parsed.sender, preview, existing)
       return existing
     }
 
@@ -73,9 +87,59 @@ object ExpenseTransactionStore {
     return item
   }
 
-  fun listPending(context: Context): JSONArray = readArray(context, PENDING_KEY)
+  fun listPending(context: Context): JSONArray {
+    val pending = readArray(context, PENDING_KEY)
+    val visible = JSONArray()
+    val seen = mutableSetOf<String>()
+
+    for (index in 0 until pending.length()) {
+      val item = pending.optJSONObject(index) ?: continue
+
+      if (item.optString("status") != "pending") {
+        continue
+      }
+
+      val key = duplicateKey(
+        item.optString("sender"),
+        item.optString("messagePreview"),
+        item.optDouble("amount", 0.0)
+      )
+
+      if (seen.contains(key)) {
+        continue
+      }
+
+      seen.add(key)
+      visible.put(item)
+    }
+
+    return visible
+  }
 
   fun listExpenses(context: Context): JSONArray = readArray(context, EXPENSES_KEY)
+
+  fun deleteExpense(context: Context, id: String): Boolean {
+    val expenses = readArray(context, EXPENSES_KEY)
+    val nextExpenses = JSONArray()
+    var deleted = false
+
+    for (index in 0 until expenses.length()) {
+      val item = expenses.optJSONObject(index) ?: continue
+
+      if (item.optString("id") == id) {
+        deleted = true
+        continue
+      }
+
+      nextExpenses.put(item)
+    }
+
+    if (deleted) {
+      writeArray(context, EXPENSES_KEY, nextExpenses)
+    }
+
+    return deleted
+  }
 
   fun updatePending(context: Context, id: String, updates: JSONObject): JSONObject? {
     val pending = readArray(context, PENDING_KEY)
@@ -166,24 +230,105 @@ object ExpenseTransactionStore {
   private fun findExistingTransaction(
     context: Context,
     sender: String,
-    timestamp: Long,
     preview: String
   ): JSONObject? {
     val pending = readArray(context, PENDING_KEY)
+    var existing: JSONObject? = null
 
     for (index in 0 until pending.length()) {
       val item = pending.optJSONObject(index) ?: continue
 
       if (
         item.optString("sender") == sender &&
-          item.optLong("timestamp") == timestamp &&
           item.optString("messagePreview") == preview
       ) {
-        return item
+        existing = item
+        break
       }
     }
 
-    return null
+    return existing
+  }
+
+  private fun updateExistingExpense(
+    context: Context,
+    parsed: ParsedSmsTransaction,
+    preview: String
+  ): Boolean {
+    val expenses = readArray(context, EXPENSES_KEY)
+    var updated = false
+
+    for (index in 0 until expenses.length()) {
+      val item = expenses.optJSONObject(index) ?: continue
+      val samePreview = item.optString("originalSmsPreview") == preview
+      val sameAmount = kotlin.math.abs(item.optDouble("amount", 0.0) - parsed.amount) < 0.01
+
+      if (!samePreview || !sameAmount) {
+        continue
+      }
+
+      item.put("type", if (parsed.type == "credit") "income" else "expense")
+      item.put("merchant", parsed.merchant)
+      item.put("category", categoryForMerchant(parsed.merchant))
+      updated = true
+    }
+
+    if (updated) {
+      writeArray(context, EXPENSES_KEY, expenses)
+      removeMatchingPending(context, parsed.sender, preview, parsed.amount)
+    }
+
+    return updated
+  }
+
+  private fun updateMatchingPending(
+    context: Context,
+    sender: String,
+    preview: String,
+    replacement: JSONObject
+  ) {
+    val pending = readArray(context, PENDING_KEY)
+
+    for (index in 0 until pending.length()) {
+      val item = pending.optJSONObject(index) ?: continue
+
+      if (item.optString("sender") == sender && item.optString("messagePreview") == preview) {
+        pending.put(index, replacement)
+        break
+      }
+    }
+
+    writeArray(context, PENDING_KEY, pending)
+  }
+
+  private fun removeMatchingPending(
+    context: Context,
+    sender: String,
+    preview: String,
+    amount: Double
+  ) {
+    val pending = readArray(context, PENDING_KEY)
+    val nextPending = JSONArray()
+
+    for (index in 0 until pending.length()) {
+      val item = pending.optJSONObject(index) ?: continue
+      val sameSender = item.optString("sender") == sender
+      val samePreview = item.optString("messagePreview") == preview
+      val sameAmount = kotlin.math.abs(item.optDouble("amount", 0.0) - amount) < 0.01
+
+      if (sameSender && samePreview && sameAmount) {
+        continue
+      }
+
+      nextPending.put(item)
+    }
+
+    writeArray(context, PENDING_KEY, nextPending)
+  }
+
+  private fun duplicateKey(sender: String, preview: String, amount: Double): String {
+    val normalizedPreview = preview.lowercase(Locale.US).replace(Regex("\\s+"), " ").trim()
+    return "${sender.lowercase(Locale.US)}|$normalizedPreview|${"%.2f".format(Locale.US, amount)}"
   }
 
   private fun readArray(context: Context, key: String): JSONArray {
@@ -200,6 +345,6 @@ object ExpenseTransactionStore {
       .getSharedPreferences(EXPENSE_PREFS, Context.MODE_PRIVATE)
       .edit()
       .putString(key, value.toString())
-      .apply()
+      .commit()
   }
 }

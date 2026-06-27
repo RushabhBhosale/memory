@@ -13,8 +13,13 @@ type MemoryCardProps = {
 const getActivityType = (memory: ActivityItem | Memory): ActivityType =>
   'type' in memory ? memory.type : 'memory';
 
+const getTransactionType = (memory: ActivityItem | Memory) =>
+  'transactionType' in memory ? memory.transactionType : undefined;
+
 const getKindLabel = (memory: ActivityItem | Memory) => {
   switch (getActivityType(memory)) {
+    case 'expense':
+      return getTransactionType(memory) === 'income' ? 'Income' : 'Expense';
     case 'task':
       return 'Task';
     case 'meeting':
@@ -41,6 +46,8 @@ const getKindLabel = (memory: ActivityItem | Memory) => {
 
 const getKindTone = (memory: ActivityItem | Memory) => {
   switch (getActivityType(memory)) {
+    case 'expense':
+      return getTransactionType(memory) === 'income' ? colors.success : colors.primary;
     case 'task':
       return colors.workTag;
     case 'meeting':
@@ -66,6 +73,8 @@ const getKindTone = (memory: ActivityItem | Memory) => {
 
 const getKindIcon = (memory: ActivityItem | Memory) => {
   switch (getActivityType(memory)) {
+    case 'expense':
+      return getTransactionType(memory) === 'income' ? 'trending-up-outline' : 'card-outline';
     case 'task':
       return 'checkbox-outline';
     case 'meeting':
@@ -118,6 +127,11 @@ export function MemoryCard({ memory }: MemoryCardProps) {
     <Pressable
       style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
       onPress={() => {
+        if (activityType === 'expense') {
+          router.push('/(tabs)/expenses');
+          return;
+        }
+
         if (activityType === 'memory') {
           router.push({
             pathname: '/memories/[id]',
