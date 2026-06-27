@@ -98,6 +98,11 @@ const getMonthCells = (visibleMonth: Date): CalendarCell[] => {
   });
 };
 
+const getCalendarRows = (cells: CalendarCell[]) =>
+  Array.from({ length: Math.ceil(cells.length / 7) }).map((_, index) =>
+    cells.slice(index * 7, index * 7 + 7),
+  );
+
 const groupActivityByDay = (items: ActivityItem[]) =>
   items.reduce<Record<string, ActivityItem[]>>((groups, item) => {
     const key = getDateKey(new Date(item.timestamp || item.createdAt));
@@ -243,6 +248,7 @@ export default function CalendarScreen() {
   const calendarInnerWidth = screenWidth - 44 - 36;
   const dayCellSize = Math.floor((calendarInnerWidth - calendarColumnGap * 6) / 7);
   const monthCells = useMemo(() => getMonthCells(visibleMonth), [visibleMonth]);
+  const monthRows = useMemo(() => getCalendarRows(monthCells), [monthCells]);
   const visibleMonthKey = getMonthKey(visibleMonth);
 
   const filteredActivity = useMemo(() => {
@@ -584,73 +590,77 @@ export default function CalendarScreen() {
           </View>
 
           <View style={styles.calendarGrid}>
-            {monthCells.map((cell) => {
-              const dateKey = cell.key;
-              const dayItems = groupedActivity[dateKey] || [];
-              const count = dayItems.length;
-              const daySpend = dayItems
-                .filter((item) => item.type === "expense" && item.transactionType !== "income")
-                .reduce((total, item) => total + (item.amount || 0), 0);
-              const isSelected = selectedDay === dateKey;
-              const isToday = todayKey === dateKey;
-              const isFuture =
-                cell.date.getTime() > new Date().setHours(23, 59, 59, 999);
+            {monthRows.map((row, rowIndex) => (
+              <View key={`week-${rowIndex}`} style={styles.calendarWeekRow}>
+                {row.map((cell) => {
+                  const dateKey = cell.key;
+                  const dayItems = groupedActivity[dateKey] || [];
+                  const count = dayItems.length;
+                  const daySpend = dayItems
+                    .filter((item) => item.type === "expense" && item.transactionType !== "income")
+                    .reduce((total, item) => total + (item.amount || 0), 0);
+                  const isSelected = selectedDay === dateKey;
+                  const isToday = todayKey === dateKey;
+                  const isFuture =
+                    cell.date.getTime() > new Date().setHours(23, 59, 59, 999);
 
-              return (
-                <Pressable
-                  key={cell.key}
-                  style={[
-                    styles.dayCell,
-                    { width: dayCellSize, height: dayCellSize + 6 },
-                    isSelected && styles.selectedDayCell,
-                    isToday && !isSelected && styles.todayDayCell,
-                  ]}
-                  onPress={() => selectCalendarDay(cell)}
-                >
-                  <Text
-                    style={[
-                      styles.dayText,
-                      !cell.inMonth && styles.mutedDayText,
-                      isFuture && cell.inMonth && styles.futureDayText,
-                      count > 0 && cell.inMonth && styles.activeDayText,
-                      isSelected && styles.selectedDayText,
-                    ]}
-                  >
-                    {cell.day}
-                  </Text>
-
-                  {daySpend > 0 ? (
-                    <Text
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.72}
-                      numberOfLines={1}
+                  return (
+                    <Pressable
+                      key={cell.key}
                       style={[
-                        styles.daySpendText,
-                        isSelected && styles.selectedDaySpendText,
+                        styles.dayCell,
+                        { width: dayCellSize, height: dayCellSize + 6 },
+                        isSelected && styles.selectedDayCell,
+                        isToday && !isSelected && styles.todayDayCell,
                       ]}
+                      onPress={() => selectCalendarDay(cell)}
                     >
-                      {formatCompactCurrency(daySpend)}
-                    </Text>
-                  ) : count > 0 ? (
-                    <View style={styles.dotRow}>
-                      {dayItems
-                        .slice(0, 3)
-                        .map((item) => (
-                          <View
-                            key={`${item.type}-${item._id}`}
-                            style={[
-                              styles.dot,
-                              { backgroundColor: getMarkerColor(item) },
-                            ]}
-                          />
-                        ))}
-                    </View>
-                  ) : (
-                    <View style={styles.dotRowPlaceholder} />
-                  )}
-                </Pressable>
-              );
-            })}
+                      <Text
+                        style={[
+                          styles.dayText,
+                          !cell.inMonth && styles.mutedDayText,
+                          isFuture && cell.inMonth && styles.futureDayText,
+                          count > 0 && cell.inMonth && styles.activeDayText,
+                          isSelected && styles.selectedDayText,
+                        ]}
+                      >
+                        {cell.day}
+                      </Text>
+
+                      {daySpend > 0 ? (
+                        <Text
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.72}
+                          numberOfLines={1}
+                          style={[
+                            styles.daySpendText,
+                            isSelected && styles.selectedDaySpendText,
+                          ]}
+                        >
+                          {formatCompactCurrency(daySpend)}
+                        </Text>
+                      ) : count > 0 ? (
+                        <View style={styles.dotRow}>
+                          {dayItems
+                            .slice(0, 3)
+                            .map((item) => (
+                              <View
+                                key={`${item.type}-${item._id}`}
+                                style={[
+                                  styles.dot,
+                                  { backgroundColor: getMarkerColor(item) },
+                                ]}
+                              />
+                            ))}
+                        </View>
+                      ) : (
+                        <View style={styles.dotRowPlaceholder} />
+                      )}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ))}
           </View>
         </View>
 
@@ -906,10 +916,11 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   calendarGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
     gap: calendarColumnGap,
-    justifyContent: "flex-start",
+  },
+  calendarWeekRow: {
+    flexDirection: "row",
+    gap: calendarColumnGap,
   },
   dayCell: {
     alignItems: "center",
