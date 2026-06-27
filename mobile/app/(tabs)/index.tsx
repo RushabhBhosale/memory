@@ -1049,7 +1049,11 @@ export default function HomeScreen() {
             <Text style={styles.overviewValue}>{taskCount}</Text>
             <Text style={styles.overviewHint}>in memory</Text>
           </Pressable>
-          <View style={styles.overviewCard}>
+          <Pressable
+            accessibilityRole="button"
+            style={styles.overviewCard}
+            onPress={() => router.push("/(tabs)/expenses")}
+          >
             <View style={styles.overviewTopRow}>
               <Text style={styles.overviewLabel}>Spent</Text>
               <Ionicons color={colors.textSoft} name="wallet-outline" size={15} />
@@ -1058,7 +1062,7 @@ export default function HomeScreen() {
               {formatCurrency(dailySummary.spentToday)}
             </Text>
             <Text style={styles.overviewHint}>today</Text>
-          </View>
+          </Pressable>
         </View>
 
         <View style={styles.todayPanel}>

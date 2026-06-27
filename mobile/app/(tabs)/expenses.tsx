@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -16,7 +16,6 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
-  addManualExpense,
   confirmPendingTransaction,
   deleteExpense,
   hasExpenseSmsPermissions,
@@ -25,11 +24,9 @@ import {
   listPendingTransactions,
   requestExpenseSmsPermissions,
   scanRecentSms,
-  simulateIncomingSms,
   subscribeToExpenseChanges,
   syncExpensesToMongo,
   type ExpenseEntry,
-  type ExpenseType,
   type PendingTransaction,
   type PendingTransactionType,
 } from "../../services/expenses";
@@ -71,14 +68,6 @@ type EditingState = {
   type: PendingTransactionType;
 };
 
-type ManualExpenseState = {
-  amount: string;
-  category: string;
-  merchant: string;
-  note: string;
-  type: ExpenseType;
-};
-
 export default function ExpensesScreen() {
   const [pending, setPending] = useState<PendingTransaction[]>([]);
   const [expenses, setExpenses] = useState<ExpenseEntry[]>([]);
@@ -87,15 +76,6 @@ export default function ExpensesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [savingId, setSavingId] = useState("");
   const [editingId, setEditingId] = useState("");
-  const [manualExpense, setManualExpense] = useState<ManualExpenseState>({
-    amount: "",
-    category: "general",
-    merchant: "",
-    note: "",
-    type: "expense",
-  });
-  const [savingManual, setSavingManual] = useState(false);
-  const [smsTestText, setSmsTestText] = useState("");
   const [smsTestResult, setSmsTestResult] = useState("");
   const [scanningSms, setScanningSms] = useState(false);
   const [editing, setEditing] = useState<EditingState>({
@@ -230,44 +210,6 @@ export default function ExpensesScreen() {
     }
   };
 
-  const saveManualExpense = async () => {
-    const amount = Number.parseFloat(manualExpense.amount);
-
-    if (!Number.isFinite(amount) || amount <= 0) {
-      Alert.alert("Check amount", "Enter a valid amount.");
-      return;
-    }
-
-    if (!manualExpense.merchant.trim()) {
-      Alert.alert("Merchant required", "Add a name like Cash, Friend, Swiggy, or Salary.");
-      return;
-    }
-
-    try {
-      setSavingManual(true);
-      setError("");
-      await addManualExpense({
-        amount,
-        category: manualExpense.category,
-        merchant: manualExpense.merchant.trim(),
-        note: manualExpense.note.trim(),
-        type: manualExpense.type,
-      });
-      setManualExpense({
-        amount: "",
-        category: "general",
-        merchant: "",
-        note: "",
-        type: "expense",
-      });
-      await loadData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to add expense");
-    } finally {
-      setSavingManual(false);
-    }
-  };
-
   const removeExpense = (expense: ExpenseEntry) => {
     Alert.alert(
       "Delete transaction?",
@@ -310,35 +252,6 @@ export default function ExpensesScreen() {
       setError(err instanceof Error ? err.message : "Unable to ignore transaction");
     } finally {
       setSavingId("");
-    }
-  };
-
-  const testSmsParser = async () => {
-    const trimmedText = smsTestText.trim();
-
-    if (!trimmedText) {
-      setSmsTestResult("Paste a transaction SMS first.");
-      return;
-    }
-
-    try {
-      const result = await simulateIncomingSms("TESTSMS", trimmedText);
-
-      if (result.matched) {
-        setSmsTestResult(
-          `Matched ${result.transaction.type}: ${formatCurrency(
-            result.transaction.amount,
-            result.transaction.currency,
-          )} at ${result.transaction.merchant}`,
-        );
-        setSmsTestText("");
-        await loadData();
-        return;
-      }
-
-      setSmsTestResult(`Not detected: ${result.reason}`);
-    } catch (err) {
-      setSmsTestResult(err instanceof Error ? err.message : "Unable to test SMS parser");
     }
   };
 
@@ -436,120 +349,39 @@ export default function ExpensesScreen() {
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-        <View style={styles.panel}>
-          <Text style={styles.panelTitle}>Add Manually</Text>
-          <Text style={styles.panelText}>
-            Add cash, UPI, income, or anything SMS detection missed.
-          </Text>
-          <View style={styles.manualGrid}>
-            <TextInput
-              keyboardType="decimal-pad"
-              onChangeText={(value) =>
-                setManualExpense((current) => ({ ...current, amount: value }))
-              }
-              placeholder="Amount"
-              style={[styles.input, styles.manualHalfInput]}
-              value={manualExpense.amount}
-            />
-            <TextInput
-              onChangeText={(value) =>
-                setManualExpense((current) => ({ ...current, merchant: value }))
-              }
-              placeholder="Merchant / person"
-              style={[styles.input, styles.manualHalfInput]}
-              value={manualExpense.merchant}
-            />
-          </View>
-          <TextInput
-            onChangeText={(value) =>
-              setManualExpense((current) => ({ ...current, note: value }))
-            }
-            placeholder="Note (optional)"
-            style={styles.input}
-            value={manualExpense.note}
-          />
-          <View style={styles.chipRow}>
-            {categories.map((category) => (
-              <Pressable
-                key={category}
-                style={[
-                  styles.chip,
-                  manualExpense.category === category && styles.selectedChip,
-                ]}
-                onPress={() =>
-                  setManualExpense((current) => ({ ...current, category }))
-                }
-              >
-                <Text
-                  style={[
-                    styles.chipText,
-                    manualExpense.category === category && styles.selectedChipText,
-                  ]}
-                >
-                  {category}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-          <View style={styles.chipRow}>
-            {(["expense", "income"] as const).map((type) => (
-              <Pressable
-                key={type}
-                style={[
-                  styles.chip,
-                  manualExpense.type === type && styles.selectedChip,
-                ]}
-                onPress={() =>
-                  setManualExpense((current) => ({ ...current, type }))
-                }
-              >
-                <Text
-                  style={[
-                    styles.chipText,
-                    manualExpense.type === type && styles.selectedChipText,
-                  ]}
-                >
-                  {type === "income" ? "Income" : "Expense"}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
+        <View style={styles.quickActions}>
           <Pressable
-            disabled={savingManual}
-            style={styles.primaryButton}
-            onPress={() => void saveManualExpense()}
+            style={[styles.quickActionButton, styles.quickActionPrimary]}
+            onPress={() => router.push("/expense-add")}
           >
-            <Text style={styles.primaryButtonText}>
-              {savingManual ? "Saving..." : "Add transaction"}
-            </Text>
+            <View style={styles.quickActionIcon}>
+              <Ionicons color={colors.white} name="add" size={20} />
+            </View>
+            <View style={styles.quickActionCopy}>
+              <Text style={styles.quickActionTitlePrimary}>Add manually</Text>
+              <Text style={styles.quickActionTextPrimary}>Cash, UPI, income</Text>
+            </View>
           </Pressable>
-        </View>
 
-        <View style={styles.panel}>
-          <Text style={styles.panelTitle}>Read SMS</Text>
-          <Text style={styles.panelText}>
-            Read the latest 10 SMS messages or paste one manually. This does not store every SMS;
-            it creates a pending transaction only if the text matches.
-          </Text>
-          <TextInput
-            multiline
-            onChangeText={setSmsTestText}
-            placeholder="Paste bank or UPI SMS text..."
-            style={[styles.input, styles.smsTestInput]}
-            value={smsTestText}
-          />
           {smsTestResult ? <Text style={styles.testResultText}>{smsTestResult}</Text> : null}
           <Pressable
             disabled={scanningSms}
-            style={styles.secondaryButton}
+            style={[styles.quickActionButton, styles.quickActionSecondary]}
             onPress={() => void checkLastTenSms()}
           >
-            <Text style={styles.secondaryButtonText}>
-              {scanningSms ? "Reading..." : "Read SMS"}
-            </Text>
-          </Pressable>
-          <Pressable style={styles.primaryButton} onPress={() => void testSmsParser()}>
-            <Text style={styles.primaryButtonText}>Test Detection</Text>
+            <View style={styles.quickActionIconSecondary}>
+              {scanningSms ? (
+                <ActivityIndicator color={colors.text} size="small" />
+              ) : (
+                <Ionicons color={colors.text} name="refresh" size={19} />
+              )}
+            </View>
+            <View style={styles.quickActionCopy}>
+              <Text style={styles.quickActionTitle}>Read SMS</Text>
+              <Text style={styles.quickActionText}>
+                {scanningSms ? "Checking latest messages" : "Refresh detection"}
+              </Text>
+            </View>
           </Pressable>
         </View>
 
@@ -881,14 +713,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
-  manualGrid: {
-    flexDirection: "row",
-    gap: 10,
-    marginBottom: 10,
-  },
-  manualHalfInput: {
-    flex: 1,
-  },
   merchantText: {
     color: colors.text,
     fontSize: 15,
@@ -964,6 +788,67 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     lineHeight: 18,
     marginTop: 10,
+  },
+  quickActionButton: {
+    alignItems: "center",
+    borderRadius: 22,
+    flexDirection: "row",
+    gap: 12,
+    padding: 16,
+  },
+  quickActionCopy: {
+    flex: 1,
+  },
+  quickActionIcon: {
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderRadius: 999,
+    height: 38,
+    justifyContent: "center",
+    width: 38,
+  },
+  quickActionIconSecondary: {
+    alignItems: "center",
+    backgroundColor: colors.backgroundSoft,
+    borderRadius: 999,
+    height: 38,
+    justifyContent: "center",
+    width: 38,
+  },
+  quickActionPrimary: {
+    backgroundColor: colors.black,
+  },
+  quickActionSecondary: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    ...subtleShadow,
+  },
+  quickActionText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 3,
+  },
+  quickActionTextPrimary: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 3,
+  },
+  quickActionTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  quickActionTitlePrimary: {
+    color: colors.white,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  quickActions: {
+    gap: 10,
+    marginBottom: 16,
   },
   primaryAction: {
     alignItems: "center",
@@ -1051,10 +936,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "900",
     marginTop: 8,
-  },
-  smsTestInput: {
-    minHeight: 92,
-    textAlignVertical: "top",
   },
   testResultText: {
     color: colors.textMuted,
