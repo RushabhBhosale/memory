@@ -1,6 +1,7 @@
 import type { FilterQuery } from 'mongoose';
 
 import {
+  toExpenseActivity,
   toMeetingActivity,
   toMemoryActivity,
   toNoteActivity,
@@ -8,13 +9,22 @@ import {
   type ActivityItem
 } from '@/lib/activityFeed';
 import { extractJsonBlock, requestOpenRouter } from '@/lib/openRouter';
+import Expense from '@/models/Expense';
 import Memory from '@/models/Memory';
 import Project from '@/models/Project';
 import ProjectMeeting from '@/models/ProjectMeeting';
 import ProjectNote from '@/models/ProjectNote';
 import ProjectTask from '@/models/ProjectTask';
 
-export type HybridSearchType = 'memory' | 'log' | 'task' | 'note' | 'meeting' | 'reminder' | 'project';
+export type HybridSearchType =
+  | 'expense'
+  | 'memory'
+  | 'log'
+  | 'task'
+  | 'note'
+  | 'meeting'
+  | 'reminder'
+  | 'project';
 
 export type HybridSearchOptions = {
   activeProjectId?: string | null;
@@ -117,6 +127,12 @@ const getDate = (value: string | Date | undefined) => {
 const getProjectName = (item: ActivityItem) =>
   item.projectName || (item.projectId && typeof item.projectId === 'object' ? item.projectId.name : '');
 
+const getReminderAt = (item: ActivityItem) =>
+  'reminderAt' in item && typeof item.reminderAt === 'string' ? item.reminderAt : '';
+
+const getKind = (item: ActivityItem) =>
+  'kind' in item && typeof item.kind === 'string' ? item.kind : '';
+
 const getSearchKind = (item: ActivityItem) => {
   if (item.type === 'task') {
     return 'task';
@@ -127,14 +143,15 @@ const getSearchKind = (item: ActivityItem) => {
   }
 
   if (item.type === 'note') {
-    return item.kind === 'work_done' ? 'log' : item.kind;
+    const kind = getKind(item);
+    return kind === 'work_done' ? 'log' : kind;
   }
 
-  if (item.reminderAt) {
+  if (getReminderAt(item)) {
     return 'reminder';
   }
 
-  return item.kind;
+  return getKind(item);
 };
 
 const getContentPreview = (content: string) => {
@@ -194,7 +211,7 @@ const matchesRequestedTypes = (item: ActivityItem, types: HybridSearchType[] = [
 
   return types.some((type) => {
     if (type === 'task') {
-      return item.type === 'task' || item.kind === 'task';
+      return item.type === 'task' || getKind(item) === 'task';
     }
 
     if (type === 'meeting') {
@@ -202,15 +219,19 @@ const matchesRequestedTypes = (item: ActivityItem, types: HybridSearchType[] = [
     }
 
     if (type === 'note') {
-      return item.type === 'note' || (item.type === 'memory' && item.kind === 'note');
+      return item.type === 'note' || (item.type === 'memory' && getKind(item) === 'note');
     }
 
     if (type === 'log') {
-      return item.kind === 'work_done';
+      return getKind(item) === 'work_done';
     }
 
     if (type === 'reminder') {
-      return item.type === 'memory' && Boolean(item.reminderAt);
+      return item.type === 'memory' && Boolean(getReminderAt(item));
+    }
+
+    if (type === 'expense') {
+      return item.type === 'expense';
     }
 
     if (type === 'project') {
@@ -445,10 +466,17 @@ export const collectHybridCandidates = async (query: string, options: HybridSear
     ...buildRegexOr(tokens, ['title', 'details', 'tags', 'category']),
     ...projectFilter
   ];
+  const expenseRegexOr = buildRegexOr(tokens, [
+    'merchant',
+    'category',
+    'note',
+    'originalSmsPreview',
+    'type'
+  ]);
   const memoryTextQuery = buildTextQuery(query) as FilterQuery<unknown>;
   const taskTextQuery = buildTextQuery(query) as FilterQuery<unknown>;
 
-  const [memories, tasks, notes, meetings] = await Promise.all([
+  const [memories, tasks, notes, meetings, expenses] = await Promise.all([
     safeFind(
       () =>
         Memory.find({ ...PRIVATE_MEMORY_FILTER, ...memoryTextQuery })
@@ -507,6 +535,18 @@ export const collectHybridCandidates = async (query: string, options: HybridSear
           .limit(CANDIDATE_LIMIT)
           .populate('projectId', 'name description status')
           .lean()
+    ),
+    safeFind(
+      () =>
+        Expense.find(taskTextQuery)
+          .sort({ score: { $meta: 'textScore' }, timestamp: -1 })
+          .limit(CANDIDATE_LIMIT)
+          .lean(),
+      () =>
+        Expense.find(expenseRegexOr.length ? { $or: expenseRegexOr } : {})
+          .sort({ timestamp: -1 })
+          .limit(CANDIDATE_LIMIT)
+          .lean()
     )
   ]);
 
@@ -514,7 +554,8 @@ export const collectHybridCandidates = async (query: string, options: HybridSear
     ...memories.map(toMemoryActivity),
     ...tasks.map(toTaskActivity),
     ...notes.map(toNoteActivity),
-    ...meetings.map(toMeetingActivity)
+    ...meetings.map(toMeetingActivity),
+    ...expenses.map(toExpenseActivity)
   ]).filter((item) => matchesRequestedTypes(item, options.types));
 };
 
