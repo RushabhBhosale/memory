@@ -111,7 +111,7 @@ export default function ExpensesScreen() {
 
       setHasPermission(permission);
       setPending(nextPending.filter((item) => item.status === "pending").reverse());
-      setExpenses(nextExpenses.reverse());
+      setExpenses(nextExpenses);
       void syncExpensesToMongo(nextExpenses).catch(() => undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load expenses");

@@ -166,7 +166,7 @@ export default function AddScreen() {
     let mounted = true;
 
     const loadPlaces = async () => {
-      const nextPlaces = await listPlaces();
+      const nextPlaces = await listPlaces().catch(() => []);
 
       if (mounted) {
         setPlaces(nextPlaces);

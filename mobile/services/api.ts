@@ -180,6 +180,17 @@ export type RemoteExpenseInput = {
   type: 'expense' | 'income';
 };
 
+export type RemoteExpense = RemoteExpenseInput & {
+  _id: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type ExpenseListResponse = {
+  count: number;
+  data: RemoteExpense[];
+};
+
 const getApiRoot = (value: string) => {
   const baseUrl = value.replace(/\/$/, '');
 
@@ -237,10 +248,24 @@ export const request = async <T>(
   });
 
   const text = await response.text();
-  const body = text ? JSON.parse(text) : null;
+  let body: unknown = null;
+
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = { message: text };
+    }
+  }
 
   if (!response.ok) {
-    throw new Error(body?.error || body?.message || `Request failed with status ${response.status}`);
+    const errorBody = body as { error?: unknown; message?: unknown } | null;
+    const message =
+      (typeof errorBody?.error === 'string' && errorBody.error) ||
+      (typeof errorBody?.message === 'string' && errorBody.message) ||
+      `Request failed with status ${response.status}`;
+
+    throw new Error(message);
   }
 
   return body as T;
@@ -297,6 +322,13 @@ export const upsertExpense = async (input: RemoteExpenseInput) => {
     method: 'POST',
     body: JSON.stringify(input)
   });
+
+  return response.data;
+};
+
+export const listRemoteExpenses = async () => {
+  const { expensesUrl } = getApiConfig();
+  const response = await request<ExpenseListResponse>(expensesUrl, '');
 
   return response.data;
 };

@@ -312,6 +312,25 @@ const getExpenseSummary = (expenses: ExpenseEntry[]) => {
   };
 };
 
+const hasReminderIntent = (input: string) =>
+  /\b(?:remind\s+me|remember\s+to|need\s+to|don't\s+forget|do\s+not\s+forget|notify\s+me|alert\s+me)\b/i.test(input) ||
+  /\b(?:when\s+i|when\s+we)\s+(?:reach|arrive|leave|get\s+to|go\s+to)\b/i.test(input);
+
+const normalizeHomepageMetadata = (
+  metadata: Awaited<ReturnType<typeof generateMetadata>>,
+  input: string,
+) => {
+  if (hasReminderIntent(input) || metadata.category !== "reminder") {
+    return metadata;
+  }
+
+  return {
+    ...metadata,
+    category: "personal",
+    tags: metadata.tags.filter((tag) => tag !== "reminder"),
+  };
+};
+
 const getLocationSummary = (
   places: SavedPlace[],
   timeline: PlaceTimelineEvent[],
@@ -790,7 +809,9 @@ export default function HomeScreen() {
         return;
       }
 
-      const locationReminder = await parseLocationReminderRequest(trimmedContent);
+      const locationReminder = hasReminderIntent(trimmedContent)
+        ? await parseLocationReminderRequest(trimmedContent).catch(() => null)
+        : null;
 
       if (locationReminder?.missingPlace) {
         Alert.alert(
@@ -854,7 +875,10 @@ export default function HomeScreen() {
         return;
       }
 
-      const metadata = await generateMetadata(trimmedContent);
+      const metadata = normalizeHomepageMetadata(
+        await generateMetadata(trimmedContent),
+        trimmedContent,
+      );
 
       const memory = await createMemory({
         title: metadata.title,
