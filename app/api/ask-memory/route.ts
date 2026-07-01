@@ -37,7 +37,15 @@ const SEARCH_RESULT_LIMIT = 20;
 const CANDIDATE_LIMIT = 120;
 const NO_RESULTS_ANSWER = "I couldn't find anything saved about that.";
 
-type SearchPlanType = 'memory' | 'log' | 'task' | 'note' | 'meeting' | 'reminder' | 'project';
+type SearchPlanType =
+  | 'memory'
+  | 'log'
+  | 'task'
+  | 'note'
+  | 'meeting'
+  | 'reminder'
+  | 'daily_summary'
+  | 'project';
 type SearchTimeframe = 'today' | 'tomorrow' | 'this_week' | 'this_month' | 'upcoming' | 'all_time';
 
 type SearchPlan = {
@@ -189,7 +197,7 @@ const validateSearchPlan = (value: unknown): SearchPlan | null => {
     ? record.types.filter(
         (type): type is SearchPlanType =>
           typeof type === 'string' &&
-          ['memory', 'log', 'task', 'note', 'meeting', 'reminder', 'project'].includes(type)
+          ['memory', 'log', 'task', 'note', 'meeting', 'reminder', 'daily_summary', 'project'].includes(type)
       )
     : [];
   const timeframe =
@@ -233,7 +241,9 @@ const generateFallbackPlan = (query: string): SearchPlan => {
           : /upcoming/i.test(normalizedQuery)
             ? 'upcoming'
             : 'all_time',
-    types: /reminder/i.test(normalizedQuery)
+    types: /daily|summary|summar|yesterday|last week|decisions|discuss/i.test(normalizedQuery)
+      ? ['daily_summary']
+      : /reminder/i.test(normalizedQuery)
       ? ['reminder']
       : /meeting/i.test(normalizedQuery)
         ? ['meeting']
@@ -265,7 +275,7 @@ Schema:
 
 Rules:
 - keywords should be 1 to 8 useful search terms
-- types can include only: memory, log, task, note, meeting, reminder, project
+- types can include only: memory, log, task, note, meeting, reminder, daily_summary, project
 - project should be a project name if clearly implied, otherwise null
 - timeframe must be one of: today, tomorrow, this_week, this_month, upcoming, all_time
 - use "upcoming" for questions about future reminders
@@ -327,6 +337,8 @@ const matchesRequestedTypes = (item: ActivityItem, types: SearchPlanType[]) => {
       case 'memory':
       case 'log':
         return item.type === 'memory';
+      case 'daily_summary':
+        return item.type === 'daily_summary';
       case 'reminder':
         return item.type === 'memory' && Boolean(item.reminderAt);
       case 'project':

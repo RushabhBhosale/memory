@@ -36,6 +36,8 @@ const getActivityLabel = (item: ActivityItem) => {
       return 'Task';
     case 'meeting':
       return 'Meeting';
+    case 'daily_summary':
+      return 'Daily Summary';
     case 'note':
       return item.kind === 'work_done' ? 'Work' : 'Note';
     default:
@@ -49,6 +51,8 @@ const getActivityTone = (item: ActivityItem) => {
       return colors.workTag;
     case 'meeting':
       return colors.reminderTag;
+    case 'daily_summary':
+      return colors.primary;
     case 'note':
       return colors.personalTag;
     default:

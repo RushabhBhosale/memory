@@ -65,11 +65,47 @@ export type ScanRecentSmsResult = {
   scanned: number;
 };
 
+export type SmsTrackingDebugStatus = {
+  lastDetectedExpenseTime: number | null;
+  lastProcessedSmsId: string | null;
+  lastSmsScanTime: number | null;
+  permissionGranted: boolean;
+  receiverEnabled: boolean;
+  totalExpensesDetectedFromSms: number;
+  trackingEnabled: boolean;
+  trackingStatus: "Running" | "Stopped";
+};
+
+export type SmsTrackingDebugMessage = {
+  bodyPreview: string;
+  id: string;
+  matched: boolean;
+  reason: string;
+  sender: string;
+  timestamp: number;
+  transaction?: {
+    amount: number;
+    category: string;
+    confidence: number;
+    currency: string;
+    merchant: string;
+    type: PendingTransactionType;
+  };
+};
+
+export type SmsTrackingDebugTestResult = {
+  matched: number;
+  messages: SmsTrackingDebugMessage[];
+  scanned: number;
+};
+
 type ExpenseSmsNativeModule = {
   addManualExpense(input: ManualExpenseInput): Promise<ExpenseEntry>;
   confirmTransaction(id: string, updates?: PendingTransactionUpdate): Promise<boolean>;
   deleteExpense?: (id: string) => Promise<boolean>;
   hasSmsPermissions(): Promise<boolean>;
+  getTrackingDebugStatus?: () => Promise<SmsTrackingDebugStatus>;
+  debugTestRecentSms?: (limit: number) => Promise<SmsTrackingDebugTestResult>;
   ignoreTransaction(id: string): Promise<boolean>;
   listExpenses(): Promise<ExpenseEntry[]>;
   listPendingTransactions(): Promise<PendingTransaction[]>;
@@ -236,6 +272,26 @@ export const simulateIncomingSms = async (sender: string, messageBody: string) =
 
 export const scanRecentSms = async (limit = 10) =>
   requireAndroidModule().scanRecentSms(limit);
+
+export const getSmsTrackingDebugStatus = async () => {
+  const module = requireAndroidModule();
+
+  if (!module.getTrackingDebugStatus) {
+    throw new Error("SMS tracking diagnostics require a rebuilt Android app.");
+  }
+
+  return module.getTrackingDebugStatus();
+};
+
+export const testRecentSmsTracking = async (limit = 10) => {
+  const module = requireAndroidModule();
+
+  if (!module.debugTestRecentSms) {
+    throw new Error("SMS tracking diagnostics require a rebuilt Android app.");
+  }
+
+  return module.debugTestRecentSms(limit);
+};
 
 export const subscribeToExpenseChanges = (listener: () => void) => {
   if (Platform.OS !== "android" || !nativeModule) {

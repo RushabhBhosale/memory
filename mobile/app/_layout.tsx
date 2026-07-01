@@ -33,10 +33,13 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="add" options={{ title: 'Add Memory' }} />
         <Stack.Screen name="app-usage" options={{ title: 'App Usage' }} />
+        <Stack.Screen name="daily-summaries" options={{ headerShown: false }} />
+        <Stack.Screen name="daily-summaries/[date]" options={{ headerShown: false }} />
         <Stack.Screen name="expense-add" options={{ headerShown: false }} />
         <Stack.Screen name="location" options={{ headerShown: false }} />
         <Stack.Screen name="screenshots" options={{ headerShown: false }} />
         <Stack.Screen name="settings" options={{ headerShown: false }} />
+        <Stack.Screen name="sms-tracking-debug" options={{ headerShown: false }} />
         <Stack.Screen name="summary/daily" options={{ headerShown: false }} />
         <Stack.Screen name="activity/[type]/[id]" options={{ title: 'Details' }} />
         <Stack.Screen name="activity-list/[filter]" options={{ headerShown: false }} />

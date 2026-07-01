@@ -1000,6 +1000,10 @@ export default function HomeScreen() {
             <Ionicons color={colors.text} name="sparkles-outline" size={18} />
             <Text style={styles.primaryActionText}>Ask</Text>
           </Pressable>
+          <Pressable style={styles.primaryAction} onPress={() => router.push("/daily-summaries")}>
+            <Ionicons color={colors.text} name="calendar-clear-outline" size={18} />
+            <Text style={styles.primaryActionText}>Daily</Text>
+          </Pressable>
           <Pressable style={styles.primaryAction} onPress={() => router.push("/screenshots")}>
             <Ionicons color={colors.text} name="images-outline" size={18} />
             <Text style={styles.primaryActionText}>Screens</Text>

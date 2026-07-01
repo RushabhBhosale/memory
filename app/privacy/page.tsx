@@ -67,9 +67,9 @@ export default function PrivacyPage() {
       <section style={sectionStyle}>
         <h2 style={headingStyle}>Storage and Security</h2>
         <p style={paragraphStyle}>
-          Memory data is stored in MongoDB. The API is protected with an API key
-          sent through the x-api-key request header. You should keep this API key
-          private and rotate it if it is exposed.
+          Memory data is stored in MongoDB. The API endpoints are currently open
+          for direct app and automation access, so avoid sending information you
+          do not want stored in this service.
         </p>
       </section>
 

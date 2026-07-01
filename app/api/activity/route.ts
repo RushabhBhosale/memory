@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import {
   sortActivityItems,
+  toDailySummaryActivity,
   toExpenseActivity,
   toMeetingActivity,
   toMemoryActivity,
@@ -11,6 +12,7 @@ import {
 import { validateApiKey } from '@/lib/apiKey';
 import { connectDB } from '@/lib/mongodb';
 import Memory from '@/models/Memory';
+import DailySummary from '@/models/DailySummary';
 import Expense from '@/models/Expense';
 import '@/models/Project';
 import ProjectMeeting from '@/models/ProjectMeeting';
@@ -79,11 +81,24 @@ export async function GET(request: Request) {
 
     await connectDB();
 
-    const [memories, tasks, notes, meetings, expenses] = await Promise.all([
+    const [memories, dailySummaries, tasks, notes, meetings, expenses] = await Promise.all([
       Memory.find({ ...query, ...PRIVATE_MEMORY_FILTER })
         .sort({ createdAt: -1 })
         .limit(limit)
         .populate('projectId', 'name description status')
+        .lean(),
+      DailySummary.find(
+        from || to
+          ? {
+              date: {
+                ...(from ? { $gte: from.toISOString().slice(0, 10) } : {}),
+                ...(to ? { $lte: to.toISOString().slice(0, 10) } : {})
+              }
+            }
+          : {}
+      )
+        .sort({ date: -1 })
+        .limit(limit)
         .lean(),
       ProjectTask.find(query)
         .sort({ createdAt: -1 })
@@ -117,6 +132,7 @@ export async function GET(request: Request) {
 
     const data = sortActivityItems([
       ...memories.map(toMemoryActivity),
+      ...dailySummaries.map(toDailySummaryActivity),
       ...tasks.map(toTaskActivity),
       ...notes.map(toNoteActivity),
       ...meetings.map(toMeetingActivity),

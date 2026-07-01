@@ -1,4 +1,4 @@
-export type ActivityType = 'memory' | 'task' | 'note' | 'meeting' | 'expense';
+export type ActivityType = 'memory' | 'task' | 'note' | 'meeting' | 'expense' | 'daily_summary';
 
 type RawRecord = Record<string, unknown>;
 
@@ -167,12 +167,46 @@ export const toExpenseActivity = (expense: RawRecord) => {
   };
 };
 
+const getDailySummaryContent = (summary: RawRecord) =>
+  [
+    toStringValue(summary.summary),
+    toStringValue(summary.bodyMarkdown),
+    ...toStringArray(summary.keyQuestions),
+    ...toStringArray(summary.decisions)
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+export const toDailySummaryActivity = (summary: RawRecord) => ({
+  ...getCommonActivityFields({
+    ...summary,
+    createdAt: toStringValue(summary.date) || toIsoString(summary.createdAt),
+    tags: toStringArray(summary.tags)
+  }),
+  bodyMarkdown: toStringValue(summary.bodyMarkdown),
+  category: 'daily_summary',
+  content: getDailySummaryContent(summary),
+  date: toStringValue(summary.date),
+  decisions: toStringArray(summary.decisions),
+  keyQuestions: toStringArray(summary.keyQuestions),
+  kind: 'daily_summary',
+  projects: toStringArray(summary.projects),
+  source: toStringValue(summary.source, 'chatgpt_scheduled_task'),
+  summary: toStringValue(summary.summary),
+  tasks: Array.isArray(summary.tasks) ? summary.tasks : [],
+  timestamp: toStringValue(summary.date),
+  title: toStringValue(summary.title, 'Daily summary'),
+  topics: Array.isArray(summary.topics) ? summary.topics : [],
+  type: 'daily_summary' as const
+});
+
 export type ActivityItem =
   | ReturnType<typeof toMemoryActivity>
   | ReturnType<typeof toTaskActivity>
   | ReturnType<typeof toNoteActivity>
   | ReturnType<typeof toMeetingActivity>
-  | ReturnType<typeof toExpenseActivity>;
+  | ReturnType<typeof toExpenseActivity>
+  | ReturnType<typeof toDailySummaryActivity>;
 
 export const sortActivityItems = (items: ActivityItem[]) =>
   [...items].sort(

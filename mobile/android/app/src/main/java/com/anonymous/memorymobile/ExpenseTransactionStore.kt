@@ -118,6 +118,36 @@ object ExpenseTransactionStore {
 
   fun listExpenses(context: Context): JSONArray = readArray(context, EXPENSES_KEY)
 
+  fun smsDebugStats(context: Context): JSONObject {
+    val pending = readArray(context, PENDING_KEY)
+    val expenses = readArray(context, EXPENSES_KEY)
+    var totalSmsExpenses = 0
+    var lastDetectedAt = 0L
+
+    for (index in 0 until expenses.length()) {
+      val item = expenses.optJSONObject(index) ?: continue
+
+      if (item.optString("source") != "sms") {
+        continue
+      }
+
+      totalSmsExpenses += 1
+      lastDetectedAt = maxOf(lastDetectedAt, item.optLong("timestamp", 0L))
+      lastDetectedAt = maxOf(lastDetectedAt, item.optLong("createdAt", 0L))
+    }
+
+    for (index in 0 until pending.length()) {
+      val item = pending.optJSONObject(index) ?: continue
+      lastDetectedAt = maxOf(lastDetectedAt, item.optLong("timestamp", 0L))
+      lastDetectedAt = maxOf(lastDetectedAt, item.optLong("createdAt", 0L))
+    }
+
+    return JSONObject().apply {
+      put("lastDetectedExpenseTime", if (lastDetectedAt > 0L) lastDetectedAt else JSONObject.NULL)
+      put("totalExpensesDetectedFromSms", totalSmsExpenses)
+    }
+  }
+
   fun deleteExpense(context: Context, id: String): Boolean {
     val expenses = readArray(context, EXPENSES_KEY)
     val nextExpenses = JSONArray()

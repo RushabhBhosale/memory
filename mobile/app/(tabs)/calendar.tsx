@@ -27,7 +27,7 @@ type CalendarCell = {
   inMonth: boolean;
 };
 
-const filters = ["All", "Notes", "Tasks", "Expenses", "Meetings", "Credentials"];
+const filters = ["All", "Daily Summaries", "Notes", "Tasks", "Expenses", "Meetings", "Credentials"];
 const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const calendarColumnGap = 4;
 
@@ -128,6 +128,10 @@ const getLabel = (item: ActivityItem) => {
     return "Meeting";
   }
 
+  if (item.type === "daily_summary") {
+    return "Daily Summary";
+  }
+
   if (item.type === "expense") {
     return item.transactionType === "income" ? "Income" : "Expense";
   }
@@ -153,6 +157,8 @@ const getMarkerColor = (item: ActivityItem) => {
   switch (label) {
     case "Meeting":
       return colors.primary;
+    case "Daily Summary":
+      return colors.primary;
     case "Task":
       return colors.secondary;
     case "Credentials":
@@ -175,6 +181,10 @@ const matchesFilter = (item: ActivityItem, filter: string) => {
 
   if (filter === "Notes") {
     return item.type === "note" || item.type === "memory";
+  }
+
+  if (filter === "Daily Summaries") {
+    return item.type === "daily_summary";
   }
 
   if (filter === "Meetings") {

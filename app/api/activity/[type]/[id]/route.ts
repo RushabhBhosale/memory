@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { NextResponse } from 'next/server';
 
 import {
+  toDailySummaryActivity,
   toMeetingActivity,
   toMemoryActivity,
   toNoteActivity,
@@ -10,6 +11,7 @@ import {
 } from '@/lib/activityFeed';
 import { validateApiKey } from '@/lib/apiKey';
 import { connectDB } from '@/lib/mongodb';
+import DailySummary from '@/models/DailySummary';
 import Memory from '@/models/Memory';
 import '@/models/Project';
 import ProjectMeeting from '@/models/ProjectMeeting';
@@ -26,7 +28,7 @@ type RouteContext = {
   }>;
 };
 
-const activityTypes = new Set<ActivityType>(['memory', 'task', 'note', 'meeting']);
+const activityTypes = new Set<ActivityType>(['memory', 'task', 'note', 'meeting', 'daily_summary']);
 
 const getErrorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Internal server error';
@@ -82,6 +84,11 @@ const findActivityItem = async (type: ActivityType, id: string) => {
         .lean();
 
       return meeting ? toMeetingActivity(meeting) : null;
+    }
+    case 'daily_summary': {
+      const summary = await DailySummary.findById(id).lean();
+
+      return summary ? toDailySummaryActivity(summary) : null;
     }
     default:
       return null;
@@ -173,6 +180,19 @@ const buildActivityUpdates = (type: ActivityType, body: Record<string, unknown>)
     }
   }
 
+  if (type === 'daily_summary') {
+    if (content) {
+      updates.summary = content;
+      delete updates.content;
+    }
+
+    const bodyMarkdown = pickString(body.bodyMarkdown);
+
+    if (bodyMarkdown) {
+      updates.bodyMarkdown = bodyMarkdown;
+    }
+  }
+
   return updates;
 };
 
@@ -222,6 +242,14 @@ const updateActivityItem = async (
 
       return meeting ? toMeetingActivity(meeting) : null;
     }
+    case 'daily_summary': {
+      const summary = await DailySummary.findByIdAndUpdate(id, updates, {
+        new: true,
+        runValidators: true
+      }).lean();
+
+      return summary ? toDailySummaryActivity(summary) : null;
+    }
     default:
       return null;
   }
@@ -256,6 +284,11 @@ const deleteActivityItem = async (type: ActivityType, id: string) => {
         .lean();
 
       return meeting ? toMeetingActivity(meeting) : null;
+    }
+    case 'daily_summary': {
+      const summary = await DailySummary.findByIdAndDelete(id).lean();
+
+      return summary ? toDailySummaryActivity(summary) : null;
     }
     default:
       return null;

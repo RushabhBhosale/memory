@@ -1,6 +1,7 @@
 import type { FilterQuery } from 'mongoose';
 
 import {
+  toDailySummaryActivity,
   toExpenseActivity,
   toMeetingActivity,
   toMemoryActivity,
@@ -10,6 +11,7 @@ import {
 } from '@/lib/activityFeed';
 import { extractJsonBlock, requestOpenRouter } from '@/lib/openRouter';
 import Expense from '@/models/Expense';
+import DailySummary from '@/models/DailySummary';
 import Memory from '@/models/Memory';
 import Project from '@/models/Project';
 import ProjectMeeting from '@/models/ProjectMeeting';
@@ -24,6 +26,7 @@ export type HybridSearchType =
   | 'note'
   | 'meeting'
   | 'reminder'
+  | 'daily_summary'
   | 'project';
 
 export type HybridSearchOptions = {
@@ -142,6 +145,10 @@ const getSearchKind = (item: ActivityItem) => {
     return 'meeting';
   }
 
+  if (item.type === 'daily_summary') {
+    return 'daily_summary';
+  }
+
   if (item.type === 'note') {
     const kind = getKind(item);
     return kind === 'work_done' ? 'log' : kind;
@@ -232,6 +239,10 @@ const matchesRequestedTypes = (item: ActivityItem, types: HybridSearchType[] = [
 
     if (type === 'expense') {
       return item.type === 'expense';
+    }
+
+    if (type === 'daily_summary') {
+      return item.type === 'daily_summary';
     }
 
     if (type === 'project') {
@@ -473,10 +484,25 @@ export const collectHybridCandidates = async (query: string, options: HybridSear
     'originalSmsPreview',
     'type'
   ]);
+  const dailySummaryRegexOr = buildRegexOr(tokens, [
+    'title',
+    'summary',
+    'bodyMarkdown',
+    'topics.title',
+    'topics.summary',
+    'topics.project',
+    'projects',
+    'tags',
+    'keyQuestions',
+    'tasks.task',
+    'tasks.project',
+    'decisions',
+    'source'
+  ]);
   const memoryTextQuery = buildTextQuery(query) as FilterQuery<unknown>;
   const taskTextQuery = buildTextQuery(query) as FilterQuery<unknown>;
 
-  const [memories, tasks, notes, meetings, expenses] = await Promise.all([
+  const [memories, dailySummaries, tasks, notes, meetings, expenses] = await Promise.all([
     safeFind(
       () =>
         Memory.find({ ...PRIVATE_MEMORY_FILTER, ...memoryTextQuery })
@@ -492,6 +518,18 @@ export const collectHybridCandidates = async (query: string, options: HybridSear
           .sort({ createdAt: -1 })
           .limit(CANDIDATE_LIMIT)
           .populate('projectId', 'name description status')
+          .lean()
+    ),
+    safeFind(
+      () =>
+        DailySummary.find(memoryTextQuery)
+          .sort({ score: { $meta: 'textScore' }, date: -1 })
+          .limit(CANDIDATE_LIMIT)
+          .lean(),
+      () =>
+        DailySummary.find(dailySummaryRegexOr.length ? { $or: dailySummaryRegexOr } : {})
+          .sort({ date: -1 })
+          .limit(CANDIDATE_LIMIT)
           .lean()
     ),
     safeFind(
@@ -552,6 +590,7 @@ export const collectHybridCandidates = async (query: string, options: HybridSear
 
   return dedupeActivities([
     ...memories.map(toMemoryActivity),
+    ...dailySummaries.map(toDailySummaryActivity),
     ...tasks.map(toTaskActivity),
     ...notes.map(toNoteActivity),
     ...meetings.map(toMeetingActivity),

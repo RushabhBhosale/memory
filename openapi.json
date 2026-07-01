@@ -2,17 +2,12 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Personal Memory API",
-    "description": "Private memory API. Prefer runAssistantCommand for GPT use; it handles tasks, notes, meetings, memories, reminders, ranked search context, summaries, and delete.",
+    "description": "Open memory API. Prefer runAssistantCommand for GPT use; it handles tasks, notes, meetings, memories, reminders, ranked search context, summaries, and delete.",
     "version": "1.0.0"
   },
   "servers": [
     {
       "url": "https://memory-green-kappa.vercel.app"
-    }
-  ],
-  "security": [
-    {
-      "apiKeyAuth": []
     }
   ],
   "paths": {
@@ -45,9 +40,6 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
           }
@@ -69,9 +61,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
           },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
@@ -106,8 +95,186 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/memories/daily-summary": {
+      "get": {
+        "operationId": "listDailySummaries",
+        "summary": "List daily ChatGPT summaries",
+        "description": "List saved daily summaries sorted by date descending. Supports optional q, project, tag, source, from, to, and limit query parameters.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Daily summaries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListDailySummariesResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      },
+      "post": {
+        "operationId": "saveDailySummary",
+        "summary": "Create or update one daily summary",
+        "description": "Upserts a single ChatGPT daily summary by date. Repeated calls for the same date update the existing summary instead of creating duplicates.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveDailySummaryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Daily summary created or updated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailySummaryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/api/memories/daily-summary/{date}": {
+      "get": {
+        "operationId": "getDailySummaryByDate",
+        "summary": "Get one daily summary by date",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Daily summary details.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailySummaryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteDailySummaryByDate",
+        "summary": "Delete one daily summary by date",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Daily summary deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailySummaryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
@@ -146,9 +313,6 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
           }
@@ -185,9 +349,6 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -226,9 +387,6 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -289,9 +447,6 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -339,9 +494,6 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -353,13 +505,6 @@
     }
   },
   "components": {
-    "securitySchemes": {
-      "apiKeyAuth": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "x-api-key"
-      }
-    },
     "schemas": {
       "AssistantSaveType": {
         "type": "string",
@@ -379,7 +524,8 @@
           "memory",
           "task",
           "note",
-          "meeting"
+          "meeting",
+          "daily_summary"
         ]
       },
       "UpdateActivityRequest": {
@@ -596,6 +742,187 @@
           },
           "data": {
             "description": "Command-specific result data."
+          }
+        }
+      },
+      "DailySummaryTopic": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "DailySummaryTask": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "task": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "SaveDailySummaryRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "date",
+          "title"
+        ],
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "description": "Daily summary date in YYYY-MM-DD format."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "summary": {
+            "type": "string",
+            "description": "Short overview. Either summary or bodyMarkdown is required."
+          },
+          "bodyMarkdown": {
+            "type": "string",
+            "description": "Full readable markdown summary. Either summary or bodyMarkdown is required."
+          },
+          "topics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DailySummaryTopic"
+            },
+            "default": []
+          },
+          "keyQuestions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DailySummaryTask"
+            },
+            "default": []
+          },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "projects": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "source": {
+            "type": "string",
+            "default": "chatgpt_scheduled_task"
+          }
+        }
+      },
+      "DailySummary": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SaveDailySummaryRequest"
+          },
+          {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "_id",
+              "type",
+              "createdAt",
+              "updatedAt"
+            ],
+            "properties": {
+              "_id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "const": "daily_summary"
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "updatedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        ]
+      },
+      "DailySummaryResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "$ref": "#/components/schemas/DailySummary"
+          }
+        }
+      },
+      "ListDailySummariesResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "count",
+          "data"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DailySummary"
+            }
           }
         }
       },
@@ -836,16 +1163,6 @@
     "responses": {
       "BadRequest": {
         "description": "Bad request.",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/ErrorResponse"
-            }
-          }
-        }
-      },
-      "Unauthorized": {
-        "description": "Missing or invalid API key.",
         "content": {
           "application/json": {
             "schema": {

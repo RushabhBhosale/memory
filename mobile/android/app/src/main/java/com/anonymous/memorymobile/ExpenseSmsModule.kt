@@ -1,6 +1,8 @@
 package com.anonymous.memorymobile
 
 import android.Manifest
+import android.content.ComponentName
+import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -63,6 +65,31 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
   @ReactMethod
   fun listExpenses(promise: Promise) {
     promise.resolve(toWritableArray(ExpenseTransactionStore.listExpenses(reactContext)))
+  }
+
+  @ReactMethod
+  fun getTrackingDebugStatus(promise: Promise) {
+    try {
+      val permissionGranted = hasRequiredPermissions()
+      val receiverEnabled = isReceiverEnabled()
+      val debugPrefs = reactContext.getSharedPreferences(DEBUG_PREFS, Context.MODE_PRIVATE)
+      val stats = ExpenseTransactionStore.smsDebugStats(reactContext)
+
+      promise.resolve(
+        Arguments.createMap().apply {
+          putBoolean("permissionGranted", permissionGranted)
+          putBoolean("trackingEnabled", receiverEnabled)
+          putBoolean("receiverEnabled", receiverEnabled)
+          putString("trackingStatus", if (permissionGranted && receiverEnabled) "Running" else "Stopped")
+          putNullableLong("lastSmsScanTime", debugPrefs.getLong(LAST_SCAN_TIME_KEY, 0L))
+          putString("lastProcessedSmsId", debugPrefs.getString(LAST_PROCESSED_SMS_ID_KEY, null))
+          putNullableLong("lastDetectedExpenseTime", stats.optLong("lastDetectedExpenseTime", 0L))
+          putInt("totalExpensesDetectedFromSms", stats.optInt("totalExpensesDetectedFromSms", 0))
+        }
+      )
+    } catch (error: Exception) {
+      promise.reject("SMS_DEBUG_STATUS_FAILED", error.message, error)
+    }
   }
 
   @ReactMethod
@@ -170,21 +197,24 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
     var scanned = 0
     var matched = 0
     var createdOrExisting = 0
+    var lastProcessedSmsId: String? = null
 
     try {
       reactContext.contentResolver.query(
         Uri.parse("content://sms/inbox"),
-        arrayOf("address", "body", "date"),
+        arrayOf("_id", "address", "body", "date"),
         null,
         null,
         "date DESC"
       )?.use { cursor ->
+        val idIndex = cursor.getColumnIndex("_id")
         val addressIndex = cursor.getColumnIndex("address")
         val bodyIndex = cursor.getColumnIndex("body")
         val dateIndex = cursor.getColumnIndex("date")
 
         while (cursor.moveToNext() && scanned < maxMessages) {
           scanned += 1
+          lastProcessedSmsId = if (idIndex >= 0) cursor.getString(idIndex) else null
           val sender = cursor.getString(addressIndex) ?: "Unknown"
           val body = cursor.getString(bodyIndex) ?: ""
           val timestamp = cursor.getLong(dateIndex)
@@ -209,6 +239,7 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
         }
       }
 
+      rememberDebugScan(lastProcessedSmsId)
       val reasons = Arguments.createMap()
       reasonCounts.forEach { (reason, count) -> reasons.putInt(reason, count) }
       promise.resolve(
@@ -221,6 +252,86 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
       )
     } catch (error: Exception) {
       promise.reject("SMS_SCAN_FAILED", error.message, error)
+    }
+  }
+
+  @ReactMethod
+  fun debugTestRecentSms(limit: Double, promise: Promise) {
+    if (reactContext.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+      promise.reject("SMS_PERMISSION_MISSING", "READ_SMS permission is required to test recent SMS.")
+      return
+    }
+
+    val maxMessages = limit.toInt().coerceIn(1, 25)
+    val messages = Arguments.createArray()
+    var scanned = 0
+    var matched = 0
+    var lastProcessedSmsId: String? = null
+
+    try {
+      reactContext.contentResolver.query(
+        Uri.parse("content://sms/inbox"),
+        arrayOf("_id", "address", "body", "date"),
+        null,
+        null,
+        "date DESC"
+      )?.use { cursor ->
+        val idIndex = cursor.getColumnIndex("_id")
+        val addressIndex = cursor.getColumnIndex("address")
+        val bodyIndex = cursor.getColumnIndex("body")
+        val dateIndex = cursor.getColumnIndex("date")
+
+        while (cursor.moveToNext() && scanned < maxMessages) {
+          scanned += 1
+          val id = if (idIndex >= 0) cursor.getString(idIndex) else scanned.toString()
+          lastProcessedSmsId = id
+          val sender = cursor.getString(addressIndex) ?: "Unknown"
+          val body = cursor.getString(bodyIndex) ?: ""
+          val timestamp = cursor.getLong(dateIndex)
+          val result = SmsTransactionParser.parseWithReason(sender, body, timestamp)
+          val parsed = result.transaction
+
+          if (parsed != null) {
+            matched += 1
+          }
+
+          messages.pushMap(
+            Arguments.createMap().apply {
+              putString("id", id)
+              putString("sender", sender)
+              putString("bodyPreview", safeDebugPreview(body))
+              putDouble("timestamp", timestamp.toDouble())
+              putBoolean("matched", parsed != null)
+              putString("reason", result.reason)
+
+              if (parsed != null) {
+                putMap(
+                  "transaction",
+                  Arguments.createMap().apply {
+                    putDouble("amount", parsed.amount)
+                    putString("currency", parsed.currency)
+                    putString("merchant", parsed.merchant)
+                    putString("type", parsed.type)
+                    putString("category", ExpenseTransactionStore.categoryForMerchant(parsed.merchant))
+                    putDouble("confidence", parsed.confidence)
+                  }
+                )
+              }
+            }
+          )
+        }
+      }
+
+      rememberDebugScan(lastProcessedSmsId)
+      promise.resolve(
+        Arguments.createMap().apply {
+          putInt("scanned", scanned)
+          putInt("matched", matched)
+          putArray("messages", messages)
+        }
+      )
+    } catch (error: Exception) {
+      promise.reject("SMS_DEBUG_TEST_FAILED", error.message, error)
     }
   }
 
@@ -258,6 +369,44 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
       .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
       .emit("MemoryOSExpensesChanged", null)
   }
+
+  private fun isReceiverEnabled(): Boolean {
+    val component = ComponentName(reactContext, SmsTransactionReceiver::class.java)
+    val state = reactContext.packageManager.getComponentEnabledSetting(component)
+
+    return state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED ||
+      state == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
+  }
+
+  private fun rememberDebugScan(lastProcessedSmsId: String?) {
+    reactContext
+      .getSharedPreferences(DEBUG_PREFS, Context.MODE_PRIVATE)
+      .edit()
+      .putLong(LAST_SCAN_TIME_KEY, System.currentTimeMillis())
+      .apply {
+        if (lastProcessedSmsId != null) {
+          putString(LAST_PROCESSED_SMS_ID_KEY, lastProcessedSmsId)
+        }
+      }
+      .apply()
+  }
+}
+
+private const val DEBUG_PREFS = "memoryos_expense_sms_debug"
+private const val LAST_SCAN_TIME_KEY = "last_sms_scan_time"
+private const val LAST_PROCESSED_SMS_ID_KEY = "last_processed_sms_id"
+
+private fun com.facebook.react.bridge.WritableMap.putNullableLong(key: String, value: Long) {
+  if (value > 0L) {
+    putDouble(key, value.toDouble())
+  } else {
+    putNull(key)
+  }
+}
+
+private fun safeDebugPreview(message: String): String {
+  val normalized = message.replace(Regex("\\s+"), " ").trim()
+  return normalized.substring(0, minOf(normalized.length, 180))
 }
 
 private fun ReadableMap.toJson(): JSONObject {

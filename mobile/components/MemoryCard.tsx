@@ -24,6 +24,8 @@ const getKindLabel = (memory: ActivityItem | Memory) => {
       return 'Task';
     case 'meeting':
       return 'Meeting';
+    case 'daily_summary':
+      return 'Daily Summary';
     case 'note':
       return 'Note';
     default:
@@ -52,6 +54,8 @@ const getKindTone = (memory: ActivityItem | Memory) => {
       return colors.workTag;
     case 'meeting':
       return colors.reminderTag;
+    case 'daily_summary':
+      return colors.primary;
     case 'note':
       return colors.personalTag;
     default:
@@ -79,6 +83,8 @@ const getKindIcon = (memory: ActivityItem | Memory) => {
       return 'checkbox-outline';
     case 'meeting':
       return 'people-outline';
+    case 'daily_summary':
+      return 'calendar-clear-outline';
     case 'note':
       return 'document-text-outline';
     default:
@@ -101,6 +107,10 @@ const getKindIcon = (memory: ActivityItem | Memory) => {
 
 const getCategoryTone = (memory: ActivityItem | Memory) => {
   const category = memory.category.toLowerCase();
+
+  if (getActivityType(memory) === 'daily_summary') {
+    return colors.primary;
+  }
 
   if (category.includes('work') || memory.kind === 'task' || memory.kind === 'work_done') {
     return colors.workTag;
@@ -136,6 +146,14 @@ export function MemoryCard({ memory }: MemoryCardProps) {
           router.push({
             pathname: '/memories/[id]',
             params: { id: memory._id }
+          });
+          return;
+        }
+
+        if (activityType === 'daily_summary' && 'date' in memory && memory.date) {
+          router.push({
+            pathname: '/daily-summaries/[date]',
+            params: { date: memory.date }
           });
           return;
         }

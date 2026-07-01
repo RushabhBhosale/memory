@@ -1,6 +1,12 @@
-export type MemoryKind = 'note' | 'task' | 'work_done' | 'requirement' | 'credential';
+export type MemoryKind =
+  | 'note'
+  | 'task'
+  | 'work_done'
+  | 'requirement'
+  | 'credential'
+  | 'daily_summary';
 
-export type ActivityType = 'memory' | 'task' | 'note' | 'meeting' | 'expense';
+export type ActivityType = 'memory' | 'task' | 'note' | 'meeting' | 'expense' | 'daily_summary';
 export type SaveItemType = 'memory' | 'log' | 'task' | 'note' | 'meeting' | 'reminder';
 export type DesktopActivity = {
   _id: string;
@@ -44,6 +50,38 @@ export type Memory = {
   updatedAt: string;
 };
 
+export type DailySummaryTopic = {
+  project: string;
+  status: string;
+  summary: string;
+  tags: string[];
+  title: string;
+};
+
+export type DailySummaryTask = {
+  project: string;
+  status: string;
+  task: string;
+};
+
+export type DailySummary = {
+  _id: string;
+  bodyMarkdown: string;
+  createdAt: string;
+  date: string;
+  decisions: string[];
+  keyQuestions: string[];
+  projects: string[];
+  source: string;
+  summary: string;
+  tags: string[];
+  tasks: DailySummaryTask[];
+  title: string;
+  topics: DailySummaryTopic[];
+  type: 'daily_summary';
+  updatedAt: string;
+};
+
 export type ActivityItem = Memory & {
   amount?: number;
   currency?: string;
@@ -52,6 +90,14 @@ export type ActivityItem = Memory & {
   originalSmsPreview?: string;
   timestamp?: string;
   transactionType?: 'expense' | 'income';
+  bodyMarkdown?: string;
+  date?: string;
+  decisions?: string[];
+  keyQuestions?: string[];
+  projects?: string[];
+  summary?: string;
+  tasks?: DailySummaryTask[];
+  topics?: DailySummaryTopic[];
   status?: string;
   type: ActivityType;
 };
@@ -115,6 +161,15 @@ type SingleResponse = {
 type DesktopActivityListResponse = {
   count: number;
   data: DesktopActivity[];
+};
+
+type DailySummaryListResponse = {
+  count: number;
+  data: DailySummary[];
+};
+
+type DailySummarySingleResponse = {
+  data: DailySummary;
 };
 
 export type ScreenshotInboxItem = {
@@ -207,22 +262,17 @@ const getApiRoot = (value: string) => {
 
 export const getApiConfig = () => {
   const apiUrl = process.env.EXPO_PUBLIC_API_URL;
-  const apiKey = process.env.EXPO_PUBLIC_MEMORY_API_KEY;
 
   if (!apiUrl) {
     throw new Error('EXPO_PUBLIC_API_URL is not set');
   }
 
-  if (!apiKey) {
-    throw new Error('EXPO_PUBLIC_MEMORY_API_KEY is not set');
-  }
-
   const apiRoot = getApiRoot(apiUrl);
 
   return {
-    apiKey,
     askMemoryUrl: `${apiRoot}/api/ask-memory`,
     activityUrl: `${apiRoot}/api/activity`,
+    dailySummaryUrl: `${apiRoot}/api/memories/daily-summary`,
     desktopActivityUrl: `${apiRoot}/api/desktop-activity`,
     expensesUrl: `${apiRoot}/api/expenses`,
     locationPlacesUrl: `${apiRoot}/api/location/places`,
@@ -237,12 +287,10 @@ export const request = async <T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> => {
-  const { apiKey } = getApiConfig();
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': apiKey,
       ...options.headers
     }
   });
@@ -311,6 +359,65 @@ export const listDesktopActivity = async (params?: { limit?: number }) => {
   const response = await request<DesktopActivityListResponse>(
     desktopActivityUrl,
     query ? `?${query}` : ''
+  );
+
+  return response.data;
+};
+
+export const listDailySummaries = async (params?: {
+  from?: string;
+  limit?: number;
+  project?: string;
+  q?: string;
+  source?: string;
+  tag?: string;
+  to?: string;
+}) => {
+  const { dailySummaryUrl } = getApiConfig();
+  const searchParams = new URLSearchParams();
+
+  if (params?.from) {
+    searchParams.set('from', params.from);
+  }
+
+  if (params?.limit) {
+    searchParams.set('limit', String(params.limit));
+  }
+
+  if (params?.project) {
+    searchParams.set('project', params.project);
+  }
+
+  if (params?.q) {
+    searchParams.set('q', params.q);
+  }
+
+  if (params?.source) {
+    searchParams.set('source', params.source);
+  }
+
+  if (params?.tag) {
+    searchParams.set('tag', params.tag);
+  }
+
+  if (params?.to) {
+    searchParams.set('to', params.to);
+  }
+
+  const query = searchParams.toString();
+  const response = await request<DailySummaryListResponse>(
+    dailySummaryUrl,
+    query ? `?${query}` : ''
+  );
+
+  return response.data;
+};
+
+export const getDailySummary = async (date: string) => {
+  const { dailySummaryUrl } = getApiConfig();
+  const response = await request<DailySummarySingleResponse>(
+    dailySummaryUrl,
+    `/${encodeURIComponent(date)}`
   );
 
   return response.data;

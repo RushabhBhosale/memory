@@ -359,6 +359,16 @@ export default function SettingsScreen() {
             onPress={() => router.push("/(tabs)/expenses")}
           />
           <NavRow
+            icon="calendar-clear-outline"
+            title="Daily Summaries"
+            onPress={() => router.push("/daily-summaries")}
+          />
+          <NavRow
+            icon="bug-outline"
+            title="SMS Tracking Status"
+            onPress={() => router.push("/sms-tracking-debug")}
+          />
+          <NavRow
             icon="images-outline"
             title="Screenshot inbox"
             onPress={() => router.push("/screenshots")}
