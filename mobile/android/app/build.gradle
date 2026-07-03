@@ -10,6 +10,11 @@ def googleMapsApiKey =
                 ?: System.getenv('EXPO_PUBLIC_GOOGLE_MAPS_API_KEY')
                 ?: System.getenv('GOOGLE_MAPS_API_KEY')
                 ?: "").toString()
+def openRouterApiKey =
+        (findProperty('OPENROUTER_API_KEY')
+                ?: System.getenv('EXPO_PUBLIC_OPENROUTER_API_KEY')
+                ?: System.getenv('OPENROUTER_API_KEY')
+                ?: "").toString()
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -106,6 +111,7 @@ android {
         ]
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
+        buildConfigField "String", "OPENROUTER_API_KEY", "\"${openRouterApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\""
     }
     signingConfigs {
         debug {
@@ -189,4 +195,6 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    testImplementation("junit:junit:4.13.2")
 }

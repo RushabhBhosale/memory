@@ -20,6 +20,11 @@ export type DailySummaryDocument = Document & {
   title: string;
   summary: string;
   bodyMarkdown: string;
+  mainTopics: string;
+  answersDecisions: string;
+  projectContext: string;
+  tasksFollowups: string;
+  importantNotes: string;
   topics: DailySummaryTopic[];
   keyQuestions: string[];
   tasks: DailySummaryTask[];
@@ -65,7 +70,6 @@ const dailySummarySchema = new Schema<DailySummaryDocument>(
       required: [true, 'Date is required'],
       match: [/^\d{4}-\d{2}-\d{2}$/, 'Date must use YYYY-MM-DD'],
       trim: true,
-      unique: true,
       index: true
     },
     title: {
@@ -79,6 +83,31 @@ const dailySummarySchema = new Schema<DailySummaryDocument>(
       trim: true
     },
     bodyMarkdown: {
+      type: String,
+      default: '',
+      trim: true
+    },
+    mainTopics: {
+      type: String,
+      default: '',
+      trim: true
+    },
+    answersDecisions: {
+      type: String,
+      default: '',
+      trim: true
+    },
+    projectContext: {
+      type: String,
+      default: '',
+      trim: true
+    },
+    tasksFollowups: {
+      type: String,
+      default: '',
+      trim: true
+    },
+    importantNotes: {
       type: String,
       default: '',
       trim: true
@@ -122,10 +151,16 @@ const dailySummarySchema = new Schema<DailySummaryDocument>(
 );
 
 dailySummarySchema.index({ date: -1 });
+dailySummarySchema.index({ date: 1, source: 1 }, { unique: true });
 dailySummarySchema.index({
   title: 'text',
   summary: 'text',
   bodyMarkdown: 'text',
+  mainTopics: 'text',
+  answersDecisions: 'text',
+  projectContext: 'text',
+  tasksFollowups: 'text',
+  importantNotes: 'text',
   'topics.title': 'text',
   'topics.summary': 'text',
   projects: 'text',

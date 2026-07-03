@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -150,9 +151,11 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
   @ReactMethod
   fun simulateIncomingSms(sender: String, messageBody: String, promise: Promise) {
     val result = SmsTransactionParser.parseWithReason(sender, messageBody, System.currentTimeMillis())
+    logSmsDecision(result)
     val parsed = result.transaction
 
     if (parsed == null) {
+      logFinalStoreDecision(result.finalDecision, result.reason, null)
       promise.resolve(
         Arguments.createMap().apply {
           putBoolean("matched", false)
@@ -166,6 +169,7 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
 
     if (pending == null) {
       emitExpensesChanged()
+      logFinalStoreDecision("ignore", "already_added", parsed)
       promise.resolve(
         Arguments.createMap().apply {
           putBoolean("matched", false)
@@ -176,6 +180,7 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
     }
 
     ExpenseNotificationHelper.notifyPendingTransaction(reactContext, pending)
+    logFinalStoreDecision("review", result.reason, parsed)
     promise.resolve(
       Arguments.createMap().apply {
         putBoolean("matched", true)
@@ -192,7 +197,7 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
       return
     }
 
-    val maxMessages = limit.toInt().coerceIn(1, 25)
+    val maxMessages = limit.toInt().coerceIn(1, 100)
     val reasonCounts = linkedMapOf<String, Int>()
     var scanned = 0
     var matched = 0
@@ -219,10 +224,12 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
           val body = cursor.getString(bodyIndex) ?: ""
           val timestamp = cursor.getLong(dateIndex)
           val result = SmsTransactionParser.parseWithReason(sender, body, timestamp)
+          logSmsDecision(result)
           val parsed = result.transaction
 
           if (parsed == null) {
             reasonCounts[result.reason] = (reasonCounts[result.reason] ?: 0) + 1
+            logFinalStoreDecision(result.finalDecision, result.reason, null)
             continue
           }
 
@@ -231,11 +238,13 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
 
           if (pending == null) {
             reasonCounts["already_added"] = (reasonCounts["already_added"] ?: 0) + 1
+            logFinalStoreDecision("ignore", "already_added", parsed)
             continue
           }
 
           createdOrExisting += 1
           ExpenseNotificationHelper.notifyPendingTransaction(reactContext, pending)
+          logFinalStoreDecision("review", result.reason, parsed)
         }
       }
 
@@ -262,7 +271,7 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
       return
     }
 
-    val maxMessages = limit.toInt().coerceIn(1, 25)
+    val maxMessages = limit.toInt().coerceIn(1, 100)
     val messages = Arguments.createArray()
     var scanned = 0
     var matched = 0
@@ -289,6 +298,7 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
           val body = cursor.getString(bodyIndex) ?: ""
           val timestamp = cursor.getLong(dateIndex)
           val result = SmsTransactionParser.parseWithReason(sender, body, timestamp)
+          logSmsDecision(result)
           val parsed = result.transaction
 
           if (parsed != null) {
@@ -314,6 +324,8 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
                     putString("type", parsed.type)
                     putString("category", ExpenseTransactionStore.categoryForMerchant(parsed.merchant))
                     putDouble("confidence", parsed.confidence)
+                    putBoolean("reviewRequired", parsed.reviewRequired)
+                    putString("classificationReason", parsed.classificationReason)
                   }
                 )
               }
@@ -376,6 +388,28 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
 
     return state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED ||
       state == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
+  }
+
+  private fun logSmsDecision(result: SmsTransactionParseResult) {
+    Log.i(
+      "MemoryExpenseSms",
+      "Rule parser result ruleReason=${result.ruleReason} matched=${result.ruleReason == "matched"}"
+    )
+    Log.i("MemoryExpenseSms", "AI fallback triggered=${result.aiFallbackTriggered}")
+    result.aiClassification?.let { classification ->
+      Log.i(
+        "MemoryExpenseSms",
+        "AI classification result isTransaction=${classification.isTransaction} type=${classification.type} amount=${classification.amount} confidence=${classification.confidence} reason=${classification.reason}"
+      )
+    }
+    Log.i("MemoryExpenseSms", "Final SMS decision=${result.finalDecision} reason=${result.reason}")
+  }
+
+  private fun logFinalStoreDecision(decision: String, reason: String, parsed: ParsedSmsTransaction?) {
+    Log.i(
+      "MemoryExpenseSms",
+      "Final SMS save decision=$decision reason=$reason amount=${parsed?.amount} type=${parsed?.type} confidence=${parsed?.confidence}"
+    )
   }
 
   private fun rememberDebugScan(lastProcessedSmsId: String?) {

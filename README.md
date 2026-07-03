@@ -6,7 +6,7 @@ Next.js App Router backend and Expo React Native mobile app for saving and searc
 
 ```bash
 npm install
-cp .env.local.example .env.local
+cp .env.example .env.local
 npm run dev
 ```
 
@@ -15,6 +15,10 @@ Set these values in `.env.local`:
 ```bash
 MONGO_URI=
 MEMORY_API_KEY=
+GOOGLE_SHEETS_CLIENT_EMAIL=
+GOOGLE_SHEETS_PRIVATE_KEY=
+CHATGPT_DAILY_BRIEF_SHEET_ID=
+DAILY_BRIEF_SYNC_SECRET=
 ```
 
 The local Next.js server runs at `http://localhost:3000` by default.
@@ -36,6 +40,7 @@ All API routes require the `x-api-key` header.
 - `GET /api/projects/:id/memories`
 - `GET /api/extension/projects`
 - `POST /api/extension/memories`
+- `POST /api/integrations/chatgpt-daily-brief/sync`
 
 Memories can optionally be attached to a project with `projectId` and typed with `kind`: `note`, `task`, `work_done`, `requirement`, or `credential`.
 
@@ -259,6 +264,48 @@ curl -X DELETE "$BASE_URL/api/memories/$MEMORY_ID" \
   -H "x-api-key: $API_KEY"
 ```
 
+## ChatGPT Daily Brief Sheet Sync
+
+The backend can sync the daily ChatGPT Scheduler brief from Google Sheets into MongoDB as a `daily_summary` with `source: "chatgpt_daily_brief"`.
+
+Required environment variables:
+
+```bash
+GOOGLE_SHEETS_CLIENT_EMAIL=
+GOOGLE_SHEETS_PRIVATE_KEY=
+CHATGPT_DAILY_BRIEF_SHEET_ID=1SpL_6RKA5F_fDjwvspsxD0VSHWSW4dQYhGvDg4LtcUw
+DAILY_BRIEF_SYNC_SECRET=
+```
+
+Google setup:
+
+1. Create a Google Cloud service account.
+2. Enable the Google Sheets API for that project.
+3. Create a JSON key for the service account.
+4. Put the JSON key's `client_email` in `GOOGLE_SHEETS_CLIENT_EMAIL`.
+5. Put the JSON key's `private_key` in `GOOGLE_SHEETS_PRIVATE_KEY`. In hosted env vars, keep newline escapes as `\n` if the UI requires a single line.
+6. Share the Google Sheet with the service account email as a Viewer.
+
+Trigger a manual sync:
+
+```bash
+curl -X POST "$BASE_URL/api/integrations/chatgpt-daily-brief/sync" \
+  -H "Content-Type: application/json" \
+  -H "X-Sync-Secret: $DAILY_BRIEF_SYNC_SECRET" \
+  -d '{"date":"2026-07-03"}'
+```
+
+If `date` is omitted, the endpoint uses Asia/Kolkata time. Around the intended 12:05 AM schedule it syncs yesterday's brief, because ChatGPT writes the sheet at 11:55 PM.
+
+There is no project scheduler config in this repo yet. To schedule it, call the endpoint daily around 12:05 AM Asia/Kolkata from your cron provider:
+
+```bash
+curl -X POST "https://your-vercel-domain.vercel.app/api/integrations/chatgpt-daily-brief/sync" \
+  -H "X-Sync-Secret: $DAILY_BRIEF_SYNC_SECRET"
+```
+
+The sync upserts by `{ date, source }` to avoid duplicate daily briefs. If an older deployment created a MongoDB unique index on `date` only, drop that old `date_1` index after deploying this change so the new compound index can be used.
+
 ## Vercel Deployment
 
 1. Push this repository to GitHub.
@@ -268,6 +315,10 @@ curl -X DELETE "$BASE_URL/api/memories/$MEMORY_ID" \
 ```bash
 MONGO_URI=
 MEMORY_API_KEY=
+GOOGLE_SHEETS_CLIENT_EMAIL=
+GOOGLE_SHEETS_PRIVATE_KEY=
+CHATGPT_DAILY_BRIEF_SHEET_ID=
+DAILY_BRIEF_SYNC_SECRET=
 ```
 
 4. Deploy. Your API will be available at:

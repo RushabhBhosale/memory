@@ -88,7 +88,7 @@ export default function SmsTrackingDebugScreen() {
       setScanned(0);
       setMatched(0);
 
-      const result = await testRecentSmsTracking(10);
+      const result = await testRecentSmsTracking(100);
       setMessages(result.messages);
       setScanned(result.scanned);
       setMatched(result.matched);
@@ -214,7 +214,7 @@ export default function SmsTrackingDebugScreen() {
             ) : (
               <View style={styles.emptyPanel}>
                 <Text style={styles.emptyText}>
-                  Run the test to parse the latest 10 SMS messages without saving anything.
+                  Run the test to parse the latest 100 SMS messages without saving anything.
                 </Text>
               </View>
             )}

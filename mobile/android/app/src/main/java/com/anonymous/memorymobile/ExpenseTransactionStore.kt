@@ -60,6 +60,10 @@ object ExpenseTransactionStore {
       existing.put("type", parsed.type)
       existing.put("category", categoryForMerchant(parsed.merchant))
       existing.put("confidence", parsed.confidence)
+      existing.put("classificationReason", parsed.classificationReason)
+      existing.put("reviewRequired", parsed.reviewRequired)
+      parsed.accountHint?.let { existing.put("accountHint", it) }
+      parsed.transactionDateTime?.let { existing.put("transactionDateTime", it) }
       existing.put("updatedAt", now)
       updateMatchingPending(context, parsed.sender, preview, existing)
       return existing
@@ -76,6 +80,10 @@ object ExpenseTransactionStore {
       put("messagePreview", preview)
       put("timestamp", parsed.timestamp)
       put("confidence", parsed.confidence)
+      put("classificationReason", parsed.classificationReason)
+      put("reviewRequired", parsed.reviewRequired)
+      parsed.accountHint?.let { put("accountHint", it) }
+      parsed.transactionDateTime?.let { put("transactionDateTime", it) }
       put("status", "pending")
       put("createdAt", now)
       put("updatedAt", now)

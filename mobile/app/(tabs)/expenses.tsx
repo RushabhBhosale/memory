@@ -255,7 +255,7 @@ export default function ExpensesScreen() {
     }
   };
 
-  const checkLastTenSms = async () => {
+  const checkLastHundredSms = async () => {
     try {
       setScanningSms(true);
       setSmsTestResult("");
@@ -271,7 +271,7 @@ export default function ExpensesScreen() {
         return;
       }
 
-      const result = await scanRecentSms(10);
+      const result = await scanRecentSms(100);
       const ignoredSummary = Object.entries(result.ignoredReasons)
         .map(([reason, count]) => `${reason}: ${count}`)
         .join(", ");
@@ -367,7 +367,7 @@ export default function ExpensesScreen() {
           <Pressable
             disabled={scanningSms}
             style={[styles.quickActionButton, styles.quickActionSecondary]}
-            onPress={() => void checkLastTenSms()}
+            onPress={() => void checkLastHundredSms()}
           >
             <View style={styles.quickActionIconSecondary}>
               {scanningSms ? (

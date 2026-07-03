@@ -23,6 +23,8 @@ export type PendingTransaction = {
   messagePreview: string;
   timestamp: number;
   confidence: number;
+  classificationReason?: string;
+  reviewRequired?: boolean;
   status: PendingTransactionStatus;
   createdAt: number;
   updatedAt: number;
@@ -87,8 +89,10 @@ export type SmsTrackingDebugMessage = {
     amount: number;
     category: string;
     confidence: number;
+    classificationReason?: string;
     currency: string;
     merchant: string;
+    reviewRequired?: boolean;
     type: PendingTransactionType;
   };
 };
@@ -270,7 +274,7 @@ export const updatePendingTransaction = async (
 export const simulateIncomingSms = async (sender: string, messageBody: string) =>
   requireAndroidModule().simulateIncomingSms(sender, messageBody);
 
-export const scanRecentSms = async (limit = 10) =>
+export const scanRecentSms = async (limit = 100) =>
   requireAndroidModule().scanRecentSms(limit);
 
 export const getSmsTrackingDebugStatus = async () => {
@@ -283,7 +287,7 @@ export const getSmsTrackingDebugStatus = async () => {
   return module.getTrackingDebugStatus();
 };
 
-export const testRecentSmsTracking = async (limit = 10) => {
+export const testRecentSmsTracking = async (limit = 100) => {
   const module = requireAndroidModule();
 
   if (!module.debugTestRecentSms) {

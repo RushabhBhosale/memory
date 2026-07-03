@@ -10,21 +10,47 @@ data class ParsedSmsTransaction(
   val sender: String,
   val messageBody: String,
   val timestamp: Long,
-  val confidence: Double
+  val confidence: Double,
+  val classificationReason: String = "rule_parser",
+  val reviewRequired: Boolean = false,
+  val accountHint: String? = null,
+  val transactionDateTime: String? = null
 )
 
 data class SmsTransactionParseResult(
   val transaction: ParsedSmsTransaction?,
-  val reason: String
+  val reason: String,
+  val ruleReason: String = reason,
+  val aiFallbackTriggered: Boolean = false,
+  val aiClassification: SmsTransactionClassification? = null,
+  val finalDecision: String = if (transaction != null) "review" else "ignore"
 )
 
 object SmsTransactionParser {
   private val blockedKeywords =
     listOf("otp", "verification code", "password", "login", "one time password")
+  private val nonTransactionKeywords =
+    listOf(
+      "apply now",
+      " offer",
+      "credit card offer",
+      "loan offer",
+      "pre-approved",
+      "preapproved",
+      "failed",
+      "declined",
+      "unsuccessful",
+      "insufficient balance",
+      "available balance",
+      "balance in account",
+      "balance is"
+    )
   private val debitKeywords =
     listOf("debited", "spent", "paid", "purchase", "withdrawn", "card used")
   private val creditKeywords =
     listOf("credited", "received", "deposited", "refund", "cashback", "salary", "sent you")
+  private val sentTransferRegex =
+    Regex("(?i)\\bsent\\s+(?:₹|rs\\.?|inr)\\s*[0-9][0-9,]*(?:\\.\\d{1,2})?\\s+from\\s+.+?\\s+to\\s+\\S+")
   private val amountRegex =
     Regex("(?i)(?:₹|rs\\.?|inr)\\s*([0-9][0-9,]*(?:\\.\\d{1,2})?)")
   private val fallbackAmountRegex =
@@ -39,13 +65,61 @@ object SmsTransactionParser {
     messageBody: String,
     timestamp: Long
   ): SmsTransactionParseResult {
+    val ruleResult = parseWithRules(sender, messageBody, timestamp)
+    if (ruleResult.transaction != null) {
+      return ruleResult
+    }
+
+    if (!SmsTransactionAiFallback.hasAmountLikeValue(messageBody)) {
+      return ruleResult
+    }
+
+    if (ruleResult.reason == "ignored_sensitive_message" || ruleResult.reason == "ignored_non_transaction_message") {
+      return ruleResult
+    }
+
+    val classification =
+      SmsTransactionAiFallback.classify(sender, messageBody, timestamp)
+        ?: return ruleResult.copy(aiFallbackTriggered = true)
+    val aiParsed = SmsTransactionAiFallback.toParsedTransaction(sender, messageBody, timestamp, classification)
+
+    return if (aiParsed != null) {
+      SmsTransactionParseResult(
+        transaction = aiParsed,
+        reason = if (aiParsed.reviewRequired) "ai_low_confidence_review" else "ai_matched",
+        ruleReason = ruleResult.reason,
+        aiFallbackTriggered = true,
+        aiClassification = classification,
+        finalDecision = "review"
+      )
+    } else {
+      SmsTransactionParseResult(
+        transaction = null,
+        reason = "ai_not_transaction",
+        ruleReason = ruleResult.reason,
+        aiFallbackTriggered = true,
+        aiClassification = classification,
+        finalDecision = "ignore"
+      )
+    }
+  }
+
+  fun parseWithRules(
+    sender: String,
+    messageBody: String,
+    timestamp: Long
+  ): SmsTransactionParseResult {
     val normalized = messageBody.lowercase(Locale.US)
 
     if (blockedKeywords.any { normalized.contains(it) }) {
       return SmsTransactionParseResult(null, "ignored_sensitive_message")
     }
 
-    val debitMatch = debitKeywords.any { normalized.contains(it) }
+    if (nonTransactionKeywords.any { normalized.contains(it) }) {
+      return SmsTransactionParseResult(null, "ignored_non_transaction_message")
+    }
+
+    val debitMatch = debitKeywords.any { normalized.contains(it) } || sentTransferRegex.containsMatchIn(messageBody)
     val creditMatch = creditKeywords.any { normalized.contains(it) }
 
     if (!debitMatch && !creditMatch) {
@@ -90,6 +164,7 @@ object SmsTransactionParser {
   private fun extractMerchant(messageBody: String): String {
     val patterns =
       listOf(
+        Regex("(?i)sent\\s+(?:₹|rs\\.?|inr)\\s*[0-9][0-9,]*(?:\\.\\d{1,2})?\\s+from\\s+.+?\\s+to\\s+([^\\s]+)"),
         Regex("(?i)spent\\s+(?:at|on)\\s+([A-Z0-9&._ -]{2,32})"),
         Regex("(?i)paid\\s+to\\s+([A-Z0-9&._ -]{2,32})"),
         Regex("(?i)purchase\\s+(?:at|on|from)\\s+([A-Z0-9&._ -]{2,32})"),
