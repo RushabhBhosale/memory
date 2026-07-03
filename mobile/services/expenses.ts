@@ -61,6 +61,7 @@ export type SimulateSmsResult =
   | { matched: true; reason: string; transaction: PendingTransaction };
 
 export type ScanRecentSmsResult = {
+  detected?: number;
   ignoredReasons: Record<string, number>;
   matched: number;
   pending: number;

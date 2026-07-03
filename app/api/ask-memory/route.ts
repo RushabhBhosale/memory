@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import {
   sortActivityItems,
+  toExpenseActivity,
   toMeetingActivity,
   toMemoryActivity,
   toNoteActivity,
@@ -12,6 +13,7 @@ import { validateApiKey } from '@/lib/apiKey';
 import { runHybridSearch, type HybridSearchType } from '@/lib/hybridSearch';
 import { connectDB } from '@/lib/mongodb';
 import { extractJsonBlock, requestOpenRouter } from '@/lib/openRouter';
+import Expense from '@/models/Expense';
 import Memory from '@/models/Memory';
 import Project from '@/models/Project';
 import '@/models/Project';
@@ -36,6 +38,39 @@ const PRIVATE_MEMORY_FILTER = {
 const SEARCH_RESULT_LIMIT = 20;
 const CANDIDATE_LIMIT = 120;
 const NO_RESULTS_ANSWER = "I couldn't find anything saved about that.";
+const ANSWER_STOP_WORDS = new Set([
+  'a',
+  'about',
+  'am',
+  'an',
+  'and',
+  'are',
+  'did',
+  'do',
+  'for',
+  'go',
+  'i',
+  'in',
+  'is',
+  'me',
+  'my',
+  'of',
+  'on',
+  'show',
+  'that',
+  'the',
+  'this',
+  'to',
+  'today',
+  'was',
+  'what',
+  'where',
+  'with'
+]);
+const LOCATION_QUERY_PATTERN = /\b(where|go|went|visit|visited|location|place|places)\b/i;
+const LOCATION_SIGNAL_PATTERN =
+  /\b(at|to|near|visited|went|mall|restaurant|cafe|office|home|hotel|airport|station|pizza|donuts|lunch|dinner|outing)\b/i;
+const MONEY_QUERY_PATTERN = /\b(spend|spent|expense|expenses|paid|payment|money|cost|costs|amount|total)\b/i;
 
 type SearchPlanType =
   | 'memory'
@@ -45,18 +80,28 @@ type SearchPlanType =
   | 'meeting'
   | 'reminder'
   | 'daily_summary'
+  | 'expense'
   | 'project';
-type SearchTimeframe = 'today' | 'tomorrow' | 'this_week' | 'this_month' | 'upcoming' | 'all_time';
+type SearchTimeframe =
+  | 'today'
+  | 'tomorrow'
+  | 'this_week'
+  | 'this_month'
+  | 'past_months'
+  | 'upcoming'
+  | 'all_time';
 
 type SearchPlan = {
   keywords: string[];
   types: SearchPlanType[];
   project: string | null;
   timeframe: SearchTimeframe;
+  monthsBack?: number;
 };
 
 type AnswerPayload = {
   answer: string;
+  relevantIds: string[];
   summary: string[];
   relevantTitles: string[];
 };
@@ -89,42 +134,60 @@ const uniq = <T,>(value: T[]) => Array.from(new Set(value));
 
 const getNow = () => new Date();
 
+const getKolkataCalendarDate = (date: Date) => {
+  const kolkataDate = new Date(date.getTime() + 330 * 60 * 1000);
+
+  return {
+    day: kolkataDate.getUTCDate(),
+    month: kolkataDate.getUTCMonth(),
+    year: kolkataDate.getUTCFullYear()
+  };
+};
+
 const getDayBounds = (baseDate: Date, dayOffset = 0) => {
-  const start = new Date(baseDate);
-  start.setHours(0, 0, 0, 0);
-  start.setDate(start.getDate() + dayOffset);
+  const { day, month, year } = getKolkataCalendarDate(baseDate);
+  const start = new Date(Date.UTC(year, month, day + dayOffset) - 330 * 60 * 1000);
 
   const end = new Date(start);
-  end.setHours(23, 59, 59, 999);
+  end.setUTCDate(end.getUTCDate() + 1);
+  end.setUTCMilliseconds(end.getUTCMilliseconds() - 1);
 
   return { start, end };
 };
 
 const getWeekBounds = (baseDate: Date) => {
-  const start = new Date(baseDate);
-  start.setHours(0, 0, 0, 0);
-  const day = start.getDay();
+  const { day: monthDay, month, year } = getKolkataCalendarDate(baseDate);
+  const kolkataStart = new Date(Date.UTC(year, month, monthDay));
+  const day = kolkataStart.getUTCDay();
   const diff = day === 0 ? -6 : 1 - day;
-  start.setDate(start.getDate() + diff);
+  const start = new Date(Date.UTC(year, month, monthDay + diff) - 330 * 60 * 1000);
 
   const end = new Date(start);
-  end.setDate(start.getDate() + 6);
-  end.setHours(23, 59, 59, 999);
+  end.setUTCDate(end.getUTCDate() + 7);
+  end.setUTCMilliseconds(end.getUTCMilliseconds() - 1);
 
   return { start, end };
 };
 
 const getMonthBounds = (baseDate: Date) => {
-  const start = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1);
-  start.setHours(0, 0, 0, 0);
+  const { month, year } = getKolkataCalendarDate(baseDate);
+  const start = new Date(Date.UTC(year, month, 1) - 330 * 60 * 1000);
 
-  const end = new Date(baseDate.getFullYear(), baseDate.getMonth() + 1, 0);
-  end.setHours(23, 59, 59, 999);
+  const end = new Date(Date.UTC(year, month + 1, 1) - 330 * 60 * 1000);
+  end.setUTCMilliseconds(end.getUTCMilliseconds() - 1);
 
   return { start, end };
 };
 
-const getTimeframeRange = (timeframe: SearchTimeframe) => {
+const getPastMonthsBounds = (baseDate: Date, monthsBack = 1) => {
+  const { day, month, year } = getKolkataCalendarDate(baseDate);
+  const start = new Date(Date.UTC(year, month - monthsBack, day) - 330 * 60 * 1000);
+  const end = new Date(baseDate);
+
+  return { start, end };
+};
+
+const getTimeframeRange = (timeframe: SearchTimeframe, monthsBack?: number) => {
   const now = getNow();
 
   switch (timeframe) {
@@ -136,6 +199,8 @@ const getTimeframeRange = (timeframe: SearchTimeframe) => {
       return getWeekBounds(now);
     case 'this_month':
       return getMonthBounds(now);
+    case 'past_months':
+      return getPastMonthsBounds(now, monthsBack);
     case 'upcoming': {
       const start = new Date(now);
       const end = new Date(now);
@@ -148,8 +213,8 @@ const getTimeframeRange = (timeframe: SearchTimeframe) => {
   }
 };
 
-const buildCreatedAtQuery = (timeframe: SearchTimeframe) => {
-  const range = getTimeframeRange(timeframe);
+const buildCreatedAtQuery = (timeframe: SearchTimeframe, monthsBack?: number) => {
+  const range = getTimeframeRange(timeframe, monthsBack);
 
   if (!range || timeframe === 'upcoming') {
     return {};
@@ -163,8 +228,8 @@ const buildCreatedAtQuery = (timeframe: SearchTimeframe) => {
   };
 };
 
-const buildReminderQuery = (timeframe: SearchTimeframe) => {
-  const range = getTimeframeRange(timeframe);
+const buildReminderQuery = (timeframe: SearchTimeframe, monthsBack?: number) => {
+  const range = getTimeframeRange(timeframe, monthsBack);
 
   if (!range) {
     return {};
@@ -197,16 +262,22 @@ const validateSearchPlan = (value: unknown): SearchPlan | null => {
     ? record.types.filter(
         (type): type is SearchPlanType =>
           typeof type === 'string' &&
-          ['memory', 'log', 'task', 'note', 'meeting', 'reminder', 'daily_summary', 'project'].includes(type)
+          ['memory', 'log', 'task', 'note', 'meeting', 'reminder', 'daily_summary', 'expense', 'project'].includes(
+            type
+          )
       )
     : [];
   const timeframe =
     typeof record.timeframe === 'string' &&
-    ['today', 'tomorrow', 'this_week', 'this_month', 'upcoming', 'all_time'].includes(
+    ['today', 'tomorrow', 'this_week', 'this_month', 'past_months', 'upcoming', 'all_time'].includes(
       record.timeframe
     )
       ? (record.timeframe as SearchTimeframe)
       : 'all_time';
+  const monthsBack =
+    typeof record.monthsBack === 'number' && Number.isFinite(record.monthsBack)
+      ? Math.min(24, Math.max(1, Math.floor(record.monthsBack)))
+      : undefined;
 
   return {
     keywords: Array.isArray(record.keywords)
@@ -219,29 +290,64 @@ const validateSearchPlan = (value: unknown): SearchPlan | null => {
     types,
     project:
       typeof record.project === 'string' && record.project.trim() ? record.project.trim() : null,
-    timeframe
+    timeframe,
+    monthsBack
   };
 };
 
 const generateFallbackPlan = (query: string): SearchPlan => {
   const normalizedQuery = normalizeText(query);
   const queryTokens = tokenize(query).slice(0, 6);
+  const pastMonthsMatch = query.match(/\b(?:past|last)\s+(\d{1,2})\s*(?:months?|mo)\b/i);
+  const monthsBack = pastMonthsMatch ? Math.min(24, Math.max(1, Number(pastMonthsMatch[1]))) : undefined;
 
   return {
     keywords: queryTokens.filter(
-      (token) => !['what', 'did', 'work', 'today', 'anything', 'show', 'about', 'know'].includes(token)
+      (token) =>
+        ![
+          'what',
+          'where',
+          'when',
+          'who',
+          'did',
+          'work',
+          'today',
+          'anything',
+          'show',
+          'about',
+          'know',
+          'went',
+          'go',
+          'how',
+          'much',
+          'spend',
+          'spent',
+          'expense',
+          'expenses',
+          'paid',
+          'payment',
+          'money',
+          'total'
+        ].includes(token)
     ),
     project: /activex/i.test(normalizedQuery) ? 'ActiveX' : null,
     timeframe: /tomorrow/i.test(normalizedQuery)
       ? 'tomorrow'
       : /this week/i.test(normalizedQuery)
         ? 'this_week'
-        : /today/i.test(normalizedQuery)
-          ? 'today'
-          : /upcoming/i.test(normalizedQuery)
-            ? 'upcoming'
-            : 'all_time',
-    types: /daily|summary|summar|yesterday|last week|decisions|discuss/i.test(normalizedQuery)
+        : monthsBack
+          ? 'past_months'
+          : /this month|current month|month/i.test(normalizedQuery)
+            ? 'this_month'
+            : /today/i.test(normalizedQuery)
+              ? 'today'
+              : /upcoming/i.test(normalizedQuery)
+                ? 'upcoming'
+                : 'all_time',
+    monthsBack,
+    types: MONEY_QUERY_PATTERN.test(query)
+      ? ['expense']
+      : /daily|summary|summar|yesterday|last week|decisions|discuss/i.test(normalizedQuery)
       ? ['daily_summary']
       : /reminder/i.test(normalizedQuery)
       ? ['reminder']
@@ -270,14 +376,16 @@ Schema:
   "keywords": [],
   "types": [],
   "project": null,
-  "timeframe": "all_time"
+  "timeframe": "all_time",
+  "monthsBack": null
 }
 
 Rules:
 - keywords should be 1 to 8 useful search terms
-- types can include only: memory, log, task, note, meeting, reminder, daily_summary, project
+- types can include only: memory, log, task, note, meeting, reminder, daily_summary, expense, project
 - project should be a project name if clearly implied, otherwise null
-- timeframe must be one of: today, tomorrow, this_week, this_month, upcoming, all_time
+- timeframe must be one of: today, tomorrow, this_week, this_month, past_months, upcoming, all_time
+- use timeframe "past_months" and set monthsBack for phrases like "past 4 months" or "last 5 months"
 - use "upcoming" for questions about future reminders
 - never add explanations
 - today's date is ${today}`;
@@ -339,6 +447,8 @@ const matchesRequestedTypes = (item: ActivityItem, types: SearchPlanType[]) => {
         return item.type === 'memory';
       case 'daily_summary':
         return item.type === 'daily_summary';
+      case 'expense':
+        return item.type === 'expense';
       case 'reminder':
         return item.type === 'memory' && Boolean(item.reminderAt);
       case 'project':
@@ -354,6 +464,132 @@ const getProjectName = (item: ActivityItem) =>
 
 const getReminderAt = (item: ActivityItem) =>
   'reminderAt' in item && typeof item.reminderAt === 'string' ? item.reminderAt : null;
+
+const getActivityDate = (item: ActivityItem) => {
+  if (item.type === 'daily_summary' && 'date' in item && item.date) {
+    return new Date(`${item.date}T00:00:00.000Z`);
+  }
+
+  if (item.type === 'expense' && 'timestamp' in item && item.timestamp) {
+    return new Date(item.timestamp);
+  }
+
+  return new Date(item.createdAt);
+};
+
+const isWithinTimeframe = (item: ActivityItem, timeframe: SearchTimeframe, monthsBack?: number) => {
+  const range = getTimeframeRange(timeframe, monthsBack);
+
+  if (!range || timeframe === 'upcoming') {
+    return true;
+  }
+
+  const activityDate = getActivityDate(item).getTime();
+
+  return activityDate >= range.start.getTime() && activityDate <= range.end.getTime();
+};
+
+const filterByTimeframe = <T extends ActivityItem>(items: T[], plan: SearchPlan) =>
+  items.filter((item) => isWithinTimeframe(item, plan.timeframe, plan.monthsBack));
+
+const getTimeframeLabel = (timeframe: SearchTimeframe, monthsBack?: number) => {
+  switch (timeframe) {
+    case 'today':
+      return 'today';
+    case 'tomorrow':
+      return 'tomorrow';
+    case 'this_week':
+      return 'this week';
+    case 'this_month':
+      return 'this month';
+    case 'past_months':
+      return `the past ${monthsBack || 1} month${(monthsBack || 1) === 1 ? '' : 's'}`;
+    case 'upcoming':
+      return 'the upcoming period';
+    default:
+      return 'the saved period';
+  }
+};
+
+const formatCurrencyAmount = (amount: number, currency = 'INR') =>
+  new Intl.NumberFormat('en-IN', {
+    currency,
+    maximumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+    minimumFractionDigits: 0,
+    style: 'currency'
+  }).format(amount);
+
+const getExpenseTimestampQuery = (plan: SearchPlan) => {
+  const range = getTimeframeRange(plan.timeframe, plan.monthsBack);
+
+  if (!range || plan.timeframe === 'upcoming') {
+    return {};
+  }
+
+  return {
+    timestamp: {
+      $gte: range.start,
+      $lte: range.end
+    }
+  };
+};
+
+const findExpenseActivitiesForSpendQuestion = async (plan: SearchPlan) => {
+  await connectDB();
+  const rows = await Expense.find({
+    type: 'expense',
+    ...getExpenseTimestampQuery(plan)
+  })
+    .sort({ timestamp: -1 })
+    .limit(100)
+    .lean();
+
+  const activities = rows.map(toExpenseActivity);
+
+  if (!plan.keywords.length) {
+    return activities;
+  }
+
+  return activities.filter((item) => {
+    const haystack = normalizeText(
+      [item.merchant, item.category, item.content, item.originalSmsPreview, item.title].filter(Boolean).join(' ')
+    );
+
+    return plan.keywords.some((keyword) => haystack.includes(normalizeText(keyword)));
+  });
+};
+
+const buildSpendAnswer = (items: ActivityItem[], plan: SearchPlan): AnswerPayload => {
+  const expenses = items.filter((item) => item.type === 'expense');
+  const timeframeLabel = getTimeframeLabel(plan.timeframe, plan.monthsBack);
+
+  if (!expenses.length) {
+    return {
+      answer: `I couldn't find any saved spending for ${timeframeLabel}.`,
+      relevantIds: [],
+      summary: [],
+      relevantTitles: []
+    };
+  }
+
+  const currency = expenses[0].currency || 'INR';
+  const total = expenses.reduce((sum, item) => sum + (typeof item.amount === 'number' ? item.amount : 0), 0);
+  const topExpenses = [...expenses]
+    .sort((left, right) => (right.amount || 0) - (left.amount || 0))
+    .slice(0, 3);
+  const merchantText = topExpenses
+    .map((item) => `${formatCurrencyAmount(item.amount || 0, item.currency || currency)} at ${item.merchant}`)
+    .join(', ');
+
+  return {
+    answer: `You spent ${formatCurrencyAmount(total, currency)} ${timeframeLabel} across ${
+      expenses.length
+    } transaction${expenses.length === 1 ? '' : 's'}${merchantText ? `. Biggest spends: ${merchantText}.` : '.'}`,
+    relevantIds: expenses.map((item) => item._id).slice(0, 8),
+    summary: topExpenses.map((item) => `${formatCurrencyAmount(item.amount || 0, item.currency || currency)} at ${item.merchant}`),
+    relevantTitles: expenses.map((item) => item.title).slice(0, 8)
+  };
+};
 
 const getActivityText = (item: ActivityItem) =>
   [item.title, item.content, item.category, item.kind, getProjectName(item), ...item.tags]
@@ -425,11 +661,78 @@ const getRelevantHighlights = (items: ActivityItem[]) =>
       .filter(Boolean)
   );
 
-const buildGroundedFallbackAnswer = (items: ActivityItem[]): AnswerPayload => {
+const getAnswerKeywords = (query: string) =>
+  tokenize(query).filter((token) => token.length > 2 && !ANSWER_STOP_WORDS.has(token));
+
+const compactSnippet = (value: string) => value.replace(/\s+/g, ' ').trim();
+
+const getItemAnswerText = (item: ActivityItem) => {
+  const extraParts: string[] = [];
+
+  if ('summary' in item && item.summary) {
+    extraParts.push(item.summary);
+  }
+
+  if ('bodyMarkdown' in item && item.bodyMarkdown) {
+    extraParts.push(item.bodyMarkdown);
+  }
+
+  if ('originalSmsPreview' in item && item.originalSmsPreview) {
+    extraParts.push(item.originalSmsPreview);
+  }
+
+  if ('merchant' in item && item.merchant) {
+    extraParts.push(item.merchant);
+  }
+
+  return [item.content, ...extraParts, item.title].filter(Boolean).join('\n');
+};
+
+const getBestAnswerSnippet = (item: ActivityItem, keywords: string[]) => {
+  const text = getItemAnswerText(item);
+  const candidates = text
+    .split(/\n+|[.!?]\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const keywordMatch = candidates.find((candidate) => {
+    const normalized = normalizeText(candidate);
+    return keywords.some((keyword) => normalized.includes(keyword));
+  });
+  const snippet = keywordMatch || candidates[0] || item.title;
+
+  return compactSnippet(snippet);
+};
+
+const buildGroundedFallbackAnswer = (query: string, items: ActivityItem[]): AnswerPayload => {
+  const availableIds = items.map((item) => item._id).filter(Boolean);
   const availableTitles = items.map((item) => item.title).filter(Boolean);
+  const keywords = getAnswerKeywords(query);
+  const isLocationQuestion = LOCATION_QUERY_PATTERN.test(query);
+  const rawSnippets = uniq(
+    items
+      .slice(0, 4)
+      .map((item) => getBestAnswerSnippet(item, keywords))
+      .filter(Boolean)
+  );
+  const snippets = (isLocationQuestion
+    ? rawSnippets.filter((snippet) => LOCATION_SIGNAL_PATTERN.test(snippet))
+    : rawSnippets
+  ).slice(0, 3);
+  const answer =
+    snippets.length > 0
+      ? `I found ${items.length} saved item${items.length === 1 ? '' : 's'} related to your question. ${snippets.join(
+          ' '
+        )}`
+      : isLocationQuestion
+        ? `I found ${items.length} saved item${
+            items.length === 1 ? '' : 's'
+          } for that date, but I couldn't find any saved place or visit details.`
+      : `I found ${items.length} saved item${items.length === 1 ? '' : 's'} related to that.`;
 
   return {
-    answer: `I found ${items.length} saved item${items.length === 1 ? '' : 's'} related to that.`,
+    answer,
+    relevantIds: availableIds.slice(0, 6),
     summary: getRelevantHighlights(items).slice(0, 5),
     relevantTitles: availableTitles.slice(0, 6)
   };
@@ -437,6 +740,7 @@ const buildGroundedFallbackAnswer = (items: ActivityItem[]): AnswerPayload => {
 
 const validateAnswerPayload = (
   value: unknown,
+  availableIds: string[],
   availableTitles: string[]
 ): AnswerPayload | null => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -445,6 +749,12 @@ const validateAnswerPayload = (
 
   const record = value as Record<string, unknown>;
   const answer = typeof record.answer === 'string' ? record.answer.trim() : '';
+  const allowedIds = new Set(availableIds);
+  const relevantIds = Array.isArray(record.relevantIds)
+    ? record.relevantIds
+        .filter((item): item is string => typeof item === 'string' && allowedIds.has(item))
+        .slice(0, 8)
+    : [];
   const summary = Array.isArray(record.summary)
     ? record.summary
         .filter((item): item is string => typeof item === 'string')
@@ -466,6 +776,7 @@ const validateAnswerPayload = (
 
   return {
     answer,
+    relevantIds,
     summary,
     relevantTitles
   };
@@ -475,6 +786,7 @@ const generateGroundedAnswer = async (query: string, items: ActivityItem[]): Pro
   if (!items.length) {
     return {
       answer: NO_RESULTS_ANSWER,
+      relevantIds: [],
       summary: [],
       relevantTitles: []
     };
@@ -488,6 +800,7 @@ const generateGroundedAnswer = async (query: string, items: ActivityItem[]): Pro
     category: item.category,
     tags: item.tags,
     project: getProjectName(item),
+    date: item.type === 'daily_summary' && 'date' in item ? item.date : undefined,
     createdAt: item.createdAt,
     reminderAt: getReminderAt(item)
   }));
@@ -499,6 +812,7 @@ Return JSON only.
 Schema:
 {
   "answer": "",
+  "relevantIds": [],
   "summary": [],
   "relevantTitles": []
 }
@@ -507,8 +821,13 @@ Rules:
 - use only the provided records
 - never invent facts
 - if the records are not enough, say "I couldn't find anything saved about that."
-- answer should be concise and direct
-- summary should be 1 to 5 short bullet-style lines
+- if the question asks where the user went and the records do not mention places or visits, say that no saved place details were found
+- answer should be concise, natural, and human; do not dump raw logs
+- if a record is long, summarize the relevant part in your own words instead of copying or truncating it
+- for "what did I do" style questions, write it like "This is what you did..."
+- choose only records that directly support the answer
+- relevantIds must be exact ids from the provided records only
+- summary should be 1 to 5 short supporting lines
 - relevantTitles must be exact titles from the provided records only`;
 
   const userPrompt = `Question:
@@ -517,6 +836,7 @@ ${query}
 Records:
 ${JSON.stringify(sourcePayload, null, 2)}`;
 
+  const availableIds = sourcePayload.map((item) => item.id);
   const availableTitles = sourcePayload.map((item) => item.title);
 
   for (const model of SEARCH_MODELS) {
@@ -530,14 +850,14 @@ ${JSON.stringify(sourcePayload, null, 2)}`;
         ]
       });
       const parsed = JSON.parse(extractJsonBlock(raw));
-      const answer = validateAnswerPayload(parsed, availableTitles);
+      const answer = validateAnswerPayload(parsed, availableIds, availableTitles);
 
       if (answer) {
         if (
           answer.answer === NO_RESULTS_ANSWER &&
           (answer.summary.length > 0 || answer.relevantTitles.length > 0 || items.length > 0)
         ) {
-          return buildGroundedFallbackAnswer(items);
+          return buildGroundedFallbackAnswer(query, items);
         }
 
         return answer;
@@ -547,7 +867,7 @@ ${JSON.stringify(sourcePayload, null, 2)}`;
     }
   }
 
-  return buildGroundedFallbackAnswer(items);
+  return buildGroundedFallbackAnswer(query, items);
 };
 
 const findActivities = async (query: string, plan: SearchPlan) => {
@@ -556,10 +876,15 @@ const findActivities = async (query: string, plan: SearchPlan) => {
     limit: 10,
     types: plan.types as HybridSearchType[]
   });
+  const results = filterByTimeframe(hybrid.results as SearchableActivity[], plan);
 
   return {
-    results: hybrid.results as SearchableActivity[],
-    debug: hybrid.debug
+    results,
+    debug: {
+      ...hybrid.debug,
+      timeframe: plan.timeframe,
+      timeframeFilteredCount: results.length
+    }
   };
 };
 
@@ -582,6 +907,33 @@ export async function POST(request: Request) {
     }
 
     const plan = generateFallbackPlan(query);
+
+    if (MONEY_QUERY_PATTERN.test(query)) {
+      const expenseResults = await findExpenseActivitiesForSpendQuestion(plan);
+      const answer = buildSpendAnswer(expenseResults, plan);
+
+      return NextResponse.json({
+        answer: answer.answer,
+        count: expenseResults.length,
+        plan: {
+          ...plan,
+          types: ['expense']
+        },
+        projects: [],
+        sources: expenseResults.slice(0, SEARCH_RESULT_LIMIT),
+        summary: answer.summary,
+        ...(shouldDebug
+          ? {
+              debug: {
+                moneyQuery: true,
+                timeframe: plan.timeframe,
+                matchedExpenseCount: expenseResults.length
+              }
+            }
+          : {})
+      });
+    }
+
     const search = await findActivities(query, plan);
     const results = search.results;
 
@@ -601,15 +953,23 @@ export async function POST(request: Request) {
       query,
       results.map(({ score: _score, ...item }) => item)
     );
+    const relevantIds = new Set(answer.relevantIds);
     const relevantTitles = new Set(answer.relevantTitles);
-    const orderedSources = [
-      ...results.filter((item) => relevantTitles.has(item.title)),
-      ...results.filter((item) => !relevantTitles.has(item.title))
-    ].slice(0, SEARCH_RESULT_LIMIT);
+    const aiSelectedSources = results.filter(
+      (item) => relevantIds.has(item._id) || relevantTitles.has(item.title)
+    );
+    const orderedSources = (
+      aiSelectedSources.length
+        ? [
+            ...aiSelectedSources,
+            ...results.filter((item) => !relevantIds.has(item._id) && !relevantTitles.has(item.title))
+          ]
+        : results
+    ).slice(0, SEARCH_RESULT_LIMIT);
 
     return NextResponse.json({
       answer: answer.answer || NO_RESULTS_ANSWER,
-      count: results.length,
+      count: aiSelectedSources.length || results.length,
       plan,
       projects: uniq(orderedSources.map(getProjectName).filter(Boolean)),
       sources: orderedSources.map(({ score: _score, ...item }) => item),

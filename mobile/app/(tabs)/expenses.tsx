@@ -86,11 +86,11 @@ export default function ExpensesScreen() {
   });
   const [error, setError] = useState("");
 
-  const loadData = useCallback(async (options?: { refreshing?: boolean }) => {
+  const loadData = useCallback(async (options?: { refreshing?: boolean; silent?: boolean }) => {
     try {
       if (options?.refreshing) {
         setRefreshing(true);
-      } else {
+      } else if (!options?.silent) {
         setLoading(true);
       }
 
@@ -130,7 +130,7 @@ export default function ExpensesScreen() {
   useFocusEffect(
     useCallback(() => {
       const subscription = subscribeToExpenseChanges(() => {
-        void loadData();
+        void loadData({ silent: true });
       });
 
       return () => subscription.remove();
@@ -182,6 +182,10 @@ export default function ExpensesScreen() {
 
   const confirmTransaction = async (item: PendingTransaction) => {
     const amount = Number.parseFloat(editingId === item.id ? editing.amount : String(item.amount));
+    const nextCategory = editingId === item.id ? editing.category : item.category;
+    const nextMerchant =
+      editingId === item.id ? editing.merchant.trim() || "Unknown Merchant" : item.merchant;
+    const nextType = editingId === item.id ? editing.type : item.type;
 
     if (!Number.isFinite(amount) || amount <= 0) {
       Alert.alert("Check amount", "Enter a valid transaction amount.");
@@ -195,14 +199,35 @@ export default function ExpensesScreen() {
         editingId === item.id
           ? {
               amount,
-              category: editing.category,
-              merchant: editing.merchant.trim() || "Unknown Merchant",
-              type: editing.type,
+              category: nextCategory,
+              merchant: nextMerchant,
+              type: nextType,
             }
           : undefined,
       );
       setEditingId("");
-      await loadData();
+      setPending((current) => current.filter((pendingItem) => pendingItem.id !== item.id));
+      setExpenses((current) => [
+        {
+          amount,
+          category: nextCategory,
+          createdAt: Date.now(),
+          currency: item.currency,
+          id: item.id,
+          merchant: nextMerchant,
+          originalSmsPreview: item.messagePreview,
+          source: "sms",
+          timestamp: item.timestamp,
+          type: nextType === "credit" ? "income" : "expense",
+        },
+        ...current.filter((expense) => expense.id !== item.id),
+      ]);
+      void listExpenses()
+        .then((nextExpenses) => {
+          setExpenses(nextExpenses);
+          void syncExpensesToMongo(nextExpenses).catch(() => undefined);
+        })
+        .catch(() => undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to add transaction");
     } finally {
@@ -247,7 +272,10 @@ export default function ExpensesScreen() {
     try {
       setSavingId(item.id);
       await ignorePendingTransaction(item.id);
-      await loadData();
+      setPending((current) => current.filter((pendingItem) => pendingItem.id !== item.id));
+      if (editingId === item.id) {
+        setEditingId("");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to ignore transaction");
     } finally {
@@ -278,8 +306,8 @@ export default function ExpensesScreen() {
 
       setSmsTestResult(
         result.matched
-          ? `Checked ${result.scanned} SMS. Found ${result.matched} transaction message${result.matched === 1 ? "" : "s"}.`
-          : `Checked ${result.scanned} SMS. No transactions found${ignoredSummary ? ` (${ignoredSummary})` : ""}.`,
+          ? `Checked ${result.scanned} SMS. Found ${result.matched} new transaction message${result.matched === 1 ? "" : "s"} to review.`
+          : `Checked ${result.scanned} SMS. No new transactions found${ignoredSummary ? ` (${ignoredSummary})` : ""}.`,
       );
       await loadData();
     } catch (err) {

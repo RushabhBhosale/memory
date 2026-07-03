@@ -201,7 +201,7 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
     val reasonCounts = linkedMapOf<String, Int>()
     var scanned = 0
     var matched = 0
-    var createdOrExisting = 0
+    var pendingCreated = 0
     var lastProcessedSmsId: String? = null
 
     try {
@@ -237,12 +237,12 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
           val pending = ExpenseTransactionStore.addPending(reactContext, parsed)
 
           if (pending == null) {
-            reasonCounts["already_added"] = (reasonCounts["already_added"] ?: 0) + 1
-            logFinalStoreDecision("ignore", "already_added", parsed)
+            reasonCounts["already_pending_or_added"] = (reasonCounts["already_pending_or_added"] ?: 0) + 1
+            logFinalStoreDecision("ignore", "already_pending_or_added", parsed)
             continue
           }
 
-          createdOrExisting += 1
+          pendingCreated += 1
           ExpenseNotificationHelper.notifyPendingTransaction(reactContext, pending)
           logFinalStoreDecision("review", result.reason, parsed)
         }
@@ -254,8 +254,9 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
       promise.resolve(
         Arguments.createMap().apply {
           putInt("scanned", scanned)
-          putInt("matched", matched)
-          putInt("pending", createdOrExisting)
+          putInt("matched", pendingCreated)
+          putInt("detected", matched)
+          putInt("pending", pendingCreated)
           putMap("ignoredReasons", reasons)
         }
       )
@@ -300,9 +301,14 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
           val result = SmsTransactionParser.parseWithReason(sender, body, timestamp)
           logSmsDecision(result)
           val parsed = result.transaction
+          val wouldCreatePending = parsed != null && !ExpenseTransactionStore.hasStoredTransaction(reactContext, parsed)
 
-          if (parsed != null) {
+          if (wouldCreatePending) {
             matched += 1
+          }
+
+          if (!wouldCreatePending) {
+            continue
           }
 
           messages.pushMap(
@@ -311,24 +317,22 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
               putString("sender", sender)
               putString("bodyPreview", safeDebugPreview(body))
               putDouble("timestamp", timestamp.toDouble())
-              putBoolean("matched", parsed != null)
+              putBoolean("matched", true)
               putString("reason", result.reason)
 
-              if (parsed != null) {
-                putMap(
-                  "transaction",
-                  Arguments.createMap().apply {
-                    putDouble("amount", parsed.amount)
-                    putString("currency", parsed.currency)
-                    putString("merchant", parsed.merchant)
-                    putString("type", parsed.type)
-                    putString("category", ExpenseTransactionStore.categoryForMerchant(parsed.merchant))
-                    putDouble("confidence", parsed.confidence)
-                    putBoolean("reviewRequired", parsed.reviewRequired)
-                    putString("classificationReason", parsed.classificationReason)
-                  }
-                )
-              }
+              putMap(
+                "transaction",
+                Arguments.createMap().apply {
+                  putDouble("amount", parsed!!.amount)
+                  putString("currency", parsed.currency)
+                  putString("merchant", parsed.merchant)
+                  putString("type", parsed.type)
+                  putString("category", ExpenseTransactionStore.categoryForMerchant(parsed.merchant))
+                  putDouble("confidence", parsed.confidence)
+                  putBoolean("reviewRequired", parsed.reviewRequired)
+                  putString("classificationReason", parsed.classificationReason)
+                }
+              )
             }
           )
         }

@@ -203,9 +203,9 @@ export default function SmsTrackingDebugScreen() {
             </Pressable>
 
             <View style={styles.resultsHeader}>
-              <Text style={styles.sectionTitle}>Latest SMS Parser Test</Text>
+              <Text style={styles.sectionTitle}>New SMS Parser Matches</Text>
               <Text style={styles.sectionMeta}>
-                {scanned ? `${matched} of ${scanned} would be detected` : "No test run yet"}
+                {scanned ? `${matched} of ${scanned} need review` : "No test run yet"}
               </Text>
             </View>
 
@@ -214,7 +214,7 @@ export default function SmsTrackingDebugScreen() {
             ) : (
               <View style={styles.emptyPanel}>
                 <Text style={styles.emptyText}>
-                  Run the test to parse the latest 100 SMS messages without saving anything.
+                  Run the test to show latest transaction SMS that are not already added or pending.
                 </Text>
               </View>
             )}

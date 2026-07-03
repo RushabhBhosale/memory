@@ -105,7 +105,8 @@ export type ActivityItem = Memory & {
 export type AskMemoryPlan = {
   keywords: string[];
   types: SaveItemType[];
-  timeframe: 'today' | 'tomorrow' | 'this_week' | 'this_month' | 'upcoming' | 'all_time';
+  timeframe: 'today' | 'tomorrow' | 'this_week' | 'this_month' | 'past_months' | 'upcoming' | 'all_time';
+  monthsBack?: number;
 };
 
 export type AskMemoryResponse = {
@@ -170,6 +171,13 @@ type DailySummaryListResponse = {
 
 type DailySummarySingleResponse = {
   data: DailySummary;
+};
+
+export type DailyBriefSyncResponse = {
+  data: DailySummary;
+  date: string;
+  message: string;
+  source: string;
 };
 
 export type ScreenshotInboxItem = {
@@ -272,6 +280,7 @@ export const getApiConfig = () => {
   return {
     askMemoryUrl: `${apiRoot}/api/ask-memory`,
     activityUrl: `${apiRoot}/api/activity`,
+    chatGptDailyBriefSyncUrl: `${apiRoot}/api/integrations/chatgpt-daily-brief/sync`,
     dailySummaryUrl: `${apiRoot}/api/memories/daily-summary`,
     desktopActivityUrl: `${apiRoot}/api/desktop-activity`,
     expensesUrl: `${apiRoot}/api/expenses`,
@@ -421,6 +430,18 @@ export const getDailySummary = async (date: string) => {
   );
 
   return response.data;
+};
+
+export const syncChatGptDailyBrief = async (date?: string) => {
+  const { chatGptDailyBriefSyncUrl } = getApiConfig();
+  const apiKey = process.env.EXPO_PUBLIC_MEMORY_API_KEY;
+  const response = await request<DailyBriefSyncResponse>(chatGptDailyBriefSyncUrl, '', {
+    body: JSON.stringify(date ? { date } : {}),
+    headers: apiKey ? { 'x-api-key': apiKey } : undefined,
+    method: 'POST'
+  });
+
+  return response;
 };
 
 export const upsertExpense = async (input: RemoteExpenseInput) => {

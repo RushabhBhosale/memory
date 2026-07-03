@@ -18,6 +18,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ScreenHeader } from "../components/ScreenHeader";
+import { syncChatGptDailyBrief } from "../services/api";
 import {
   hasUsageAccessPermission,
   openUsageAccessSettings,
@@ -203,6 +204,20 @@ export default function SettingsScreen() {
       await saveLocationSettings(next);
     });
 
+  const syncDailyBrief = () =>
+    runAction("daily-brief-sync", async () => {
+      const result = await syncChatGptDailyBrief();
+
+      Alert.alert(
+        "Daily brief synced",
+        `${result.message || "Sync complete"} for ${result.date}.`,
+        [
+          { text: "View", onPress: () => router.push("/daily-summaries") },
+          { text: "OK" },
+        ],
+      );
+    });
+
   if (loading) {
     return (
       <SafeAreaView edges={["top"]} style={styles.screen}>
@@ -364,6 +379,12 @@ export default function SettingsScreen() {
             onPress={() => router.push("/daily-summaries")}
           />
           <NavRow
+            busy={busyKey === "daily-brief-sync"}
+            icon="cloud-download-outline"
+            title="Sync ChatGPT daily brief"
+            onPress={() => void syncDailyBrief()}
+          />
+          <NavRow
             icon="bug-outline"
             title="SMS Tracking Status"
             onPress={() => router.push("/sms-tracking-debug")}
@@ -462,10 +483,12 @@ function SettingToggle({
 }
 
 function NavRow({
+  busy,
   icon,
   onPress,
   title,
 }: {
+  busy?: boolean;
   icon: IconName;
   onPress: () => void;
   title: string;
@@ -476,7 +499,11 @@ function NavRow({
         <Ionicons color={colors.primary} name={icon} size={19} />
       </View>
       <Text style={styles.rowTitle}>{title}</Text>
-      <Ionicons color={colors.textSoft} name="chevron-forward" size={18} />
+      {busy ? (
+        <ActivityIndicator color={colors.primary} size="small" />
+      ) : (
+        <Ionicons color={colors.textSoft} name="chevron-forward" size={18} />
+      )}
     </Pressable>
   );
 }

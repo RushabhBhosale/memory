@@ -19,11 +19,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MemoryCard } from '../../components/MemoryCard';
-import { askMemory, type AskMemoryResponse } from '../../services/api';
+import { askMemory, type ActivityItem, type AskMemoryResponse } from '../../services/api';
 import { colors, subtleShadow } from '../../styles/theme';
 import { getRecentSearches, saveRecentSearch } from '../../utils/searchHistory';
 
-const CHAT_STORAGE_KEY = 'ask_memory_chat_history';
+const CHAT_STORAGE_KEY = 'ask_memory_chat_history_v2';
 const MAX_STORED_CONVERSATIONS = 20;
 
 const SUGGESTED_PROMPTS = [
@@ -95,13 +95,103 @@ const getConversationPairs = (messages: ChatMessage[]) => {
   return pairs.slice(-MAX_STORED_CONVERSATIONS);
 };
 
+const ANSWER_STOP_WORDS = new Set([
+  'about',
+  'and',
+  'did',
+  'for',
+  'from',
+  'have',
+  'how',
+  'the',
+  'this',
+  'that',
+  'today',
+  'what',
+  'when',
+  'where',
+  'with',
+  'work'
+]);
+const FOLLOW_UP_STOP_WORDS = new Set(['about', 'did', 'go', 'today', 'what', 'where', 'work']);
+const LOCATION_QUERY_PATTERN = /\b(where|go|went|visit|visited|location|place|places)\b/i;
+const LOCATION_SIGNAL_PATTERN =
+  /\b(at|to|near|visited|went|mall|restaurant|cafe|office|home|hotel|airport|station|pizza|donuts|lunch|dinner|outing)\b/i;
+
+const getAnswerKeywords = (question: string) =>
+  question
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(/\s+/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 2 && !ANSWER_STOP_WORDS.has(item));
+
+const compactAnswerText = (value: string) => value.replace(/\s+/g, ' ').trim();
+
+const getSourceText = (source: ActivityItem) =>
+  [
+    source.content,
+    source.summary,
+    source.bodyMarkdown,
+    source.originalSmsPreview,
+    source.merchant,
+    source.title
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+const getMatchedSourceLine = (source: ActivityItem, keywords: string[]) => {
+  const candidates = getSourceText(source)
+    .split(/\n+|[.!?]\s+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const matched = candidates.find((candidate) => {
+    const normalized = candidate.toLowerCase();
+    return keywords.some((keyword) => normalized.includes(keyword));
+  });
+
+  return compactAnswerText(matched || candidates[0] || source.title);
+};
+
+const buildReadableAnswer = (question: string, response: AskMemoryResponse) => {
+  const genericAnswer = /^I found \d+ saved item/i.test(response.answer);
+
+  if (!genericAnswer || response.sources.length === 0) {
+    return response.answer;
+  }
+
+  const keywords = getAnswerKeywords(question);
+  const isLocationQuestion = LOCATION_QUERY_PATTERN.test(question);
+  const sourceLines = Array.from(
+    new Set(response.sources.slice(0, 4).map((source) => getMatchedSourceLine(source, keywords)).filter(Boolean))
+  );
+  const matchedLines = (isLocationQuestion
+    ? sourceLines.filter((line) => LOCATION_SIGNAL_PATTERN.test(line))
+    : sourceLines
+  ).slice(0, 3);
+
+  if (!matchedLines.length) {
+    if (isLocationQuestion) {
+      return `I found ${response.count} saved item${
+        response.count === 1 ? '' : 's'
+      } for that date, but I couldn't find any saved place or visit details.`;
+    }
+
+    return response.answer;
+  }
+
+  return `I found ${response.count} saved item${
+    response.count === 1 ? '' : 's'
+  } related to your question. ${matchedLines.join(' ')}`;
+};
+
 const buildFollowUps = (question: string, response: AskMemoryResponse) => {
   const topics = [
     ...response.plan.keywords,
     ...response.sources.flatMap((item) => [item.category, ...item.tags.slice(0, 1)])
   ]
     .map((item) => item.trim())
-    .filter(Boolean);
+    .filter((item) => item.length > 2 && !FOLLOW_UP_STOP_WORDS.has(item.toLowerCase()));
   const uniqueTopics = Array.from(new Set(topics.map((item) => item.toLowerCase()))).slice(0, 2);
   const followUps = uniqueTopics.map((topic) => `Show me more about ${topic}.`);
 
@@ -121,15 +211,15 @@ const buildFollowUps = (question: string, response: AskMemoryResponse) => {
 };
 
 function MessageBubble({
-  message,
-  onFollowUp
+  message
 }: {
   message: ChatMessage;
-  onFollowUp: (query: string) => void;
 }) {
   const fade = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(8)).current;
+  const [showSources, setShowSources] = useState(false);
   const isUser = message.role === 'user';
+  const sourceCount = !isUser ? message.response?.sources.length ?? 0 : 0;
 
   useEffect(() => {
     Animated.parallel([
@@ -171,44 +261,30 @@ function MessageBubble({
           </Text>
         </View>
 
-        {message.response?.summary.length ? (
-          <View style={styles.summaryList}>
-            {message.response.summary.slice(0, 4).map((item) => (
-              <View key={item} style={styles.summaryRow}>
-                <View style={styles.summaryDot} />
-                <Text style={styles.summaryText}>{item}</Text>
-              </View>
-            ))}
-          </View>
-        ) : null}
-
-        {message.response ? (
-          <View style={styles.resultMeta}>
-            <Text style={styles.resultMetaText}>{message.response.count} sources found</Text>
-          </View>
+        {sourceCount > 0 ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={showSources ? 'Hide sources' : 'Show sources'}
+            style={styles.sourcesToggle}
+            onPress={() => setShowSources((current) => !current)}
+          >
+            <View style={styles.sourcesToggleIcon}>
+              <Ionicons color={colors.white} name="albums-outline" size={13} />
+            </View>
+            <Text style={styles.sourcesToggleText}>
+              {showSources ? 'Hide sources' : `${sourceCount} source${sourceCount === 1 ? '' : 's'}`}
+            </Text>
+            <Ionicons color={colors.textMuted} name={showSources ? 'chevron-up' : 'chevron-down'} size={14} />
+          </Pressable>
         ) : null}
       </View>
 
-      {!isUser && message.response?.sources.length ? (
+      {!isUser && showSources && message.response?.sources.length ? (
         <View style={styles.sourcesBlock}>
           <Text style={styles.blockLabel}>Sources</Text>
           {message.response.sources.slice(0, 5).map((item) => (
             <MemoryCard key={`${message.id}-${item.type}-${item._id}`} memory={item} />
           ))}
-        </View>
-      ) : null}
-
-      {!isUser && message.followUps?.length ? (
-        <View style={styles.followUpBlock}>
-          <Text style={styles.blockLabel}>Follow up</Text>
-          <View style={styles.followUpList}>
-            {message.followUps.map((item) => (
-              <Pressable key={item} style={styles.followUpChip} onPress={() => onFollowUp(item)}>
-                <Text style={styles.followUpText}>{item}</Text>
-                <Ionicons color={colors.textMuted} name="arrow-up" size={13} />
-              </Pressable>
-            ))}
-          </View>
         </View>
       ) : null}
     </Animated.View>
@@ -315,6 +391,7 @@ export default function SearchScreen() {
     try {
       const nextResponse = await askMemory(nextQuery);
       const followUps = buildFollowUps(nextQuery, nextResponse);
+      const answerText = buildReadableAnswer(nextQuery, nextResponse);
 
       setRecentSearches(await saveRecentSearch(nextQuery));
       setMessages((current) =>
@@ -323,7 +400,7 @@ export default function SearchScreen() {
             ? {
                 id: loadingMessageId,
                 role: 'assistant',
-                text: nextResponse.answer,
+                text: answerText,
                 response: nextResponse,
                 followUps
               }
@@ -350,7 +427,12 @@ export default function SearchScreen() {
     }
   };
 
-  const promptItems = hasMessages ? recentSearches.slice(0, 4) : SUGGESTED_PROMPTS;
+  const latestFollowUps =
+    [...messages]
+      .reverse()
+      .find((message) => message.role === 'assistant' && !message.loading && message.followUps?.length)
+      ?.followUps?.slice(0, 4) ?? [];
+  const promptItems = hasMessages ? latestFollowUps : SUGGESTED_PROMPTS;
 
   return (
     <SafeAreaView edges={['top']} style={styles.screen}>
@@ -401,9 +483,7 @@ export default function SearchScreen() {
               </View>
             </View>
           ) : (
-            messages.map((message) => (
-              <MessageBubble key={message.id} message={message} onFollowUp={(value) => void runAskMemory(value)} />
-            ))
+            messages.map((message) => <MessageBubble key={message.id} message={message} />)
           )}
         </ScrollView>
 
@@ -420,6 +500,7 @@ export default function SearchScreen() {
                 <Text numberOfLines={1} style={styles.inlinePromptText}>
                   {item}
                 </Text>
+                <Ionicons color={colors.textMuted} name="arrow-up" size={14} />
               </Pressable>
             ))}
           </ScrollView>
@@ -495,6 +576,9 @@ type SearchStyles = {
   summaryText: TextStyle;
   resultMeta: ViewStyle;
   resultMetaText: TextStyle;
+  sourcesToggle: ViewStyle;
+  sourcesToggleIcon: ViewStyle;
+  sourcesToggleText: TextStyle;
   sourcesBlock: ViewStyle;
   blockLabel: TextStyle;
   followUpBlock: ViewStyle;
@@ -715,6 +799,33 @@ const styles = StyleSheet.create<SearchStyles>({
     fontSize: 12,
     fontWeight: '800'
   },
+  sourcesToggle: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: colors.white,
+    borderColor: colors.border,
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 7,
+    marginTop: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6
+  },
+  sourcesToggleIcon: {
+    alignItems: 'center',
+    backgroundColor: colors.text,
+    borderRadius: 999,
+    height: 22,
+    justifyContent: 'center',
+    width: 22
+  },
+  sourcesToggleText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '900',
+    lineHeight: 16
+  },
   sourcesBlock: {
     marginTop: 10,
     width: '100%'
@@ -756,48 +867,61 @@ const styles = StyleSheet.create<SearchStyles>({
     lineHeight: 18
   },
   inlinePrompts: {
+    backgroundColor: colors.background,
     borderTopColor: colors.border,
     borderTopWidth: 1,
-    maxHeight: 52
+    flexGrow: 0,
+    flexShrink: 0,
+    height: 54
   },
   inlinePromptsContent: {
+    alignItems: 'center',
     gap: 8,
     paddingHorizontal: 16,
-    paddingVertical: 9
+    paddingVertical: 8
   },
   inlinePrompt: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
+    alignItems: 'center',
+    alignSelf: 'center',
+    backgroundColor: colors.accentSurface,
+    borderColor: '#DDD2FE',
     borderRadius: 999,
     borderWidth: 1,
-    maxWidth: 240,
-    paddingHorizontal: 12,
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    maxWidth: 320,
+    minHeight: 36,
+    maxHeight: 38,
+    paddingHorizontal: 14,
     paddingVertical: 8
   },
   inlinePromptText: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: '800'
+    color: colors.text,
+    flexShrink: 1,
+    fontSize: 13,
+    fontWeight: '900',
+    lineHeight: 17
   },
   composerWrap: {
     backgroundColor: colors.background,
     borderTopColor: colors.border,
     borderTopWidth: 1,
     paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: Platform.OS === 'ios' ? 18 : 12
+    paddingTop: 8,
+    paddingBottom: 8
   },
   composer: {
-    alignItems: 'flex-end',
+    alignItems: 'center',
     backgroundColor: colors.surface,
     borderColor: colors.borderStrong,
     borderRadius: 24,
     borderWidth: 1,
     flexDirection: 'row',
     gap: 10,
-    minHeight: 52,
+    minHeight: 48,
     paddingHorizontal: 12,
-    paddingVertical: 9,
+    paddingVertical: 7,
     ...subtleShadow
   },
   input: {
@@ -807,9 +931,10 @@ const styles = StyleSheet.create<SearchStyles>({
     fontWeight: '600',
     lineHeight: 22,
     maxHeight: 130,
-    minHeight: 34,
+    minHeight: 30,
     paddingHorizontal: 0,
-    paddingVertical: 6
+    paddingVertical: 2,
+    textAlignVertical: 'center'
   },
   sendButton: {
     alignItems: 'center',
@@ -817,7 +942,6 @@ const styles = StyleSheet.create<SearchStyles>({
     borderRadius: 999,
     height: 36,
     justifyContent: 'center',
-    marginBottom: 1,
     width: 36
   },
   sendButtonDisabled: {

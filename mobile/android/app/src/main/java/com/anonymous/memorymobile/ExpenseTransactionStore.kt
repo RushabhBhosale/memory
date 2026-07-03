@@ -54,19 +54,7 @@ object ExpenseTransactionStore {
     val existing = findExistingTransaction(context, parsed.sender, preview)
 
     if (existing != null) {
-      existing.put("amount", parsed.amount)
-      existing.put("currency", parsed.currency)
-      existing.put("merchant", parsed.merchant)
-      existing.put("type", parsed.type)
-      existing.put("category", categoryForMerchant(parsed.merchant))
-      existing.put("confidence", parsed.confidence)
-      existing.put("classificationReason", parsed.classificationReason)
-      existing.put("reviewRequired", parsed.reviewRequired)
-      parsed.accountHint?.let { existing.put("accountHint", it) }
-      parsed.transactionDateTime?.let { existing.put("transactionDateTime", it) }
-      existing.put("updatedAt", now)
-      updateMatchingPending(context, parsed.sender, preview, existing)
-      return existing
+      return null
     }
 
     val item = JSONObject().apply {
@@ -125,6 +113,13 @@ object ExpenseTransactionStore {
   }
 
   fun listExpenses(context: Context): JSONArray = readArray(context, EXPENSES_KEY)
+
+  fun hasStoredTransaction(context: Context, parsed: ParsedSmsTransaction): Boolean {
+    val preview = safePreview(parsed.messageBody)
+
+    return hasMatchingExpense(context, parsed, preview) ||
+      findExistingTransaction(context, parsed.sender, preview) != null
+  }
 
   fun smsDebugStats(context: Context): JSONObject {
     val pending = readArray(context, PENDING_KEY)
@@ -317,6 +312,26 @@ object ExpenseTransactionStore {
     }
 
     return updated
+  }
+
+  private fun hasMatchingExpense(
+    context: Context,
+    parsed: ParsedSmsTransaction,
+    preview: String
+  ): Boolean {
+    val expenses = readArray(context, EXPENSES_KEY)
+
+    for (index in 0 until expenses.length()) {
+      val item = expenses.optJSONObject(index) ?: continue
+      val samePreview = item.optString("originalSmsPreview") == preview
+      val sameAmount = kotlin.math.abs(item.optDouble("amount", 0.0) - parsed.amount) < 0.01
+
+      if (samePreview && sameAmount) {
+        return true
+      }
+    }
+
+    return false
   }
 
   private fun updateMatchingPending(

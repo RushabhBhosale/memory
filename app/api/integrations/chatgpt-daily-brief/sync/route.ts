@@ -6,6 +6,7 @@ import {
   readDailyBriefRowFromSheet,
   CHATGPT_DAILY_BRIEF_SOURCE
 } from '@/lib/chatgptDailyBrief';
+import { validateApiKey } from '@/lib/apiKey';
 import { getDailySummaryDateError } from '@/lib/dailySummary';
 import { connectDB } from '@/lib/mongodb';
 import DailySummary from '@/models/DailySummary';
@@ -32,12 +33,17 @@ const getErrorMessage = (error: unknown) =>
 
 const validateSyncSecret = (request: Request) => {
   const expected = process.env.DAILY_BRIEF_SYNC_SECRET;
+  const syncSecret = request.headers.get('x-sync-secret');
+
+  if (!syncSecret && request.headers.get('x-api-key')) {
+    return validateApiKey(request);
+  }
 
   if (!expected) {
     return NextResponse.json({ error: 'DAILY_BRIEF_SYNC_SECRET is required' }, { status: 500 });
   }
 
-  if (request.headers.get('x-sync-secret') !== expected) {
+  if (syncSecret !== expected) {
     return NextResponse.json({ error: 'Invalid sync secret' }, { status: 401 });
   }
 
