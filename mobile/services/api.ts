@@ -266,8 +266,10 @@ export const getApiConfig = () => {
   const apiRoot = getApiRoot(apiUrl);
 
   return {
+    apiRoot,
     askMemoryUrl: `${apiRoot}/api/ask-memory`,
     activityUrl: `${apiRoot}/api/activity`,
+    assistantCommandUrl: `${apiRoot}/api/assistant/command`,
     chatGptDailyBriefSyncUrl: `${apiRoot}/api/integrations/chatgpt-daily-brief/sync`,
     dailySummaryUrl: `${apiRoot}/api/memories/daily-summary`,
     desktopActivityUrl: `${apiRoot}/api/desktop-activity`,

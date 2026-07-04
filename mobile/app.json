@@ -21,10 +21,15 @@
         "backgroundColor": "#FFFFFF"
       },
       "permissions": [
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
         "android.permission.PACKAGE_USAGE_STATS",
+        "android.permission.POST_NOTIFICATIONS",
         "android.permission.QUERY_ALL_PACKAGES",
+        "android.permission.RECORD_AUDIO",
         "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.VIBRATE",
+        "android.permission.WAKE_LOCK"
       ],
       "package": "com.anonymous.memorymobile"
     },

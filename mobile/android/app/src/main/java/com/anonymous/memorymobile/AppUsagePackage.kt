@@ -10,6 +10,7 @@ class AppUsagePackage : ReactPackage {
     listOf(
       AppUsageModule(reactContext),
       ExpenseSmsModule(reactContext),
+      JarvisAssistantModule(reactContext),
       ScreenshotWatcherModule(reactContext),
       VoiceNoteModule(reactContext)
     )
