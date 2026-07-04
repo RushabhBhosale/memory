@@ -14,8 +14,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { AppHeader, HeaderIcon } from "../../components/AppHeader";
 import { MemoryCard } from "../../components/MemoryCard";
-import { ScreenHeader } from "../../components/ScreenHeader";
 import { StateView } from "../../components/StateView";
 import { listActivity, type ActivityItem } from "../../services/api";
 import { colors, subtleShadow } from "../../styles/theme";
@@ -483,7 +483,19 @@ export default function CalendarScreen() {
         }
         showsVerticalScrollIndicator={false}
       >
-        <ScreenHeader mode="back" title="History" />
+        <AppHeader
+          title="History"
+          rightIcons={
+            <>
+              <HeaderIcon name="search-outline" onPress={() => {
+                // TODO
+              }} />
+              <HeaderIcon name="filter-outline" onPress={() => {
+                // TODO
+              }} />
+            </>
+          }
+        />
 
         {/* <View style={styles.heroCard}>
           <View style={styles.heroTopRow}>

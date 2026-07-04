@@ -57,11 +57,29 @@ const getRangeEnd = (range: string | null) => {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
 };
 
+const getDateBounds = (value: string | null) => {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return null;
+  }
+
+  const [year, month, day] = value.split('-').map(Number);
+
+  return {
+    end: new Date(year, month - 1, day + 1),
+    start: new Date(year, month - 1, day)
+  };
+};
+
 const buildTimelinePayload = (body: Record<string, unknown>) => ({
+  activity: toString(body.activity) || undefined,
+  address: toString(body.address) || undefined,
+  city: toString(body.city) || undefined,
+  country: toString(body.country) || undefined,
   durationMinutes:
     body.durationMinutes === undefined ? undefined : toNumber(body.durationMinutes, 0),
   eventType: toString(body.eventType),
   latitude: toNumber(body.latitude, Number.NaN),
+  locality: toString(body.locality) || undefined,
   longitude: toNumber(body.longitude, Number.NaN),
   placeId: toString(body.placeId),
   placeName: toString(body.placeName),
@@ -78,8 +96,9 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const range = searchParams.get('range');
-    const start = getRangeStart(range);
-    const end = getRangeEnd(range);
+    const dateBounds = getDateBounds(searchParams.get('date'));
+    const start = dateBounds?.start || getRangeStart(range);
+    const end = dateBounds?.end || getRangeEnd(range);
     const query: Record<string, unknown> = {};
 
     if (start || end) {
@@ -121,7 +140,7 @@ export async function POST(request: Request) {
     if (
       !payload.placeId ||
       !payload.placeName ||
-      !['enter', 'exit'].includes(payload.eventType) ||
+      !['enter', 'exit', 'dwell', 'visit'].includes(payload.eventType) ||
       !Number.isFinite(payload.latitude) ||
       !Number.isFinite(payload.longitude)
     ) {

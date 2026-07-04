@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import * as Location from "expo-location";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import {
@@ -17,7 +16,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { ScreenHeader } from "../components/ScreenHeader";
+import { AppHeader } from "../components/AppHeader";
 import { syncChatGptDailyBrief } from "../services/api";
 import {
   hasUsageAccessPermission,
@@ -29,6 +28,7 @@ import {
 } from "../services/expenses";
 import {
   defaultLocationSettings,
+  getLocationPermissionStatus,
   readLocationSettings,
   requestLocationPermissionFlow,
   saveLocationSettings,
@@ -105,23 +105,25 @@ export default function SettingsScreen() {
         smsGranted,
         screenshotGranted,
         usageGranted,
-        foregroundLocation,
-        backgroundLocation,
+        locationPermission,
         storedLocationSettings,
       ] = await Promise.all([
         getNotificationPermissionStatus().catch(() => "unavailable"),
         hasExpenseSmsPermissions().catch(() => false),
         hasScreenshotPermissions().catch(() => false),
         hasUsageAccessPermission().catch(() => false),
-        Location.getForegroundPermissionsAsync().catch(() => ({ status: "unavailable" })),
-        Location.getBackgroundPermissionsAsync().catch(() => ({ status: "unavailable" })),
+        getLocationPermissionStatus().catch(() => ({
+          activity: "unavailable",
+          background: "unavailable",
+          foreground: "unavailable",
+        })),
         readLocationSettings(),
       ]);
 
       setPermissions({
         appUsage: usageGranted ? "granted" : Platform.OS === "android" ? "denied" : "unavailable",
-        backgroundLocation: backgroundLocation.status,
-        foregroundLocation: foregroundLocation.status,
+        backgroundLocation: locationPermission.background,
+        foregroundLocation: locationPermission.foreground,
         notifications: notificationStatus,
         screenshots: screenshotGranted ? "granted" : Platform.OS === "android" ? "denied" : "unavailable",
         sms: smsGranted ? "granted" : Platform.OS === "android" ? "denied" : "unavailable",
@@ -155,12 +157,12 @@ export default function SettingsScreen() {
     runAction("location", async () => {
       const result = await requestLocationPermissionFlow();
 
-      if (result.foreground.status !== Location.PermissionStatus.GRANTED) {
+      if (result.foreground.status !== "granted") {
         Alert.alert("Location blocked", "Allow location from system settings to enable places.");
         return;
       }
 
-      if (result.background?.status !== Location.PermissionStatus.GRANTED) {
+      if (result.background?.status !== "granted") {
         Alert.alert(
           "Background location",
           "Allow background location from Android settings for geofences.",
@@ -187,8 +189,8 @@ export default function SettingsScreen() {
         const result = await requestLocationPermissionFlow();
 
         if (
-          result.foreground.status !== Location.PermissionStatus.GRANTED ||
-          result.background?.status !== Location.PermissionStatus.GRANTED
+          result.foreground.status !== "granted" ||
+          result.background?.status !== "granted"
         ) {
           Alert.alert("Location access needed", "Enable location before turning this on.");
           return;
@@ -243,7 +245,7 @@ export default function SettingsScreen() {
         }
         showsVerticalScrollIndicator={false}
       >
-        <ScreenHeader mode="back" title="Settings" />
+        <AppHeader title="Settings" showBackButton />
 
         <View style={styles.introPanel}>
           <Text style={styles.introTitle}>App controls</Text>

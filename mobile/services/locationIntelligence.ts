@@ -1,13 +1,12 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as Location from "expo-location";
-import * as TaskManager from "expo-task-manager";
-import { Linking, Platform } from "react-native";
+import { Linking, NativeEventEmitter, NativeModules, Platform } from "react-native";
 
 import { getApiConfig, listMemories, request, updateMemory } from "./api";
 import { scheduleLocationReminderNotification } from "./notifications";
 
 export type PlaceType = "home" | "office" | "gym" | "mall" | "custom";
 export type LocationTriggerType = "enter" | "exit";
+export type LocationTimelineEventType = LocationTriggerType | "dwell" | "visit";
 export type LocationReminderStatus = "pending" | "triggered" | "completed";
 
 export type SavedPlace = {
@@ -43,11 +42,31 @@ export type PlaceTimelineEvent = {
   id: string;
   placeId: string;
   placeName: string;
-  eventType: LocationTriggerType;
+  eventType: LocationTimelineEventType;
   latitude: number;
   longitude: number;
   timestamp: string;
   durationMinutes?: number;
+  activity?: "walking" | "running" | "cycling" | "driving" | "still" | "unknown";
+  address?: string;
+  locality?: string;
+  city?: string;
+  country?: string;
+};
+
+export type SuggestedPlace = {
+  id: string;
+  address?: string;
+  city?: string;
+  country?: string;
+  durationMinutes: number;
+  eventCount: number;
+  lastSeenAt: string;
+  latitude: number;
+  locality?: string;
+  longitude: number;
+  name: string;
+  radiusMeters: number;
 };
 
 export type LocationSettings = {
@@ -61,10 +80,13 @@ export type LocationSettings = {
 export type LocationDebugState = {
   foregroundPermission: string;
   backgroundPermission: string;
+  activityPermission?: string;
   currentLocation: { latitude: number; longitude: number } | null;
   registeredGeofences: string[];
   lastGeofenceTrigger: string;
   lastTimelineEvent: PlaceTimelineEvent | null;
+  lastActivity?: string;
+  trackingEnabled?: boolean;
 };
 
 export type WorkHoursSummary = {
@@ -77,11 +99,67 @@ export type WorkHoursSummary = {
 const DEFAULT_RADIUS_METERS = 50;
 const SAME_EVENT_COOLDOWN_MS = 10 * 60 * 1000;
 const TRANSITION_COOLDOWN_MS = 90 * 1000;
-const LOCATION_GEOFENCE_TASK = "memoryos-location-geofence";
 const SETTINGS_KEY = "location:settings";
 const DEBUG_KEY = "location:debug";
 const GEOFENCE_STATE_KEY = "location:geofenceState";
+const SUGGESTED_PLACE_IGNORES_KEY = "location:suggestedPlaceIgnores";
 const LEGACY_LOCAL_DATA_KEYS = ["location:places", "location:reminders", "location:timeline"];
+const SUGGESTED_PLACE_MIN_DURATION_MINUTES = 20;
+const SUGGESTED_PLACE_RADIUS_METERS = 75;
+
+type NativeLocationPayload = {
+  id?: string;
+  placeId?: string;
+  placeName?: string;
+  eventType?: LocationTimelineEventType;
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+  timestamp: number | string;
+  durationMinutes?: number;
+  activity?: PlaceTimelineEvent["activity"];
+  address?: string;
+  locality?: string;
+  city?: string;
+  country?: string;
+};
+
+type NativeMemoryLocationModule = {
+  configurePlaces: (places: SavedPlace[]) => Promise<boolean>;
+  drainPendingEvents: () => Promise<NativeLocationPayload[]>;
+  getCurrentLocation: () => Promise<NativeLocationPayload | null>;
+  getLastKnownLocation: () => Promise<NativeLocationPayload | null>;
+  getNearbySavedPlace: (
+    coords: { latitude: number; longitude: number },
+  ) => Promise<(SavedPlace & { distanceMeters: number }) | null>;
+  getPermissionStatus: () => Promise<{
+    foreground: string;
+    background: string;
+    activity: string;
+  }>;
+  getTimeline: () => Promise<NativeLocationPayload[]>;
+  isTrackingEnabled: () => Promise<boolean>;
+  openBatteryOptimizationSettings: () => void;
+  requestPermissions: () => Promise<boolean>;
+  startTracking: () => Promise<boolean>;
+  stopTracking: () => Promise<boolean>;
+};
+
+const nativeLocationModule = NativeModules.MemoryLocationModule as
+  | NativeMemoryLocationModule
+  | undefined;
+
+const ensureNativeLocationModule = () => {
+  if (Platform.OS !== "android") {
+    return null;
+  }
+
+  if (!nativeLocationModule) {
+    throw new Error("Memory location native module is unavailable. Rebuild the Android app.");
+  }
+
+  return nativeLocationModule;
+};
 
 type GeofencePlaceState = {
   inside: boolean;
@@ -168,6 +246,25 @@ const getDistanceMeters = (
 };
 
 export const distanceMeters = getDistanceMeters;
+
+const getSuggestedPlaceClusterId = (event: {
+  latitude: number;
+  longitude: number;
+}) => `suggested:${event.latitude.toFixed(3)},${event.longitude.toFixed(3)}`;
+
+const getSuggestedPlaceName = (event: PlaceTimelineEvent) => {
+  const rawName =
+    event.locality ||
+    event.address ||
+    event.city ||
+    event.placeName ||
+    "this place";
+  const cleanName = rawName.replace(/^current location$/i, "this place").trim();
+
+  return cleanName.toLowerCase() === "this place"
+    ? "Place you visited"
+    : `Near ${cleanName}`;
+};
 
 type ListPlacesResponse = {
   count: number;
@@ -391,13 +488,16 @@ const readGeofenceState = () => readJson<GeofenceState>(GEOFENCE_STATE_KEY, {});
 const writeGeofenceState = (state: GeofenceState) => writeJson(GEOFENCE_STATE_KEY, state);
 
 export const getCurrentCoordinates = async () => {
-  const location = await Location.getCurrentPositionAsync({
-    accuracy: Location.Accuracy.Balanced,
-  });
+  const nativeModule = ensureNativeLocationModule();
+  const location = await nativeModule?.getCurrentLocation();
+
+  if (!location) {
+    throw new Error("Unable to read current location.");
+  }
 
   const currentLocation = {
-    latitude: location.coords.latitude,
-    longitude: location.coords.longitude,
+    latitude: location.latitude,
+    longitude: location.longitude,
   };
 
   await updateDebugState({ currentLocation });
@@ -406,17 +506,44 @@ export const getCurrentCoordinates = async () => {
 };
 
 export const requestLocationPermissionFlow = async () => {
-  const foreground = await Location.requestForegroundPermissionsAsync();
-  await updateDebugState({ foregroundPermission: foreground.status });
+  const nativeModule = ensureNativeLocationModule();
 
-  if (foreground.status !== Location.PermissionStatus.GRANTED) {
-    return { background: null, foreground };
+  if (!nativeModule) {
+    const unavailable = { status: "unavailable" };
+    return { activity: unavailable, background: unavailable, foreground: unavailable };
   }
 
-  const background = await Location.requestBackgroundPermissionsAsync();
-  await updateDebugState({ backgroundPermission: background.status });
+  await nativeModule.requestPermissions();
+  const status = await nativeModule.getPermissionStatus();
+  const foreground = { status: status.foreground };
+  const background = { status: status.background };
+  const activity = { status: status.activity };
 
-  return { background, foreground };
+  await updateDebugState({
+    activityPermission: status.activity,
+    backgroundPermission: status.background,
+    foregroundPermission: status.foreground,
+  });
+
+  if (foreground.status !== "granted") {
+    return { activity, background: null, foreground };
+  }
+
+  return { activity, background, foreground };
+};
+
+export const getLocationPermissionStatus = async () => {
+  const nativeModule = ensureNativeLocationModule();
+
+  if (!nativeModule) {
+    return {
+      activity: "unavailable",
+      background: "unavailable",
+      foreground: "unavailable",
+    };
+  }
+
+  return nativeModule.getPermissionStatus();
 };
 
 export const openLocationSettings = () => {
@@ -464,23 +591,40 @@ export const syncLocationGeofences = async () => {
   }
 
   const regions = await getPlaceGeofenceRegions();
+  const nativeModule = ensureNativeLocationModule();
+  const places = await listPlaces();
 
   if (!regions.length) {
-    await Location.stopGeofencingAsync(LOCATION_GEOFENCE_TASK).catch(() => undefined);
+    await nativeModule?.stopTracking().catch(() => undefined);
     await updateDebugState({ registeredGeofences: [] });
     return [];
   }
 
-  const backgroundPermission = await Location.getBackgroundPermissionsAsync();
-  await updateDebugState({ backgroundPermission: backgroundPermission.status });
+  await nativeModule?.configurePlaces(places).catch((error) =>
+    updateDebugState({
+      lastGeofenceTrigger: `Native place sync failed: ${getErrorMessage(error)}`,
+    }),
+  );
+  await drainNativeLocationEvents();
 
-  if (backgroundPermission.status !== Location.PermissionStatus.GRANTED) {
+  const permissions = await nativeModule?.getPermissionStatus();
+  const trackingEnabled = (await nativeModule?.isTrackingEnabled().catch(() => false)) ?? false;
+
+  await updateDebugState({
+    activityPermission: permissions?.activity || "unknown",
+    backgroundPermission: permissions?.background || "unknown",
+    foregroundPermission: permissions?.foreground || "unknown",
+    registeredGeofences: regions.map((region) => region.identifier),
+    trackingEnabled,
+  });
+
+  if (permissions?.foreground !== "granted") {
     await updateDebugState({ registeredGeofences: [] });
     return [];
   }
 
-  await Location.startGeofencingAsync(LOCATION_GEOFENCE_TASK, regions);
-  await updateDebugState({ registeredGeofences: regions.map((region) => region.identifier) });
+  await nativeModule?.startTracking();
+  await updateDebugState({ trackingEnabled: true });
 
   return regions;
 };
@@ -538,6 +682,89 @@ const addTimelineEvent = async (
   await updateDebugState({ lastTimelineEvent: savedEvent });
 
   return savedEvent;
+};
+
+const normalizeNativeTimestamp = (value: NativeLocationPayload["timestamp"]) => {
+  if (typeof value === "number") {
+    return new Date(value).toISOString();
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? nowIso() : parsed.toISOString();
+};
+
+const getNativePlaceId = (event: NativeLocationPayload) => {
+  if (event.placeId) {
+    return event.placeId;
+  }
+
+  return `native:${event.latitude.toFixed(4)},${event.longitude.toFixed(4)}`;
+};
+
+const persistNativeTimelineEvent = async (event: NativeLocationPayload) => {
+  if (!Number.isFinite(event.latitude) || !Number.isFinite(event.longitude)) {
+    return null;
+  }
+
+  const timestamp = normalizeNativeTimestamp(event.timestamp);
+  const nextEvent: PlaceTimelineEvent = {
+    activity: event.activity || "unknown",
+    address: event.address,
+    city: event.city,
+    country: event.country,
+    durationMinutes: event.durationMinutes,
+    eventType: event.eventType || "visit",
+    id: event.id || createId("native-place-event"),
+    latitude: event.latitude,
+    locality: event.locality,
+    longitude: event.longitude,
+    placeId: getNativePlaceId(event),
+    placeName:
+      event.placeName ||
+      event.locality ||
+      event.city ||
+      event.address ||
+      "Current location",
+    timestamp,
+  };
+  const { locationTimelineUrl } = getLocationUrls();
+  const response = await request<SingleTimelineResponse>(locationTimelineUrl, "", {
+    body: JSON.stringify(nextEvent),
+    method: "POST",
+  });
+  const savedEvent = normalizeTimelineEvent(response.data);
+
+  await updateDebugState({
+    currentLocation: {
+      latitude: savedEvent.latitude,
+      longitude: savedEvent.longitude,
+    },
+    lastActivity: savedEvent.activity,
+    lastTimelineEvent: savedEvent,
+  });
+
+  return savedEvent;
+};
+
+const drainNativeLocationEvents = async () => {
+  const nativeModule = ensureNativeLocationModule();
+  const events = (await nativeModule?.drainPendingEvents().catch(() => [])) ?? [];
+
+  for (const event of events) {
+    if (event.eventType === "enter" || event.eventType === "exit") {
+      await handleGeofenceEvent({
+        eventType: event.eventType,
+        region: { identifier: `place:${event.placeId || ""}` },
+      }).catch(() => persistNativeTimelineEvent(event));
+      continue;
+    }
+
+    await persistNativeTimelineEvent(event).catch((error) =>
+      updateDebugState({
+        lastGeofenceTrigger: `Native timeline sync failed: ${getErrorMessage(error)}`,
+      }),
+    );
+  }
 };
 
 const resolveAcceptedTransition = async (
@@ -618,6 +845,15 @@ export const getTimelineByRange = async (
   const response = await request<ListTimelineResponse>(
     locationTimelineUrl,
     `?range=${encodeURIComponent(range)}`,
+  );
+  return response.data.map(normalizeTimelineEvent);
+};
+
+export const getTimelineByDate = async (dateKey: string) => {
+  const { locationTimelineUrl } = getLocationUrls();
+  const response = await request<ListTimelineResponse>(
+    locationTimelineUrl,
+    `?date=${encodeURIComponent(dateKey)}`,
   );
   return response.data.map(normalizeTimelineEvent);
 };
@@ -723,6 +959,105 @@ export const getFrequentPlaceSuggestions = async () => {
     .filter(Boolean) as string[];
 };
 
+export const listSuggestedPlaces = async (): Promise<SuggestedPlace[]> => {
+  const [places, events, ignoredIds] = await Promise.all([
+    listPlaces(),
+    listTimelineEvents(),
+    readJson<string[]>(SUGGESTED_PLACE_IGNORES_KEY, []),
+  ]);
+  const ignored = new Set(ignoredIds);
+  const clusters = new Map<
+    string,
+    {
+      events: PlaceTimelineEvent[];
+      totalDuration: number;
+    }
+  >();
+
+  events.forEach((event) => {
+    if (!Number.isFinite(event.latitude) || !Number.isFinite(event.longitude)) {
+      return;
+    }
+
+    const durationMinutes = event.durationMinutes || 0;
+    const isUnknownVisit =
+      event.eventType === "visit" ||
+      event.eventType === "dwell" ||
+      event.placeId.startsWith("native:");
+    const isMovingActivity =
+      event.activity === "walking" ||
+      event.activity === "running" ||
+      event.activity === "cycling" ||
+      event.activity === "driving";
+    const nearestSavedPlace = places
+      .map((place) => ({
+        distance: getDistanceMeters(event, place),
+        place,
+      }))
+      .sort((a, b) => a.distance - b.distance)[0];
+    const isNearSavedPlace =
+      nearestSavedPlace &&
+      nearestSavedPlace.distance <=
+        Math.max(nearestSavedPlace.place.radiusMeters + 50, SUGGESTED_PLACE_RADIUS_METERS);
+
+    if (
+      !isUnknownVisit ||
+      isMovingActivity ||
+      durationMinutes < SUGGESTED_PLACE_MIN_DURATION_MINUTES ||
+      isNearSavedPlace
+    ) {
+      return;
+    }
+
+    const id = getSuggestedPlaceClusterId(event);
+
+    if (ignored.has(id)) {
+      return;
+    }
+
+    const current = clusters.get(id) || { events: [], totalDuration: 0 };
+
+    current.events.push(event);
+    current.totalDuration += durationMinutes;
+    clusters.set(id, current);
+  });
+
+  return [...clusters.entries()]
+    .map(([id, cluster]) => {
+      const sorted = [...cluster.events].sort(
+        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      );
+      const latest = sorted[0];
+
+      return {
+        address: latest.address,
+        city: latest.city,
+        country: latest.country,
+        durationMinutes: Math.max(1, Math.round(cluster.totalDuration)),
+        eventCount: cluster.events.length,
+        id,
+        lastSeenAt: latest.timestamp,
+        latitude: latest.latitude,
+        locality: latest.locality,
+        longitude: latest.longitude,
+        name: getSuggestedPlaceName(latest),
+        radiusMeters: SUGGESTED_PLACE_RADIUS_METERS,
+      };
+    })
+    .sort((a, b) => new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime())
+    .slice(0, 8);
+};
+
+export const ignoreSuggestedPlace = async (id: string) => {
+  const ignoredIds = await readJson<string[]>(SUGGESTED_PLACE_IGNORES_KEY, []);
+
+  if (ignoredIds.includes(id)) {
+    return;
+  }
+
+  await writeJson(SUGGESTED_PLACE_IGNORES_KEY, [...ignoredIds, id]);
+};
+
 export const findNearestPlace = async (coords: { latitude: number; longitude: number }) => {
   const places = await listPlaces();
   const withDistance = places
@@ -782,7 +1117,7 @@ export const parseLocationReminderRequest = async (input: string) => {
 };
 
 const handleGeofenceEvent = async (data: {
-  eventType?: Location.GeofencingEventType;
+  eventType?: LocationTriggerType | "dwell";
   region?: { identifier?: string };
   testMode?: boolean;
 }) => {
@@ -792,8 +1127,7 @@ const handleGeofenceEvent = async (data: {
     return;
   }
 
-  const eventType =
-    data.eventType === Location.GeofencingEventType.Exit ? "exit" : "enter";
+  const eventType: LocationTriggerType = data.eventType === "exit" ? "exit" : "enter";
   const [places, reminders, settings] = await Promise.all([
     listPlaces(),
     listLocationReminders(),
@@ -901,10 +1235,7 @@ export const triggerLocationReminderTest = async (
   eventType: LocationTriggerType = "enter",
 ) => {
   await handleGeofenceEvent({
-    eventType:
-      eventType === "exit"
-        ? Location.GeofencingEventType.Exit
-        : Location.GeofencingEventType.Enter,
+    eventType,
     region: {
       identifier: `place:${placeId}`,
     },
@@ -912,31 +1243,67 @@ export const triggerLocationReminderTest = async (
   });
 };
 
-export const registerLocationGeofenceTask = () => {
-  if (TaskManager.isTaskDefined(LOCATION_GEOFENCE_TASK)) {
+const registerNativeLocationListeners = () => {
+  if (Platform.OS !== "android" || !nativeLocationModule) {
     return;
   }
 
-  TaskManager.defineTask(LOCATION_GEOFENCE_TASK, async ({ data, error }) => {
-    if (error) {
-      await updateDebugState({ lastGeofenceTrigger: error.message });
-      return;
-    }
-
-    try {
-      await handleGeofenceEvent(
-        data as {
-          eventType?: Location.GeofencingEventType;
-          region?: { identifier?: string };
-        },
-      );
-    } catch (eventError) {
-      await updateDebugState({
-        lastGeofenceTrigger: `Geofence task skipped: ${getErrorMessage(eventError)}`,
-      });
-    }
+  const emitter = new NativeEventEmitter(nativeLocationModule as never);
+  emitter.addListener("locationChanged", (event: NativeLocationPayload) => {
+    void persistNativeTimelineEvent(event).catch((error) =>
+      updateDebugState({
+        lastGeofenceTrigger: `Native location event skipped: ${getErrorMessage(error)}`,
+      }),
+    );
+  });
+  emitter.addListener("enteredPlace", (event: NativeLocationPayload) => {
+    void handleGeofenceEvent({
+      eventType: event.eventType === "dwell" ? "enter" : "enter",
+      region: { identifier: `place:${event.placeId || ""}` },
+    });
+  });
+  emitter.addListener("leftPlace", (event: NativeLocationPayload) => {
+    void handleGeofenceEvent({
+      eventType: "exit",
+      region: { identifier: `place:${event.placeId || ""}` },
+    });
+  });
+  emitter.addListener("activityChanged", (event: { activity?: string }) => {
+    void updateDebugState({ lastActivity: event.activity || "unknown" });
   });
 };
 
-registerLocationGeofenceTask();
+export const startTracking = async () => {
+  const places = await listPlaces();
+  const nativeModule = ensureNativeLocationModule();
+  await nativeModule?.configurePlaces(places);
+  return (await nativeModule?.startTracking()) ?? false;
+};
+
+export const stopTracking = async () => {
+  const nativeModule = ensureNativeLocationModule();
+  return (await nativeModule?.stopTracking()) ?? false;
+};
+
+export const isTrackingEnabled = async () => {
+  const nativeModule = ensureNativeLocationModule();
+  return (await nativeModule?.isTrackingEnabled()) ?? false;
+};
+
+export const getLastKnownLocation = async () => {
+  const nativeModule = ensureNativeLocationModule();
+  return nativeModule?.getLastKnownLocation() ?? null;
+};
+
+export const getTimeline = async () => {
+  const nativeModule = ensureNativeLocationModule();
+  return nativeModule?.getTimeline() ?? [];
+};
+
+export const getNearbySavedPlace = async (coords: { latitude: number; longitude: number }) => {
+  const nativeModule = ensureNativeLocationModule();
+  return nativeModule?.getNearbySavedPlace(coords) ?? null;
+};
+
+registerNativeLocationListeners();
 void clearLegacyLocalLocationData();

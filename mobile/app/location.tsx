@@ -21,6 +21,7 @@ import MapView, {
 } from "react-native-maps";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { AppHeader, HeaderIcon } from "../components/AppHeader";
 import { StateView } from "../components/StateView";
 import {
   clearRecentTimelineNoise,
@@ -32,8 +33,10 @@ import {
   getFrequentPlaceSuggestions,
   getLocationDebugState,
   getTimelineByRange,
+  ignoreSuggestedPlace,
   listLocationReminders,
   listPlaces,
+  listSuggestedPlaces,
   openLocationSettings,
   readLocationSettings,
   requestLocationPermissionFlow,
@@ -45,6 +48,7 @@ import {
   type PlaceTimelineEvent,
   type PlaceType,
   type SavedPlace,
+  type SuggestedPlace,
 } from "../services/locationIntelligence";
 import { colors, subtleShadow } from "../styles/theme";
 
@@ -84,6 +88,22 @@ const formatMinutes = (minutes: number) => {
 const formatEventTime = (value: string) =>
   timeFormatter.format(new Date(value));
 
+const getTimelineVerb = (event: PlaceTimelineEvent) => {
+  if (event.eventType === "exit") {
+    return "Left";
+  }
+
+  if (event.eventType === "dwell") {
+    return "Stayed at";
+  }
+
+  if (event.eventType === "visit") {
+    return "Visited";
+  }
+
+  return "Arrived at";
+};
+
 const emptyDebug: LocationDebugState = {
   backgroundPermission: "unknown",
   currentLocation: null,
@@ -100,6 +120,10 @@ export default function LocationScreen() {
   const [settings, setSettings] = useState<LocationSettings | null>(null);
   const [debug, setDebug] = useState<LocationDebugState>(emptyDebug);
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestedPlaces, setSuggestedPlaces] = useState<SuggestedPlace[]>([]);
+  const [suggestedPlaceNames, setSuggestedPlaceNames] = useState<Record<string, string>>({});
+  const [editingSuggestionId, setEditingSuggestionId] = useState("");
+  const [savingSuggestionId, setSavingSuggestionId] = useState("");
   const [range, setRange] = useState<TimelineRange>("today");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -153,6 +177,7 @@ export default function LocationScreen() {
         nextSettings,
         nextDebug,
         nextSuggestions,
+        nextSuggestedPlaces,
       ] = await Promise.all([
         listPlaces(),
         listLocationReminders(),
@@ -160,6 +185,7 @@ export default function LocationScreen() {
         readLocationSettings(),
         getLocationDebugState(),
         getFrequentPlaceSuggestions(),
+        listSuggestedPlaces(),
       ]);
 
       setPlaces(nextPlaces);
@@ -168,6 +194,18 @@ export default function LocationScreen() {
       setSettings(nextSettings);
       setDebug(nextDebug);
       setSuggestions(nextSuggestions);
+      setSuggestedPlaces(nextSuggestedPlaces);
+      setSuggestedPlaceNames((current) => {
+        const next = { ...current };
+
+        nextSuggestedPlaces.forEach((suggestion) => {
+          if (!next[suggestion.id]) {
+            next[suggestion.id] = suggestion.name;
+          }
+        });
+
+        return next;
+      });
     } finally {
       setLoading(false);
     }
@@ -309,6 +347,37 @@ export default function LocationScreen() {
     }
   };
 
+  const saveSuggestedPlace = async (suggestion: SuggestedPlace) => {
+    const name = (suggestedPlaceNames[suggestion.id] || suggestion.name).trim();
+
+    if (!name) {
+      Alert.alert("Name required", "Give this suggested place a name first.");
+      setEditingSuggestionId(suggestion.id);
+      return;
+    }
+
+    try {
+      setSavingSuggestionId(suggestion.id);
+      await savePlace({
+        latitude: suggestion.latitude,
+        longitude: suggestion.longitude,
+        name,
+        radiusMeters: suggestion.radiusMeters,
+        type: "custom",
+      });
+      await ignoreSuggestedPlace(suggestion.id);
+      setEditingSuggestionId("");
+      await loadLocationData();
+    } finally {
+      setSavingSuggestionId("");
+    }
+  };
+
+  const ignorePlaceSuggestion = async (suggestion: SuggestedPlace) => {
+    await ignoreSuggestedPlace(suggestion.id);
+    await loadLocationData();
+  };
+
   const refreshGeofences = async () => {
     await syncLocationGeofences();
     await loadLocationData();
@@ -380,18 +449,15 @@ export default function LocationScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.eyebrow}>MemoryOS</Text>
-            <Text style={styles.title}>Location</Text>
-          </View>
-          <Pressable
-            style={styles.iconButton}
-            onPress={() => void refreshGeofences()}
-          >
-            <Ionicons color={colors.primary} name="locate-outline" size={20} />
-          </Pressable>
-        </View>
+        <AppHeader
+          title="Places"
+          showBackButton
+          rightIcons={
+            <HeaderIcon name="add-outline" onPress={() => {
+              // TODO: add place
+            }} />
+          }
+        />
 
         <View style={styles.panel}>
           <Text style={styles.panelTitle}>Saved Places</Text>
@@ -682,11 +748,11 @@ export default function LocationScreen() {
                 </Text>
                 <View style={styles.timelineDot} />
                 <Text style={styles.timelineText}>
-                  {event.eventType === "exit" ? "Left" : "Entered"}{" "}
-                  {event.placeName}
+                  {getTimelineVerb(event)} {event.placeName}
                   {event.durationMinutes
                     ? ` • ${formatMinutes(event.durationMinutes)}`
                     : ""}
+                  {event.activity ? ` • ${event.activity}` : ""}
                 </Text>
               </View>
             ))
@@ -696,6 +762,100 @@ export default function LocationScreen() {
             </Text>
           )}
         </View>
+
+        {suggestedPlaces.length ? (
+          <View style={styles.panel}>
+            <View style={styles.panelHeader}>
+              <Text style={styles.panelTitle}>Suggested Places</Text>
+              <Text style={styles.panelCaption}>{suggestedPlaces.length} new</Text>
+            </View>
+            <Text style={styles.helpText}>
+              Long stops away from saved places appear here. Save only the ones you want to remember.
+            </Text>
+
+            <View style={styles.suggestionList}>
+              {suggestedPlaces.map((suggestion) => {
+                const isEditing = editingSuggestionId === suggestion.id;
+                const isSaving = savingSuggestionId === suggestion.id;
+                const currentName = suggestedPlaceNames[suggestion.id] || suggestion.name;
+
+                return (
+                  <View key={suggestion.id} style={styles.suggestionCard}>
+                    <View style={styles.placeRow}>
+                      <View style={styles.placeIcon}>
+                        <Ionicons color={colors.primary} name="location-outline" size={17} />
+                      </View>
+                      <View style={styles.placeCopy}>
+                        {isEditing ? (
+                          <TextInput
+                            autoFocus
+                            value={currentName}
+                            onChangeText={(value) =>
+                              setSuggestedPlaceNames((current) => ({
+                                ...current,
+                                [suggestion.id]: value,
+                              }))
+                            }
+                            placeholder="Place name"
+                            placeholderTextColor={colors.textSoft}
+                            style={styles.suggestionInput}
+                          />
+                        ) : (
+                          <Text style={styles.placeTitle}>{currentName}</Text>
+                        )}
+                        <Text style={styles.placeMeta}>
+                          Stayed {formatMinutes(suggestion.durationMinutes)} · Last seen{" "}
+                          {formatEventTime(suggestion.lastSeenAt)}
+                        </Text>
+                        {suggestion.address || suggestion.locality || suggestion.city ? (
+                          <Text numberOfLines={2} style={styles.suggestionAddress}>
+                            {[suggestion.address, suggestion.locality, suggestion.city]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </Text>
+                        ) : null}
+                      </View>
+                    </View>
+
+                    <View style={styles.suggestionActions}>
+                      <Pressable
+                        disabled={isSaving}
+                        style={styles.suggestionSaveButton}
+                        onPress={() => void saveSuggestedPlace(suggestion)}
+                      >
+                        {isSaving ? (
+                          <ActivityIndicator color={colors.white} size="small" />
+                        ) : (
+                          <Text style={styles.suggestionSaveText}>Save</Text>
+                        )}
+                      </Pressable>
+                      <Pressable
+                        disabled={isSaving}
+                        style={styles.suggestionButton}
+                        onPress={() =>
+                          setEditingSuggestionId((current) =>
+                            current === suggestion.id ? "" : suggestion.id,
+                          )
+                        }
+                      >
+                        <Text style={styles.suggestionButtonText}>
+                          {isEditing ? "Done" : "Rename"}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        disabled={isSaving}
+                        style={styles.suggestionButton}
+                        onPress={() => void ignorePlaceSuggestion(suggestion)}
+                      >
+                        <Text style={styles.suggestionButtonText}>Ignore</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
 
         {settings.frequentPlaceSuggestions && suggestions.length ? (
           <View style={styles.panel}>
@@ -1009,6 +1169,70 @@ const styles = StyleSheet.create({
   },
   selectedChipText: {
     color: colors.white,
+  },
+  suggestionActions: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 12,
+  },
+  suggestionAddress: {
+    color: colors.textSoft,
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 17,
+    marginTop: 4,
+  },
+  suggestionButton: {
+    alignItems: "center",
+    backgroundColor: colors.backgroundSoft,
+    borderColor: colors.border,
+    borderRadius: 999,
+    borderWidth: 1,
+    flex: 1,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  suggestionButtonText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  suggestionCard: {
+    backgroundColor: colors.backgroundSoft,
+    borderColor: colors.border,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 12,
+  },
+  suggestionInput: {
+    backgroundColor: colors.white,
+    borderColor: colors.borderStrong,
+    borderRadius: 12,
+    borderWidth: 1,
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: "900",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  suggestionList: {
+    gap: 10,
+    marginTop: 12,
+  },
+  suggestionSaveButton: {
+    alignItems: "center",
+    backgroundColor: colors.black,
+    borderRadius: 999,
+    flex: 1,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  suggestionSaveText: {
+    color: colors.white,
+    fontSize: 12,
+    fontWeight: "900",
   },
   routeMarker: {
     backgroundColor: colors.white,

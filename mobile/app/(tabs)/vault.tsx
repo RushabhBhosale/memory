@@ -13,6 +13,7 @@ import {
 import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { AppHeader, HeaderIcon } from '../../components/AppHeader';
 import { listMemories, type Memory } from '../../services/api';
 import { colors, subtleShadow } from '../../styles/theme';
 import { isVaultMemory, maskPassword, parseCredentialContent } from '../../utils/credentialVault';
@@ -154,15 +155,12 @@ export default function VaultScreen() {
 
   const renderVaultList = () => (
     <>
-      <View style={styles.headerRow}>
-        <View>
-          <Text style={styles.title}>Vault</Text>
-          <Text style={styles.subtitle}>Passwords, PINs, and private codes.</Text>
-        </View>
-        <Pressable style={styles.addButton} onPress={() => router.push('/vault-add')}>
-          <Ionicons color={colors.white} name="add" size={20} />
-        </Pressable>
-      </View>
+      <AppHeader
+        title="Vault"
+        rightIcons={
+          <HeaderIcon name="settings-outline" onPress={() => router.push('/settings')} />
+        }
+      />
 
       <Pressable style={styles.settingsLinkRow} onPress={() => router.push('/vault-settings')}>
         <Text style={styles.settingsLinkText}>Change vault settings</Text>

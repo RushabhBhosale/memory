@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { AppHeader, HeaderIcon } from "../../components/AppHeader";
 import {
   confirmPendingTransaction,
   deleteExpense,
@@ -339,6 +340,13 @@ export default function ExpensesScreen() {
     );
   }
 
+  const handleSMSRefresh = () => {
+    void checkLastHundredSms();
+  };
+  const handleAddExpense = () => {
+    router.push("/expense-add");
+  };
+
   return (
     <SafeAreaView edges={["top"]} style={styles.screen}>
       <ScrollView
@@ -352,15 +360,15 @@ export default function ExpensesScreen() {
         }
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.eyebrow}>MemoryOS</Text>
-            <Text style={styles.title}>Expenses</Text>
-          </View>
-          <View style={styles.headerIcon}>
-            <Ionicons color={colors.primary} name="wallet-outline" size={22} />
-          </View>
-        </View>
+        <AppHeader
+          title="Expenses"
+          rightIcons={
+            <>
+              <HeaderIcon name="refresh-outline" onPress={handleSMSRefresh} />
+              <HeaderIcon name="add-outline" onPress={handleAddExpense} />
+            </>
+          }
+        />
 
         {!hasPermission ? (
           <View style={styles.permissionPanel}>

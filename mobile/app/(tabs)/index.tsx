@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { AppHeader, HeaderIcon } from "../../components/AppHeader";
 import { AppUsageLinkCard } from "../../components/AppUsageLinkCard";
 import { MemoryCard } from "../../components/MemoryCard";
 import { generateMetadata } from "../../services/ai";
@@ -56,6 +57,11 @@ import {
   listScreenshots,
   type ScreenshotInboxItem,
 } from "../../services/screenshotWatcher";
+import {
+  buildRouteOfDay,
+  formatRouteDistance,
+  formatRouteDuration,
+} from "../../services/routeOfDay";
 import { colors, subtleShadow } from "../../styles/theme";
 import {
   isHomeCacheFresh,
@@ -561,6 +567,7 @@ export default function HomeScreen() {
       ),
     [locationDebug, locationReminders, placeTimeline, places, workHours],
   );
+  const routeSummary = useMemo(() => buildRouteOfDay(placeTimeline), [placeTimeline]);
   const screenshotInboxSummary = useMemo(
     () => getScreenshotInboxSummary(screenshots),
     [screenshots],
@@ -934,31 +941,15 @@ export default function HomeScreen() {
         }
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.headerRow}>
-          <View style={styles.brandRow}>
-            <View style={styles.brandMark} />
-            <Text style={styles.brandText}>Second Brain</Text>
-          </View>
-          {/* {syncing || offlineMessage ? (
-            <Text style={[styles.syncStatus, offlineMessage && styles.offlineStatus]}>
-              {offlineMessage || "Syncing..."}
-            </Text>
-          ) : null} */}
-          <View style={styles.headerActions}>
-            <Pressable
-              style={styles.headerAction}
-              onPress={() => router.push("/settings")}
-            >
-              <Ionicons color={colors.text} name="settings-outline" size={18} />
-            </Pressable>
-            <Pressable
-              style={styles.headerAction}
-              onPress={() => router.push("/search")}
-            >
-              <Ionicons color={colors.text} name="sparkles-outline" size={18} />
-            </Pressable>
-          </View>
-        </View>
+        <AppHeader
+          title="second brain"
+          rightIcons={
+            <>
+              <HeaderIcon name="search-outline" onPress={() => router.push("/(tabs)/search")} />
+              <HeaderIcon name="settings-outline" onPress={() => router.push("/settings")} />
+            </>
+          }
+        />
 
         <View style={styles.heroBlock}>
           <Text style={styles.greeting}>{greeting}</Text>
@@ -1154,6 +1145,19 @@ export default function HomeScreen() {
                 <Text style={styles.todayTitle}>Location</Text>
                 <Text numberOfLines={2} style={styles.todayMeta}>
                   {locationSummary.currentLocation} · {formatDuration(locationSummary.officeMinutes)} office · {locationSummary.activeLocationReminders} reminders
+                </Text>
+              </View>
+              <Ionicons color={colors.textSoft} name="chevron-forward" size={18} />
+            </Pressable>
+
+            <Pressable style={styles.todayRow} onPress={() => router.push("/route-of-day")}>
+              <View style={[styles.todayIcon, { backgroundColor: "#FFF7ED" }]}>
+                <Ionicons color={colors.reminderTag} name="map-outline" size={17} />
+              </View>
+              <View style={styles.todayCopy}>
+                <Text style={styles.todayTitle}>Today's Route</Text>
+                <Text numberOfLines={2} style={styles.todayMeta}>
+                  {routeSummary.stats.placesVisited} Places · {formatRouteDistance(routeSummary.stats.totalDistanceMeters)} · {formatRouteDuration(routeSummary.stats.totalMinutes)}
                 </Text>
               </View>
               <Ionicons color={colors.textSoft} name="chevron-forward" size={18} />

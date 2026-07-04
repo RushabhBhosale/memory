@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { AppHeader, HeaderIcon } from '../../components/AppHeader';
 import { MemoryCard } from '../../components/MemoryCard';
 import { askMemory, type ActivityItem, type AskMemoryResponse } from '../../services/api';
 import { colors, subtleShadow } from '../../styles/theme';
@@ -441,22 +442,15 @@ export default function SearchScreen() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 4 : 0}
         style={styles.keyboard}
       >
-        <View style={styles.header}>
-          <Pressable style={styles.headerButton} onPress={() => router.back()}>
-            <Ionicons color={colors.text} name="arrow-back" size={22} />
-          </Pressable>
-          <View style={styles.headerTitleWrap}>
-            <Text style={styles.headerTitle}>Ask Memory</Text>
-            <Text style={styles.headerSubtitle}>Search your saved context</Text>
-          </View>
-          <Pressable
-            disabled={!hasMessages}
-            style={[styles.headerButton, !hasMessages && styles.headerButtonDisabled]}
-            onPress={() => void clearChat()}
-          >
-            <Ionicons color={hasMessages ? colors.text : colors.textSoft} name="trash-outline" size={20} />
-          </Pressable>
-        </View>
+        <AppHeader
+          title="Ask Memory"
+          showBackButton
+          rightIcons={
+            <HeaderIcon name="ellipsis-horizontal" onPress={() => {
+              // TODO: options
+            }} />
+          }
+        />
 
         <ScrollView
           ref={scrollRef}
