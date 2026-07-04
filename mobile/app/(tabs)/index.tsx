@@ -16,8 +16,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AppHeader, HeaderIcon } from "../../components/AppHeader";
-import { AppUsageLinkCard } from "../../components/AppUsageLinkCard";
 import { MemoryCard } from "../../components/MemoryCard";
+import { useSmartCaptureCenter } from "../../components/SmartCaptureCenterContext";
 import { generateMetadata } from "../../services/ai";
 import { StateView } from "../../components/StateView";
 import {
@@ -25,6 +25,7 @@ import {
   listActivity,
   listDesktopActivity,
   listMemories,
+  updateActivityItem,
   type ActivityItem,
   type DesktopActivity,
   type Memory,
@@ -39,29 +40,9 @@ import {
   scheduleUpcomingMemoryReminders,
 } from "../../services/notifications";
 import {
-  createLocationReminder,
-  getLocationDebugState,
-  getTimelineByRange,
-  getWorkHoursSummary,
-  listLocationReminders,
-  listPlaces,
-  parseLocationReminderRequest,
-  readLocationSettings,
-  type LocationDebugState,
-  type LocationReminder,
-  type PlaceTimelineEvent,
-  type SavedPlace,
-  type WorkHoursSummary,
-} from "../../services/locationIntelligence";
-import {
   listScreenshots,
   type ScreenshotInboxItem,
 } from "../../services/screenshotWatcher";
-import {
-  buildRouteOfDay,
-  formatRouteDistance,
-  formatRouteDuration,
-} from "../../services/routeOfDay";
 import { colors, subtleShadow } from "../../styles/theme";
 import {
   isHomeCacheFresh,
@@ -71,7 +52,6 @@ import {
 } from "../../utils/homeCache";
 import { parseQuickReminder } from "../../utils/quickReminder";
 
-const SHOW_APP_USAGE_SURFACE = false;
 const SHOW_DESKTOP_ACTIVITY_SURFACE = false;
 
 const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -170,74 +150,9 @@ const getWeekdayCounts = (items: ActivityItem[], weekStart: Date, weekEnd: Date)
 
 const formatCurrency = (amount: number) => currencyFormatter.format(Math.round(amount));
 
-const formatDuration = (minutes: number) => {
-  if (minutes <= 0) {
-    return "0m";
-  }
-
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-
-  if (!hours) {
-    return `${remainingMinutes}m`;
-  }
-
-  return `${hours}h ${remainingMinutes}m`;
-};
-
-const getPlaceMinutesForToday = (
-  timeline: PlaceTimelineEvent[],
-  place: SavedPlace | undefined,
-) => {
-  if (!place) {
-    return 0;
-  }
-
-  const todayKey = getDateKey(new Date());
-  const sorted = timeline
-    .filter((event) => event.placeId === place.id)
-    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-  let minutes = 0;
-  let openEnterTimestamp = "";
-
-  sorted.forEach((event) => {
-    if (getDateKey(new Date(event.timestamp)) !== todayKey) {
-      return;
-    }
-
-    if (event.eventType === "enter") {
-      openEnterTimestamp = event.timestamp;
-      return;
-    }
-
-    if (event.eventType === "exit" && openEnterTimestamp) {
-      minutes +=
-        event.durationMinutes ||
-        Math.max(
-          1,
-          Math.round(
-            (new Date(event.timestamp).getTime() - new Date(openEnterTimestamp).getTime()) /
-              60000,
-          ),
-        );
-      openEnterTimestamp = "";
-    }
-  });
-
-  if (openEnterTimestamp) {
-    minutes += Math.max(
-      1,
-      Math.round((Date.now() - new Date(openEnterTimestamp).getTime()) / 60000),
-    );
-  }
-
-  return minutes;
-};
-
 const getDailySummary = (
   items: ActivityItem[],
   expenses: ExpenseEntry[],
-  timeline: PlaceTimelineEvent[],
 ) => {
   const todayKey = getDateKey(new Date());
   const todayItems = items.filter(
@@ -258,15 +173,6 @@ const getDailySummary = (
         getDateKey(new Date(expense.timestamp)) === todayKey,
     )
     .reduce((total, expense) => total + expense.amount, 0);
-  const placesVisited = new Set(
-    timeline
-      .filter(
-        (event) =>
-          event.eventType === "enter" &&
-          getDateKey(new Date(event.timestamp)) === todayKey,
-      )
-      .map((event) => event.placeId),
-  ).size;
   const sentence = spentToday > 0
       ? `You logged ${formatCurrency(spentToday)} in expenses today.`
       : todayItems.length > 0
@@ -275,7 +181,6 @@ const getDailySummary = (
 
   return {
     memoriesCaptured,
-    placesVisited,
     sentence,
     spentToday,
     tasksCompleted,
@@ -319,8 +224,7 @@ const getExpenseSummary = (expenses: ExpenseEntry[]) => {
 };
 
 const hasReminderIntent = (input: string) =>
-  /\b(?:remind\s+me|remember\s+to|need\s+to|don't\s+forget|do\s+not\s+forget|notify\s+me|alert\s+me)\b/i.test(input) ||
-  /\b(?:when\s+i|when\s+we)\s+(?:reach|arrive|leave|get\s+to|go\s+to)\b/i.test(input);
+  /\b(?:remind\s+me|remember\s+to|need\s+to|don't\s+forget|do\s+not\s+forget|notify\s+me|alert\s+me)\b/i.test(input);
 
 const normalizeHomepageMetadata = (
   metadata: Awaited<ReturnType<typeof generateMetadata>>,
@@ -334,35 +238,6 @@ const normalizeHomepageMetadata = (
     ...metadata,
     category: "personal",
     tags: metadata.tags.filter((tag) => tag !== "reminder"),
-  };
-};
-
-const getLocationSummary = (
-  places: SavedPlace[],
-  timeline: PlaceTimelineEvent[],
-  reminders: LocationReminder[],
-  workHours: WorkHoursSummary | null,
-  debug: LocationDebugState | null,
-) => {
-  const home = places.find((place) => place.type === "home");
-  const office = places.find((place) => place.type === "office");
-  const lastEnter = [...timeline]
-    .filter((event) => event.eventType === "enter")
-    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
-  const currentLocation =
-    debug?.lastTimelineEvent?.eventType === "enter"
-      ? debug.lastTimelineEvent.placeName
-      : lastEnter?.placeName || "Unknown";
-  const activeLocationReminders = reminders.filter(
-    (reminder) => reminder.status === "pending",
-  ).length;
-
-  return {
-    activeLocationReminders,
-    currentLocation,
-    homeMinutes: getPlaceMinutesForToday(timeline, home),
-    officeMinutes: workHours?.todayMinutes || getPlaceMinutesForToday(timeline, office),
-    savedPlaces: places.length,
   };
 };
 
@@ -392,14 +267,6 @@ const getRelativeTime = (value: string) => {
   }
 
   return "Earlier";
-};
-
-const getPromptQuestion = (items: ActivityItem[]) => {
-  if (items.some((item) => item.type === "task")) {
-    return "What unfinished work have I logged recently?";
-  }
-
-  return "What should I review from this week?";
 };
 
 const getInsightSlot = () => Math.floor(new Date().getHours() / 6);
@@ -471,17 +338,83 @@ const getAiInsight = (
   return options[slot % options.length];
 };
 
+const isTaskLike = (item: ActivityItem) =>
+  item.type === "task" ||
+  item.kind === "task" ||
+  item.category === "task" ||
+  item.category === "reminder" ||
+  Boolean(item.reminderAt);
+
+const isOpenTask = (item: ActivityItem) =>
+  !["completed", "done", "triggered"].includes(String(item.status || "").toLowerCase());
+
+const getUpcomingFocusItems = (items: ActivityItem[]) => {
+  const now = Date.now();
+
+  return items
+    .filter(isTaskLike)
+    .filter(isOpenTask)
+    .sort((a, b) => {
+      const aTime = a.reminderAt ? new Date(a.reminderAt).getTime() : new Date(a.createdAt).getTime();
+      const bTime = b.reminderAt ? new Date(b.reminderAt).getTime() : new Date(b.createdAt).getTime();
+      return aTime - bTime;
+    })
+    .filter((item) => !item.reminderAt || new Date(item.reminderAt).getTime() >= now - 24 * 60 * 60 * 1000)
+    .slice(0, 3);
+};
+
+const getRecentMemoryItems = (items: ActivityItem[]) =>
+  items
+    .filter(
+      (item) =>
+        item.type === "memory" ||
+        item.type === "note" ||
+        item.kind === "note" ||
+        item.type === "daily_summary",
+    )
+    .slice(0, 3);
+
+const focusDateFormatter = new Intl.DateTimeFormat(undefined, {
+  day: "numeric",
+  month: "short",
+});
+
+const focusTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+const getFocusMeta = (item: ActivityItem) => {
+  if (!item.reminderAt) {
+    return "Open task";
+  }
+
+  const date = new Date(item.reminderAt);
+  return `${focusDateFormatter.format(date)} at ${focusTimeFormatter.format(date)}`;
+};
+
+const getItemTitle = (item: ActivityItem) =>
+  item.title || item.summary || item.content || item.merchant || "Saved item";
+
+const getItemMeta = (item: ActivityItem) => {
+  if (item.type === "expense" && item.amount) {
+    return `${formatCurrency(item.amount)} ${item.merchant ? `at ${item.merchant}` : ""}`.trim();
+  }
+
+  if (item.category) {
+    return item.category;
+  }
+
+  return getRelativeTime(item.createdAt);
+};
+
 export default function HomeScreen() {
+  const captureCenter = useSmartCaptureCenter();
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [desktopActivity, setDesktopActivity] = useState<DesktopActivity[]>([]);
   const [expenses, setExpenses] = useState<ExpenseEntry[]>([]);
-  const [locationDebug, setLocationDebug] = useState<LocationDebugState | null>(null);
-  const [locationReminders, setLocationReminders] = useState<LocationReminder[]>([]);
   const [memories, setMemories] = useState<Memory[]>([]);
-  const [places, setPlaces] = useState<SavedPlace[]>([]);
-  const [placeTimeline, setPlaceTimeline] = useState<PlaceTimelineEvent[]>([]);
   const [screenshots, setScreenshots] = useState<ScreenshotInboxItem[]>([]);
-  const [workHours, setWorkHours] = useState<WorkHoursSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -489,6 +422,7 @@ export default function HomeScreen() {
   const [offlineMessage, setOfflineMessage] = useState("");
   const [error, setError] = useState("");
   const [composerText, setComposerText] = useState("");
+  const [completingFocusItemId, setCompletingFocusItemId] = useState("");
   const [savingComposer, setSavingComposer] = useState(false);
   const [metricFilter, setMetricFilter] = useState<MetricFilter>(null);
 
@@ -524,10 +458,6 @@ export default function HomeScreen() {
         .length,
     [activity],
   );
-  const askQuestion = useMemo(
-    () => getPromptQuestion(activity),
-    [activity],
-  );
   const insightSlot = getInsightSlot();
   const aiInsight = useMemo(
     () =>
@@ -549,29 +479,19 @@ export default function HomeScreen() {
   );
 
   const dailySummary = useMemo(
-    () => getDailySummary(activity, expenses, placeTimeline),
-    [activity, expenses, placeTimeline],
+    () => getDailySummary(activity, expenses),
+    [activity, expenses],
   );
   const expenseSummary = useMemo(
     () => getExpenseSummary(expenses),
     [expenses],
   );
-  const locationSummary = useMemo(
-    () =>
-      getLocationSummary(
-        places,
-        placeTimeline,
-        locationReminders,
-        workHours,
-        locationDebug,
-      ),
-    [locationDebug, locationReminders, placeTimeline, places, workHours],
-  );
-  const routeSummary = useMemo(() => buildRouteOfDay(placeTimeline), [placeTimeline]);
   const screenshotInboxSummary = useMemo(
     () => getScreenshotInboxSummary(screenshots),
     [screenshots],
   );
+  const focusItems = useMemo(() => getUpcomingFocusItems(activity), [activity]);
+  const recentMemoryItems = useMemo(() => getRecentMemoryItems(activity), [activity]);
 
   const hasHydratedCacheRef = useRef(false);
   const isSyncingRef = useRef(false);
@@ -616,28 +536,13 @@ export default function HomeScreen() {
   const loadDashboardData = useCallback(async () => {
     const [
       nextExpenses,
-      nextPlaces,
-      nextTimeline,
-      nextReminders,
-      nextDebug,
-      nextWorkHours,
       nextScreenshots,
     ] = await Promise.all([
       listExpenses().catch(() => []),
-      listPlaces().catch(() => []),
-      getTimelineByRange("today").catch(() => []),
-      listLocationReminders().catch(() => []),
-      getLocationDebugState().catch(() => null),
-      getWorkHoursSummary().catch(() => null),
       listScreenshots().catch(() => []),
     ]);
 
     setExpenses(nextExpenses);
-    setPlaces(nextPlaces);
-    setPlaceTimeline(nextTimeline);
-    setLocationReminders(nextReminders);
-    setLocationDebug(nextDebug);
-    setWorkHours(nextWorkHours);
     setScreenshots(nextScreenshots);
   }, []);
 
@@ -752,6 +657,63 @@ export default function HomeScreen() {
     [applyHomeData, hasCache, syncHomeData],
   );
 
+  const completeFocusItem = useCallback(
+    async (item: ActivityItem) => {
+      if (item.type !== "task" && item.type !== "memory") {
+        return;
+      }
+
+      if (completingFocusItemId) {
+        return;
+      }
+
+      const nextActivity = activity.map((activityItem) =>
+        activityItem._id === item._id && activityItem.type === item.type
+          ? { ...activityItem, status: "completed" as const }
+          : activityItem,
+      );
+      const nextMemories = memories.map((memory) =>
+        memory._id === item._id ? { ...memory, status: "completed" as const } : memory,
+      );
+      const nextData = {
+        activity: nextActivity,
+        desktopActivity,
+        memories: nextMemories,
+      };
+
+      try {
+        setCompletingFocusItemId(item._id);
+        setError("");
+        applyHomeData(nextData);
+        await writeHomeCache({
+          ...nextData,
+          syncedAt: lastSyncedAtRef.current || Date.now(),
+        }).catch(() => undefined);
+
+        if (item.type === "task") {
+          await updateActivityItem("task", item._id, { status: "completed" });
+        } else if (item.type === "memory") {
+          await updateActivityItem("memory", item._id, { status: "completed" });
+        }
+
+        void syncHomeData({ silent: true });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unable to mark task done");
+        void syncHomeData({ silent: true });
+      } finally {
+        setCompletingFocusItemId("");
+      }
+    },
+    [
+      activity,
+      applyHomeData,
+      completingFocusItemId,
+      desktopActivity,
+      memories,
+      syncHomeData,
+    ],
+  );
+
   useFocusEffect(
     useCallback(() => {
       loadMemories();
@@ -810,72 +772,6 @@ export default function HomeScreen() {
           );
         }
 
-        await applyOptimisticMemory(memory);
-        setComposerText("");
-        void syncHomeData({ silent: true });
-        return;
-      }
-
-      const locationReminder = hasReminderIntent(trimmedContent)
-        ? await parseLocationReminderRequest(trimmedContent).catch(() => null)
-        : null;
-
-      if (locationReminder?.missingPlace) {
-        Alert.alert(
-          "Save place first",
-          locationReminder.placeName
-            ? `I found a location reminder, but ${locationReminder.placeName} is not saved yet. Add it from Location.`
-            : "I found a location reminder, but the place is not saved yet. Add it from Location.",
-          [
-            { text: "Later", style: "cancel" },
-            { text: "Open Location", onPress: () => router.push("/(tabs)/location") },
-          ],
-        );
-        return;
-      }
-
-      if (locationReminder && !locationReminder.missingPlace) {
-        const locationSettings = await readLocationSettings();
-
-        if (!locationSettings.locationReminders) {
-          Alert.alert(
-            "Location reminders are off",
-            "Turn them on from Location settings before creating geofence reminders.",
-            [
-              { text: "Cancel", style: "cancel" },
-              { text: "Open Location", onPress: () => router.push("/(tabs)/location") },
-            ],
-          );
-          return;
-        }
-
-        const description = locationReminder.description || trimmedContent;
-        const metadata = await generateMetadata(description);
-        const memory = await createMemory({
-          title: metadata.title || `Location reminder: ${description}`,
-          content: description,
-          category: "reminder",
-          tags: metadata.tags.length ? metadata.tags : ["reminder", "location"],
-          importance: metadata.importance,
-          kind: "note",
-          notificationEnabled: true,
-          reminderType: "location",
-          triggerType: locationReminder.triggerType,
-          placeId: locationReminder.place.id,
-          placeName: locationReminder.place.name,
-          latitude: locationReminder.place.latitude,
-          longitude: locationReminder.place.longitude,
-          radiusMeters: locationReminder.place.radiusMeters,
-          status: "pending",
-        });
-
-        await createLocationReminder({
-          description,
-          memoryId: memory._id,
-          place: locationReminder.place,
-          title: memory.title,
-          triggerType: locationReminder.triggerType,
-        });
         await applyOptimisticMemory(memory);
         setComposerText("");
         void syncHomeData({ silent: true });
@@ -942,7 +838,7 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
       >
         <AppHeader
-          title="second brain"
+          title="Memory"
           rightIcons={
             <>
               <HeaderIcon name="search-outline" onPress={() => router.push("/(tabs)/search")} />
@@ -951,29 +847,72 @@ export default function HomeScreen() {
           }
         />
 
-        <View style={styles.heroBlock}>
-          <Text style={styles.greeting}>{greeting}</Text>
-          <Text style={styles.heroSentence}>{aiInsight}</Text>
-        </View>
+        <Pressable
+          accessibilityRole="button"
+          style={styles.assistantPanel}
+          onPress={() => router.push("/(tabs)/search")}
+        >
+          <View style={styles.assistantTopRow}>
+            <View style={styles.assistantIcon}>
+              <Ionicons color={colors.white} name="sparkles" size={22} />
+            </View>
+            <View style={styles.syncPill}>
+              <Text style={styles.syncPillText}>
+                {offlineMessage || (syncing ? "Syncing" : "Ready")}
+              </Text>
+            </View>
+          </View>
+          <Text style={styles.assistantEyebrow}>{greeting}</Text>
+          <Text style={styles.assistantTitle}>Ask your memory anything.</Text>
+          <Text numberOfLines={2} style={styles.assistantBody}>
+            {aiInsight}
+          </Text>
+          <View style={styles.askInputMock}>
+            <Text style={styles.askInputText}>What should I know right now?</Text>
+            <Ionicons color={colors.white} name="arrow-forward" size={18} />
+          </View>
+        </Pressable>
 
-        <View style={styles.composerCard}>
+        <View style={styles.quickCapturePanel}>
+          <View style={styles.quickCaptureHeader}>
+            <View>
+              <Text style={styles.sectionEyebrow}>Quick capture</Text>
+              <Text style={styles.quickCaptureTitle}>Save a thought fast</Text>
+            </View>
+            <View style={styles.quickCaptureActions}>
+              <Pressable
+                accessibilityRole="button"
+                style={styles.smallIconButton}
+                onPress={captureCenter.openVoiceCapture}
+              >
+                <Ionicons color={colors.text} name="mic-outline" size={18} />
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                style={styles.smallIconButton}
+                onPress={() => router.push("/(tabs)/create")}
+              >
+                <Ionicons color={colors.text} name="expand-outline" size={18} />
+              </Pressable>
+            </View>
+          </View>
           <TextInput
             value={composerText}
             onChangeText={setComposerText}
             multiline
-            placeholder="Capture anything..."
+            placeholder="Type a note, task, or reminder..."
             placeholderTextColor={colors.textSoft}
             style={styles.composerInput}
             textAlignVertical="top"
           />
 
           <View style={styles.composerFooter}>
-            <Text style={styles.composerHelper}>Notes, tasks, reminders, ideas</Text>
+            <Text style={styles.composerHelper}>AI will file it into memory.</Text>
             <Pressable
-              disabled={savingComposer}
+              disabled={savingComposer || !composerText.trim()}
               style={[
                 styles.sendButton,
-                savingComposer && styles.sendButtonDisabled,
+                (!composerText.trim() || savingComposer) && styles.sendButtonDisabled,
               ]}
               onPress={() => void submitComposer()}
             >
@@ -986,403 +925,172 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        <View style={styles.primaryActions}>
-          <Pressable style={styles.primaryAction} onPress={() => router.push("/search")}>
-            <Ionicons color={colors.text} name="sparkles-outline" size={18} />
-            <Text style={styles.primaryActionText}>Ask</Text>
-          </Pressable>
-          <Pressable style={styles.primaryAction} onPress={() => router.push("/daily-summaries")}>
-            <Ionicons color={colors.text} name="calendar-clear-outline" size={18} />
-            <Text style={styles.primaryActionText}>Daily</Text>
-          </Pressable>
-          <Pressable style={styles.primaryAction} onPress={() => router.push("/screenshots")}>
-            <Ionicons color={colors.text} name="images-outline" size={18} />
-            <Text style={styles.primaryActionText}>Screens</Text>
-            {screenshotInboxSummary.pending ? (
-              <View style={styles.actionBadge}>
-                <Text style={styles.actionBadgeText}>{screenshotInboxSummary.pending}</Text>
-              </View>
-            ) : null}
-          </Pressable>
-          <Pressable style={styles.primaryAction} onPress={() => router.push("/(tabs)/expenses")}>
-            <Ionicons color={colors.text} name="wallet-outline" size={18} />
-            <Text style={styles.primaryActionText}>Spend</Text>
-          </Pressable>
-          <Pressable style={styles.primaryAction} onPress={() => router.push("/(tabs)/location")}>
-            <Ionicons color={colors.text} name="location-outline" size={18} />
-            <Text style={styles.primaryActionText}>Places</Text>
-          </Pressable>
-        </View>
+        {error && hasCache ? <Text style={styles.inlineError}>{error}</Text> : null}
 
-        <View style={styles.overviewGrid}>
-          <Pressable
-            accessibilityRole="button"
-            style={[
-              styles.overviewCard,
-              metricFilter === "today" && styles.overviewCardSelected,
-            ]}
-            onPress={() =>
-              setMetricFilter((current) =>
-                current === "today" ? null : "today",
-              )
-            }
-          >
-            <View style={styles.overviewTopRow}>
-              <Text style={styles.overviewLabel}>Today</Text>
-              <Ionicons color={colors.textSoft} name="calendar-outline" size={15} />
-            </View>
-            <Text style={styles.overviewValue}>{todayCount}</Text>
-            <Text style={styles.overviewHint}>items captured</Text>
+        <View style={styles.todaySnapshot}>
+          <Pressable style={styles.snapshotItem} onPress={() => router.push("/(tabs)/calendar")}>
+            <Text style={styles.snapshotValue}>{todayCount}</Text>
+            <Text style={styles.snapshotLabel}>today</Text>
           </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            style={styles.overviewCard}
-            onPress={() =>
-              router.push({
-                pathname: "/activity-list/[filter]",
-                params: { filter: "notes" },
-              })
-            }
-          >
-            <View style={styles.overviewTopRow}>
-              <Text style={styles.overviewLabel}>Notes</Text>
-              <Ionicons color={colors.textSoft} name="document-text-outline" size={15} />
-            </View>
-            <Text style={styles.overviewValue}>{noteCount}</Text>
-            <Text style={styles.overviewHint}>saved context</Text>
+          <View style={styles.snapshotDivider} />
+          <Pressable style={styles.snapshotItem} onPress={() => router.push("/(tabs)/tasks")}>
+            <Text style={styles.snapshotValue}>{focusItems.length}</Text>
+            <Text style={styles.snapshotLabel}>focus</Text>
           </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            style={styles.overviewCard}
-            onPress={() =>
-              router.push({
-                pathname: "/activity-list/[filter]",
-                params: { filter: "tasks" },
-              })
-            }
-          >
-            <View style={styles.overviewTopRow}>
-              <Text style={styles.overviewLabel}>Tasks</Text>
-              <Ionicons color={colors.textSoft} name="checkbox-outline" size={15} />
-            </View>
-            <Text style={styles.overviewValue}>{taskCount}</Text>
-            <Text style={styles.overviewHint}>in memory</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            style={styles.overviewCard}
-            onPress={() => router.push("/(tabs)/expenses")}
-          >
-            <View style={styles.overviewTopRow}>
-              <Text style={styles.overviewLabel}>Spent</Text>
-              <Ionicons color={colors.textSoft} name="wallet-outline" size={15} />
-            </View>
-            <Text adjustsFontSizeToFit minimumFontScale={0.72} numberOfLines={1} style={styles.overviewValue}>
+          <View style={styles.snapshotDivider} />
+          <Pressable style={styles.snapshotItem} onPress={() => router.push("/(tabs)/expenses")}>
+            <Text adjustsFontSizeToFit minimumFontScale={0.72} numberOfLines={1} style={styles.snapshotValue}>
               {formatCurrency(dailySummary.spentToday)}
             </Text>
-            <Text style={styles.overviewHint}>today</Text>
+            <Text style={styles.snapshotLabel}>spent</Text>
           </Pressable>
-        </View>
-
-        <View style={styles.todayPanel}>
-          <View style={styles.todayPanelHeader}>
-            <View style={styles.todayPanelTopRow}>
-              <Text style={styles.panelTitle}>Today</Text>
-              <Pressable style={styles.panelLinkButton} onPress={() => router.push("/summary/daily")}>
-                <Text style={styles.panelLinkText}>Open</Text>
-              </Pressable>
-            </View>
-            <Text numberOfLines={3} style={styles.panelCaption}>
-              {dailySummary.sentence}
-            </Text>
-          </View>
-
-          <View style={styles.todayRows}>
-            <Pressable style={styles.todayRow} onPress={() => router.push("/summary/daily")}>
-              <View style={[styles.todayIcon, { backgroundColor: colors.accentSurface }]}>
-                <Ionicons color={colors.primary} name="sparkles-outline" size={17} />
-              </View>
-              <View style={styles.todayCopy}>
-                <Text style={styles.todayTitle}>Daily summary</Text>
-                <Text numberOfLines={2} style={styles.todayMeta}>
-                  {dailySummary.memoriesCaptured} memories, {dailySummary.tasksCompleted} tasks, {dailySummary.placesVisited} places
-                </Text>
-              </View>
-              <Ionicons color={colors.textSoft} name="chevron-forward" size={18} />
-            </Pressable>
-
-            <Pressable style={styles.todayRow} onPress={() => router.push("/screenshots")}>
-              <View style={[styles.todayIcon, { backgroundColor: "#EEF5FF" }]}>
-                <Ionicons color={colors.secondary} name="images-outline" size={17} />
-              </View>
-              <View style={styles.todayCopy}>
-                <Text style={styles.todayTitle}>Screenshot inbox</Text>
-                <Text numberOfLines={2} style={styles.todayMeta}>
-                  {screenshotInboxSummary.pending} pending, {screenshotInboxSummary.processedToday} processed today
-                </Text>
-              </View>
-              <Ionicons color={colors.textSoft} name="chevron-forward" size={18} />
-            </Pressable>
-
-            <Pressable style={styles.todayRow} onPress={() => router.push("/(tabs)/expenses")}>
-              <View style={[styles.todayIcon, { backgroundColor: colors.successSurface }]}>
-                <Ionicons color={colors.success} name="wallet-outline" size={17} />
-              </View>
-              <View style={styles.todayCopy}>
-                <Text style={styles.todayTitle}>Expenses</Text>
-                <Text numberOfLines={2} style={styles.todayMeta}>
-                  {formatCurrency(expenseSummary.monthSpend)} this month, top category {expenseSummary.topCategory}
-                </Text>
-              </View>
-              <Ionicons color={colors.textSoft} name="chevron-forward" size={18} />
-            </Pressable>
-
-            <Pressable style={styles.todayRow} onPress={() => router.push("/(tabs)/location")}>
-              <View style={[styles.todayIcon, { backgroundColor: "#EFF6FF" }]}>
-                <Ionicons color={colors.secondary} name="location-outline" size={17} />
-              </View>
-              <View style={styles.todayCopy}>
-                <Text style={styles.todayTitle}>Location</Text>
-                <Text numberOfLines={2} style={styles.todayMeta}>
-                  {locationSummary.currentLocation} · {formatDuration(locationSummary.officeMinutes)} office · {locationSummary.activeLocationReminders} reminders
-                </Text>
-              </View>
-              <Ionicons color={colors.textSoft} name="chevron-forward" size={18} />
-            </Pressable>
-
-            <Pressable style={styles.todayRow} onPress={() => router.push("/route-of-day")}>
-              <View style={[styles.todayIcon, { backgroundColor: "#FFF7ED" }]}>
-                <Ionicons color={colors.reminderTag} name="map-outline" size={17} />
-              </View>
-              <View style={styles.todayCopy}>
-                <Text style={styles.todayTitle}>Today's Route</Text>
-                <Text numberOfLines={2} style={styles.todayMeta}>
-                  {routeSummary.stats.placesVisited} Places · {formatRouteDistance(routeSummary.stats.totalDistanceMeters)} · {formatRouteDuration(routeSummary.stats.totalMinutes)}
-                </Text>
-              </View>
-              <Ionicons color={colors.textSoft} name="chevron-forward" size={18} />
-            </Pressable>
-          </View>
-        </View>
-
-        {SHOW_APP_USAGE_SURFACE ? <AppUsageLinkCard /> : null}
-
-        {SHOW_DESKTOP_ACTIVITY_SURFACE && desktopActivity.length ? (
-          <View style={styles.desktopSection}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>Desktop activity</Text>
-              <Text style={styles.sectionMeta}>Auto-synced from laptop</Text>
-            </View>
-            {latestDesktopActivity ? (
-              <View style={styles.desktopOverviewCard}>
-                <View style={styles.desktopOverviewHeader}>
-                  <View>
-                    <Text style={styles.desktopOverviewTitle}>Latest laptop snapshot</Text>
-                    <Text style={styles.desktopOverviewDate}>{latestDesktopActivity.date}</Text>
-                  </View>
-                  <View style={styles.desktopOverviewBadge}>
-                    <Text style={styles.desktopOverviewBadgeText}>
-                      {latestDesktopActivity.productivityScore}% score
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.desktopStatsRow}>
-                  <View style={styles.desktopStatCard}>
-                    <Text style={styles.desktopStatValue}>{latestDesktopActivity.codingMinutes}m</Text>
-                    <Text style={styles.desktopStatLabel}>coding</Text>
-                  </View>
-                  <View style={styles.desktopStatCard}>
-                    <Text style={styles.desktopStatValue}>{latestDesktopActivity.productiveMinutes}m</Text>
-                    <Text style={styles.desktopStatLabel}>productive</Text>
-                  </View>
-                  <View style={styles.desktopStatCard}>
-                    <Text style={styles.desktopStatValue}>{latestDesktopActivity.idleMinutes}m</Text>
-                    <Text style={styles.desktopStatLabel}>idle</Text>
-                  </View>
-                </View>
-
-                <View style={styles.desktopStackTrack}>
-                  <View
-                    style={[
-                      styles.desktopStackSegment,
-                      styles.desktopProductiveSegment,
-                      {
-                        flex:
-                          latestDesktopActivity.productiveMinutes /
-                          latestDesktopTotalMinutes,
-                      },
-                    ]}
-                  />
-                  <View
-                    style={[
-                      styles.desktopStackSegment,
-                      styles.desktopIdleSegment,
-                      {
-                        flex:
-                          latestDesktopActivity.idleMinutes /
-                          latestDesktopTotalMinutes,
-                      },
-                    ]}
-                  />
-                </View>
-                <View style={styles.desktopLegendRow}>
-                  <Text style={styles.desktopLegendText}>productive</Text>
-                  <Text style={styles.desktopLegendText}>idle</Text>
-                </View>
-
-                <View style={styles.desktopHighlightsRow}>
-                  {latestDesktopApp ? (
-                    <View style={styles.desktopHighlightPill}>
-                      <Text style={styles.desktopHighlightText}>Top app: {latestDesktopApp}</Text>
-                    </View>
-                  ) : null}
-                </View>
-              </View>
-            ) : null}
-
-            {desktopAppBreakdown.length ? (
-              <View style={styles.desktopTrendCard}>
-                <View style={styles.panelHeader}>
-                  <Text style={styles.panelTitle}>Top apps</Text>
-                  <Text style={styles.panelCaption}>Latest sync</Text>
-                </View>
-                <View style={styles.desktopAppList}>
-                  {desktopAppBreakdown.map((item) => (
-                    <View key={item.appName} style={styles.desktopAppRow}>
-                      <View style={styles.desktopAppMeta}>
-                        <Text numberOfLines={1} style={styles.desktopAppName}>
-                          {item.appName}
-                        </Text>
-                        <Text style={styles.desktopAppMinutes}>
-                          {item.durationMinutes}m
-                        </Text>
-                      </View>
-                      <View style={styles.desktopAppTrack}>
-                        <View
-                          style={[
-                            styles.desktopAppBar,
-                            {
-                              width: `${Math.max(
-                                8,
-                                (item.durationMinutes / maxDesktopAppMinutes) * 100,
-                              )}%`,
-                            },
-                          ]}
-                        />
-                      </View>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            ) : null}
-
-            {desktopActivity.slice(0, 3).map((item) => (
-              <View key={item._id} style={styles.desktopCard}>
-                <View style={styles.desktopCardHeader}>
-                  <Text style={styles.desktopCardTitle}>{item.title}</Text>
-                  <Text style={styles.desktopCardDate}>{item.date}</Text>
-                </View>
-                <Text numberOfLines={2} style={styles.desktopSummary}>
-                  {item.summary}
-                </Text>
-                <View style={styles.desktopMetrics}>
-                  <View style={styles.desktopMetricPill}>
-                    <Text style={styles.desktopMetricText}>{item.codingMinutes}m coding</Text>
-                  </View>
-                  <View style={styles.desktopMetricPill}>
-                    <Text style={styles.desktopMetricText}>{item.productiveMinutes}m productive</Text>
-                  </View>
-                  <View style={styles.desktopMetricPill}>
-                    <Text style={styles.desktopMetricText}>{item.idleMinutes}m idle</Text>
-                  </View>
-                </View>
-              </View>
-            ))}
-          </View>
-        ) : null}
-
-        <View style={styles.panel}>
-          <View style={styles.panelHeader}>
-            <Text style={styles.panelTitle}>Weekly activity</Text>
-            <Text style={styles.panelCaption}>{weekRangeLabel}</Text>
-          </View>
-
-          <View style={styles.chartWrap}>
-            {weekdayCounts.map((count, index) => {
-              const height = weeklyActivityTotal
-                ? Math.max(18, Math.round((count / maxWeekCount) * 94))
-                : 18;
-
-              return (
-                <View key={`${weeklyActivityLabels[index].weekday}-${weeklyActivityLabels[index].day}`} style={styles.barColumn}>
-                  <View style={[styles.bar, { height }]} />
-                  <View style={styles.barLabelStack}>
-                    <Text style={styles.barLabel}>{weeklyActivityLabels[index].weekday}</Text>
-                    <Text style={styles.barDateLabel}>{weeklyActivityLabels[index].day}</Text>
-                  </View>
-                </View>
-              );
-            })}
-          </View>
         </View>
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>{activitySectionTitle}</Text>
-          {metricFilter ? (
-            <Pressable onPress={() => setMetricFilter(null)}>
-              <Text style={styles.sectionLink}>Clear filter</Text>
-            </Pressable>
-          ) : (
-            <Pressable onPress={() => router.push("/(tabs)/calendar")}>
-              <Text style={styles.sectionLink}>View calendar</Text>
-            </Pressable>
-          )}
+          <View>
+            <Text style={styles.sectionEyebrow}>Today</Text>
+            <Text style={styles.sectionTitle}>What needs attention</Text>
+          </View>
+          <Pressable onPress={() => router.push("/(tabs)/tasks")}>
+            <Text style={styles.sectionLink}>Tasks</Text>
+          </Pressable>
         </View>
 
-        {activityPreview.length ? (
-          <View style={styles.recentList}>
-            {activityPreview.map((item) => (
-              <MemoryCard key={`${item.type}-${item._id}`} memory={item} />
+        <View style={styles.focusList}>
+          {focusItems.length ? (
+            focusItems.map((item) => (
+              <View
+                key={`${item.type}-${item._id}`}
+                style={styles.focusRow}
+              >
+                {item.type === "task" || item.type === "memory" ? (
+                  <Pressable
+                    accessibilityLabel="Mark done"
+                    accessibilityRole="button"
+                    disabled={completingFocusItemId === item._id}
+                    style={[
+                      styles.focusCompleteButton,
+                      completingFocusItemId === item._id && styles.focusCompleteButtonBusy,
+                    ]}
+                    onPress={() => void completeFocusItem(item)}
+                  >
+                    {completingFocusItemId === item._id ? (
+                      <ActivityIndicator color={colors.primary} size="small" />
+                    ) : (
+                      <Ionicons color={colors.primary} name="checkmark" size={18} />
+                    )}
+                  </Pressable>
+                ) : (
+                  <View style={styles.focusIcon}>
+                    <Ionicons color={colors.reminderTag} name="time-outline" size={18} />
+                  </View>
+                )}
+                <Pressable
+                  accessibilityRole="button"
+                  style={styles.focusOpenTarget}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/activity/[type]/[id]",
+                      params: { id: item._id, type: item.type },
+                    })
+                  }
+                >
+                  <View style={styles.focusCopy}>
+                    <Text numberOfLines={1} style={styles.focusTitle}>
+                      {getItemTitle(item)}
+                    </Text>
+                    <Text numberOfLines={1} style={styles.focusMeta}>
+                      {getFocusMeta(item)}
+                    </Text>
+                  </View>
+                  <Ionicons color={colors.textSoft} name="chevron-forward" size={18} />
+                </Pressable>
+              </View>
+            ))
+          ) : (
+            <View style={styles.emptyFocus}>
+              <Text style={styles.emptyFocusTitle}>No urgent items</Text>
+              <Text style={styles.emptyFocusText}>Your next tasks and reminders will appear here.</Text>
+            </View>
+          )}
+
+          {screenshotInboxSummary.pending ? (
+            <Pressable style={styles.focusRow} onPress={() => router.push("/screenshots")}>
+              <View style={[styles.focusIcon, styles.screenshotIcon]}>
+                <Ionicons color={colors.secondary} name="images-outline" size={18} />
+              </View>
+              <View style={styles.focusCopy}>
+                <Text style={styles.focusTitle}>Screenshot inbox</Text>
+                <Text style={styles.focusMeta}>
+                  {screenshotInboxSummary.pending} waiting for review
+                </Text>
+              </View>
+              <Ionicons color={colors.textSoft} name="chevron-forward" size={18} />
+            </Pressable>
+          ) : null}
+        </View>
+
+        <View style={styles.sectionHeader}>
+          <View>
+            <Text style={styles.sectionEyebrow}>Continue</Text>
+            <Text style={styles.sectionTitle}>Recent memories</Text>
+          </View>
+          <Pressable onPress={() => router.push("/(tabs)/calendar")}>
+            <Text style={styles.sectionLink}>History</Text>
+          </Pressable>
+        </View>
+
+        {recentMemoryItems.length ? (
+          <View style={styles.recentRows}>
+            {recentMemoryItems.map((item) => (
+              <Pressable
+                key={`${item.type}-${item._id}`}
+                accessibilityRole="button"
+                style={styles.recentRow}
+                onPress={() =>
+                  router.push({
+                    pathname: "/activity/[type]/[id]",
+                    params: { id: item._id, type: item.type },
+                  })
+                }
+              >
+                <View style={styles.recentDot} />
+                <View style={styles.recentCopy}>
+                  <Text numberOfLines={1} style={styles.recentTitle}>
+                    {getItemTitle(item)}
+                  </Text>
+                  <Text numberOfLines={1} style={styles.recentMeta}>
+                    {getItemMeta(item)}
+                  </Text>
+                </View>
+              </Pressable>
             ))}
           </View>
         ) : (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>No activity yet</Text>
-            <Text style={styles.emptyText}>
-              Start with one quick capture and your dashboard will build itself.
-            </Text>
+          <View style={styles.emptyFocus}>
+            <Text style={styles.emptyFocusTitle}>No memories yet</Text>
+            <Text style={styles.emptyFocusText}>Start with one quick capture.</Text>
           </View>
         )}
 
-        <Pressable
-          style={styles.askPanel}
-          onPress={() => router.push("/search")}
-        >
-          <View style={styles.askTopRow}>
-            <View style={styles.askBadge}>
-              <Ionicons
-                color={colors.primary}
-                name="sparkles-outline"
-                size={14}
-              />
-              <Text style={styles.askBadgeText}>Ask Memory</Text>
-            </View>
-            <Ionicons color={colors.textSoft} name="arrow-forward" size={18} />
-          </View>
-
-          <Text style={styles.askQuestion}>{askQuestion}</Text>
-          <Text style={styles.askDescription}>
-            Search across memories, tasks, reminders, notes, and daily context
-            with natural language.
-          </Text>
-
-          <View style={styles.askPromptRow}>
-            <Text numberOfLines={1} style={styles.askPromptText}>
-              {askQuestion}
-            </Text>
-          </View>
-        </Pressable>
+        <View style={styles.shortcutGrid}>
+          <Pressable style={styles.shortcutTile} onPress={() => router.push("/(tabs)/tasks")}>
+            <Ionicons color={colors.primary} name="checkbox-outline" size={21} />
+            <Text style={styles.shortcutText}>Tasks</Text>
+          </Pressable>
+          <Pressable style={styles.shortcutTile} onPress={() => router.push("/(tabs)/expenses")}>
+            <Ionicons color={colors.success} name="wallet-outline" size={21} />
+            <Text style={styles.shortcutText}>Expenses</Text>
+          </Pressable>
+          <Pressable style={styles.shortcutTile} onPress={() => router.push("/(tabs)/vault")}>
+            <Ionicons color={colors.text} name="key-outline" size={21} />
+            <Text style={styles.shortcutText}>Vault</Text>
+          </Pressable>
+          <Pressable style={styles.shortcutTile} onPress={() => router.push("/(tabs)/more")}>
+            <Ionicons color={colors.accent} name="grid-outline" size={21} />
+            <Text style={styles.shortcutText}>More</Text>
+          </Pressable>
+        </View>
 
         <View style={styles.footerSpace} />
       </ScrollView>
@@ -1474,7 +1182,6 @@ const styles = StyleSheet.create({
   },
   composerInput: {
     color: colors.text,
-    flex: 1,
     fontSize: 17,
     fontWeight: "600",
     lineHeight: 24,
@@ -2031,6 +1738,292 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 15,
     fontWeight: "700",
+  },
+  assistantBody: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 15,
+    fontWeight: "600",
+    lineHeight: 22,
+    marginTop: 10,
+  },
+  assistantEyebrow: {
+    color: "rgba(255,255,255,0.68)",
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 0,
+    marginTop: 22,
+    textTransform: "uppercase",
+  },
+  assistantIcon: {
+    alignItems: "center",
+    backgroundColor: colors.primary,
+    borderRadius: 999,
+    height: 48,
+    justifyContent: "center",
+    width: 48,
+  },
+  assistantPanel: {
+    backgroundColor: colors.black,
+    borderRadius: 24,
+    marginBottom: 14,
+    padding: 20,
+  },
+  assistantTitle: {
+    color: colors.white,
+    fontSize: 32,
+    fontWeight: "900",
+    lineHeight: 38,
+    marginTop: 6,
+    maxWidth: 320,
+  },
+  assistantTopRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  askInputMock: {
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderColor: "rgba(255,255,255,0.12)",
+    borderRadius: 18,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 12,
+    justifyContent: "space-between",
+    marginTop: 18,
+    minHeight: 54,
+    paddingHorizontal: 15,
+  },
+  askInputText: {
+    color: colors.white,
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  emptyFocus: {
+    backgroundColor: colors.backgroundSoft,
+    borderRadius: 18,
+    padding: 16,
+  },
+  emptyFocusText: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 19,
+    marginTop: 4,
+  },
+  emptyFocusTitle: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  focusCopy: {
+    flex: 1,
+  },
+  focusCompleteButton: {
+    alignItems: "center",
+    backgroundColor: colors.successSurface,
+    borderColor: colors.borderStrong,
+    borderRadius: 999,
+    borderWidth: 1,
+    height: 40,
+    justifyContent: "center",
+    width: 40,
+  },
+  focusCompleteButtonBusy: {
+    opacity: 0.72,
+  },
+  focusIcon: {
+    alignItems: "center",
+    backgroundColor: colors.accentSurface,
+    borderRadius: 999,
+    height: 40,
+    justifyContent: "center",
+    width: 40,
+  },
+  focusList: {
+    gap: 10,
+    marginBottom: 22,
+  },
+  focusMeta: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: "700",
+    marginTop: 3,
+  },
+  focusOpenTarget: {
+    alignItems: "center",
+    flex: 1,
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 72,
+  },
+  focusRow: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 18,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 72,
+    paddingHorizontal: 14,
+  },
+  focusTitle: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  inlineError: {
+    color: colors.danger,
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  quickCaptureHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  quickCaptureActions: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+  },
+  quickCapturePanel: {
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: 20,
+    borderWidth: 1,
+    marginBottom: 12,
+    padding: 16,
+  },
+  quickCaptureTitle: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: "900",
+    marginTop: 3,
+  },
+  recentCopy: {
+    flex: 1,
+  },
+  recentDot: {
+    backgroundColor: colors.primary,
+    borderRadius: 999,
+    height: 8,
+    marginTop: 7,
+    width: 8,
+  },
+  recentMeta: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: "700",
+    marginTop: 3,
+    textTransform: "capitalize",
+  },
+  recentRow: {
+    alignItems: "flex-start",
+    borderBottomColor: colors.border,
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 62,
+    paddingVertical: 12,
+  },
+  recentRows: {
+    marginBottom: 22,
+  },
+  recentTitle: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  screenshotIcon: {
+    backgroundColor: "#EEF5FF",
+  },
+  sectionEyebrow: {
+    color: colors.textSoft,
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0,
+    textTransform: "uppercase",
+  },
+  shortcutGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginBottom: 22,
+  },
+  shortcutText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: "900",
+    marginTop: 8,
+  },
+  shortcutTile: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 18,
+    borderWidth: 1,
+    flexBasis: "47%",
+    flexGrow: 1,
+    minHeight: 82,
+    justifyContent: "center",
+  },
+  smallIconButton: {
+    alignItems: "center",
+    backgroundColor: colors.backgroundSoft,
+    borderRadius: 999,
+    height: 42,
+    justifyContent: "center",
+    width: 42,
+  },
+  snapshotDivider: {
+    backgroundColor: colors.border,
+    height: 42,
+    width: 1,
+  },
+  snapshotItem: {
+    alignItems: "center",
+    flex: 1,
+    minWidth: 0,
+  },
+  snapshotLabel: {
+    color: colors.textSoft,
+    fontSize: 11,
+    fontWeight: "900",
+    marginTop: 3,
+    textTransform: "uppercase",
+  },
+  snapshotValue: {
+    color: colors.text,
+    fontSize: 19,
+    fontWeight: "900",
+    lineHeight: 24,
+    maxWidth: "100%",
+  },
+  syncPill: {
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  syncPillText: {
+    color: "rgba(255,255,255,0.82)",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  todaySnapshot: {
+    alignItems: "center",
+    backgroundColor: colors.backgroundSoft,
+    borderRadius: 18,
+    flexDirection: "row",
+    marginBottom: 22,
+    minHeight: 78,
+    paddingHorizontal: 8,
   },
   footerSpace: {
     height: 16,

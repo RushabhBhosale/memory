@@ -5,11 +5,6 @@ apply plugin: "com.facebook.react"
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 def resolvedNodeBinary =
         (findProperty('NODE_BINARY') ?: System.getenv('NODE_BINARY') ?: 'node').toString()
-def googleMapsApiKey =
-        (findProperty('GOOGLE_MAPS_API_KEY')
-                ?: System.getenv('EXPO_PUBLIC_GOOGLE_MAPS_API_KEY')
-                ?: System.getenv('GOOGLE_MAPS_API_KEY')
-                ?: "").toString()
 def openRouterApiKey =
         (findProperty('OPENROUTER_API_KEY')
                 ?: System.getenv('EXPO_PUBLIC_OPENROUTER_API_KEY')
@@ -106,9 +101,6 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0.0"
-        manifestPlaceholders = [
-                GOOGLE_MAPS_API_KEY: googleMapsApiKey
-        ]
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
         buildConfigField "String", "OPENROUTER_API_KEY", "\"${openRouterApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\""
@@ -171,7 +163,6 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
-    implementation("com.google.android.gms:play-services-location:21.3.0")
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";

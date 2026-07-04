@@ -31,30 +31,35 @@ import {
 } from "../services/ai";
 import { createMemory, type CreateMemoryInput } from "../services/api";
 import { addManualExpense } from "../services/expenses";
-import {
-  createLocationReminder,
-  listPlaces,
-  readLocationSettings,
-  type LocationTriggerType,
-  type SavedPlace,
-} from "../services/locationIntelligence";
 import { scheduleMemoryReminder } from "../services/notifications";
+import {
+  addVoiceTranscriptListener,
+  cancelVoiceTranscription,
+  captureVoiceWithSystemPrompt,
+  hasVoicePermission,
+  hasVoiceTranscriptionSupport,
+  requestVoicePermission,
+  startVoiceTranscription,
+  stopVoiceTranscription,
+} from "../services/voiceTranscription";
 import { colors, subtleShadow } from "../styles/theme";
 import { markHomeCacheStale } from "../utils/homeCache";
 
-type CaptureMode = "quick" | "confirm" | "menu" | "expense" | "manual";
-type ManualCaptureType = "memory" | "task" | "reminder" | "location";
+type CaptureMode = "quick" | "confirm" | "menu" | "expense" | "manual" | "voice";
+type ManualCaptureType = "memory" | "task" | "reminder";
+type VoiceCapturePhase = "idle" | "checking" | "recording" | "transcribing" | "review" | "saving";
 
 export type SmartCaptureCenterHandle = {
   openMenu: () => void;
   openQuickCapture: () => void;
+  openVoiceCapture: () => void;
 };
 
 const placeholders = [
-  "Need batteries when I go to D-Mart",
+  "Need batteries tomorrow evening",
   "Spent ₹320 at Zomato",
   "Thomas changed the Lefu SDK key",
-  "Finished location reminders feature",
+  "Finished the API notes",
 ];
 
 const menuItems: Array<{
@@ -62,11 +67,11 @@ const menuItems: Array<{
   label: string;
   type?: ManualCaptureType;
 }> = [
+  { icon: "mic-outline", label: "Voice Note" },
   { icon: "document-text-outline", label: "Memory", type: "memory" },
   { icon: "checkmark-circle-outline", label: "Task", type: "task" },
   { icon: "notifications-outline", label: "Reminder", type: "reminder" },
   { icon: "wallet-outline", label: "Expense" },
-  { icon: "location-outline", label: "Location Log", type: "location" },
   {
     icon: "camera-outline",
     label: "Screenshot Memory",
@@ -84,14 +89,6 @@ const manualTypeConfig: Record<
     placeholder: string;
   }
 > = {
-  location: {
-    category: "location",
-    helper: "Place context",
-    icon: "location-outline",
-    kind: "note",
-    label: "Location Log",
-    placeholder: "Reached D-Mart / Left office / Parked near Gate 2",
-  },
   memory: {
     category: "personal",
     helper: "Personal note",
@@ -106,7 +103,7 @@ const manualTypeConfig: Record<
     icon: "notifications-outline",
     kind: "note",
     label: "Reminder",
-    placeholder: "Need batteries when I go to D-Mart",
+    placeholder: "Need batteries tomorrow at 7 PM",
   },
   task: {
     category: "task",
@@ -114,7 +111,7 @@ const manualTypeConfig: Record<
     icon: "checkmark-circle-outline",
     kind: "task",
     label: "Task",
-    placeholder: "Finish location reminders feature",
+    placeholder: "Finish API follow-up",
   },
 };
 
@@ -209,13 +206,12 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
   const [manualType, setManualType] = useState<ManualCaptureType>("memory");
   const [manualText, setManualText] = useState("");
   const [priority, setPriority] = useState(3);
-  const [places, setPlaces] = useState<SavedPlace[]>([]);
-  const [selectedPlaceId, setSelectedPlaceId] = useState("");
   const [reminderAt, setReminderAt] = useState(getDefaultReminderAt);
-  const [reminderKind, setReminderKind] = useState<"time" | "location">("time");
-  const [locationTriggerType, setLocationTriggerType] = useState<LocationTriggerType>("enter");
   const [activePicker, setActivePicker] = useState<"date" | "time" | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [voicePhase, setVoicePhase] = useState<VoiceCapturePhase>("idle");
+  const [voiceTranscript, setVoiceTranscript] = useState("");
   const [expenseDraft, setExpenseDraft] = useState({
     amount: "",
     category: "general",
@@ -224,6 +220,7 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
   const scale = useRef(new Animated.Value(0.96)).current;
   const translate = useRef(new Animated.Value(18)).current;
   const keyboardVisibleRef = useRef(false);
+  const voiceStartTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const placeholder = placeholders[new Date().getMinutes() % placeholders.length];
 
   useEffect(() => {
@@ -243,29 +240,19 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
   }, []);
 
   useEffect(() => {
-    if (!visible || (mode !== "menu" && mode !== "manual")) {
-      return;
-    }
-
-    let mounted = true;
-
-    const loadCaptureOptions = async () => {
-      const nextPlaces = await listPlaces().catch(() => []);
-
-      if (!mounted) {
-        return;
-      }
-
-      setPlaces(nextPlaces);
-      setSelectedPlaceId((current) => current || nextPlaces[0]?.id || "");
-    };
-
-    void loadCaptureOptions();
+    const subscription = addVoiceTranscriptListener((transcript) => {
+      setVoiceTranscript(transcript);
+    });
 
     return () => {
-      mounted = false;
+      subscription.remove();
+      if (voiceStartTimeoutRef.current) {
+        clearTimeout(voiceStartTimeoutRef.current);
+        voiceStartTimeoutRef.current = null;
+      }
+      void cancelVoiceTranscription();
     };
-  }, [mode, visible]);
+  }, []);
 
   const animateIn = () => {
     scale.setValue(0.96);
@@ -292,8 +279,127 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
     requestAnimationFrame(animateIn);
   };
 
+  const resetVoiceCapture = () => {
+    setVoiceError(null);
+    setVoicePhase("idle");
+    setVoiceTranscript("");
+  };
+
+  const beginVoiceCapture = async () => {
+    try {
+      setVoiceError(null);
+      setVoiceTranscript("");
+      setVoicePhase("checking");
+
+      const supported = await hasVoiceTranscriptionSupport();
+
+      if (!supported) {
+        setVoicePhase("idle");
+        setVoiceError("Voice capture is not available on this phone.");
+        return;
+      }
+
+      const hasPermission = await hasVoicePermission();
+      const granted = hasPermission || (await requestVoicePermission());
+
+      if (!granted) {
+        setVoicePhase("idle");
+        setVoiceError("Microphone permission is required for voice notes.");
+        return;
+      }
+
+      await startVoiceTranscription();
+      setVoicePhase("recording");
+    } catch (err) {
+      setVoicePhase("idle");
+      setVoiceError(err instanceof Error ? err.message : "Unable to start voice capture.");
+    }
+  };
+
+  const beginSystemVoiceCapture = async () => {
+    try {
+      setVoiceError(null);
+      setVoiceTranscript("");
+      setVoicePhase("checking");
+
+      const hasPermission = await hasVoicePermission();
+      const granted = hasPermission || (await requestVoicePermission());
+
+      if (!granted) {
+        setVoicePhase("idle");
+        setVoiceError("Microphone permission is required for voice notes.");
+        return;
+      }
+
+      setVoicePhase("recording");
+      const result = await captureVoiceWithSystemPrompt();
+      const transcript = result.transcript.trim();
+
+      if (!transcript) {
+        setVoicePhase("idle");
+        setVoiceError("I did not catch any speech. Try again.");
+        return;
+      }
+
+      setVoiceTranscript(transcript);
+      setVoicePhase("review");
+    } catch (err) {
+      setVoicePhase("idle");
+      const message = err instanceof Error ? err.message : "Unable to start voice capture.";
+      setVoiceError(
+        message === "Voice note was cancelled."
+          ? "Voice note was cancelled."
+          : message,
+      );
+    }
+  };
+
+  const stopVoiceCapture = async () => {
+    try {
+      setVoiceError(null);
+      setVoicePhase("transcribing");
+      const result = await stopVoiceTranscription();
+      const transcript = result.transcript.trim() || voiceTranscript.trim();
+
+      if (!transcript) {
+        setVoicePhase("idle");
+        setVoiceError("I did not catch any speech. Try again.");
+        return;
+      }
+
+      setVoiceTranscript(transcript);
+      setVoicePhase("review");
+    } catch (err) {
+      if (voiceTranscript.trim()) {
+        setVoicePhase("review");
+        return;
+      }
+
+      setVoicePhase("idle");
+      setVoiceError(err instanceof Error ? err.message : "Unable to transcribe voice note.");
+    }
+  };
+
+  const openVoiceCapture = () => {
+    resetVoiceCapture();
+    Vibration.vibrate(12);
+    open("voice");
+    if (voiceStartTimeoutRef.current) {
+      clearTimeout(voiceStartTimeoutRef.current);
+    }
+    voiceStartTimeoutRef.current = setTimeout(() => {
+      voiceStartTimeoutRef.current = null;
+      void beginVoiceCapture();
+    }, 180);
+  };
+
   const close = () => {
     Keyboard.dismiss();
+    if (voiceStartTimeoutRef.current) {
+      clearTimeout(voiceStartTimeoutRef.current);
+      voiceStartTimeoutRef.current = null;
+    }
+    void cancelVoiceTranscription();
     Animated.timing(scale, {
       duration: 120,
       toValue: 0.96,
@@ -304,6 +410,7 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
       setClassification(null);
       setSaving(false);
       setActivePicker(null);
+      resetVoiceCapture();
     });
   };
 
@@ -322,7 +429,38 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
       open("menu");
     },
     openQuickCapture: () => open("quick"),
+    openVoiceCapture,
   }));
+
+  const saveVoiceCapture = async () => {
+    const transcript = voiceTranscript.trim();
+
+    if (!transcript) {
+      setVoiceError("There is no transcript to save yet.");
+      return;
+    }
+
+    try {
+      setVoiceError(null);
+      setVoicePhase("saving");
+      await createMemory({
+        title: getDefaultTitle(transcript, "Voice Note"),
+        content: transcript,
+        category: "personal",
+        tags: ["voice"],
+        kind: "note",
+        type: "memory",
+        source: "voice",
+        capturedAt: new Date().toISOString(),
+      });
+      await markHomeCacheStale();
+      await cancelVoiceTranscription();
+      close();
+    } catch (err) {
+      setVoicePhase("review");
+      setVoiceError(err instanceof Error ? err.message : "Unable to save voice note.");
+    }
+  };
 
   const saveConfirmedCapture = async () => {
     if (!classification || !content.trim()) {
@@ -428,8 +566,6 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
     setManualText("");
     setPriority(3);
     setReminderAt(getDefaultReminderAt());
-    setReminderKind(nextType === "location" ? "location" : "time");
-    setLocationTriggerType("enter");
     setMode("manual");
     requestAnimationFrame(animateIn);
   };
@@ -477,32 +613,13 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
       return;
     }
 
-    const selectedPlace = places.find((place) => place.id === selectedPlaceId);
-    const usesPlaceContext =
-      manualType === "location" || (manualType === "reminder" && reminderKind === "location");
-    const usesLocationReminder = manualType === "reminder" && reminderKind === "location";
-
-    if (manualType === "reminder" && reminderKind === "time" && reminderAt.getTime() <= Date.now()) {
+    if (manualType === "reminder" && reminderAt.getTime() <= Date.now()) {
       Alert.alert("Check time", "Reminder time must be in the future.");
-      return;
-    }
-
-    if (usesPlaceContext && !selectedPlace) {
-      Alert.alert("Select place", "Add or select a saved place first.");
       return;
     }
 
     try {
       setSaving(true);
-
-      if (usesLocationReminder) {
-        const locationSettings = await readLocationSettings();
-
-        if (!locationSettings.locationReminders) {
-          Alert.alert("Location reminders off", "Enable location reminders from the Location screen first.");
-          return;
-        }
-      }
 
       const memory = await createMemory({
         title: getDefaultTitle(trimmed, config.label),
@@ -512,30 +629,13 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
         importance: manualType === "task" ? priority : 3,
         kind: config.kind,
         reminderAt:
-          manualType === "reminder" && reminderKind === "time" ? reminderAt.toISOString() : undefined,
+          manualType === "reminder" ? reminderAt.toISOString() : undefined,
         notificationEnabled: manualType === "reminder",
-        reminderType: manualType === "reminder" ? reminderKind : undefined,
-        triggerType: usesLocationReminder ? locationTriggerType : undefined,
-        placeId: usesPlaceContext ? selectedPlace?.id : undefined,
-        placeName: usesPlaceContext ? selectedPlace?.name : undefined,
-        latitude: usesPlaceContext ? selectedPlace?.latitude : undefined,
-        longitude: usesPlaceContext ? selectedPlace?.longitude : undefined,
-        radiusMeters: usesPlaceContext ? selectedPlace?.radiusMeters : undefined,
-        status: usesLocationReminder ? "pending" : undefined,
+        reminderType: manualType === "reminder" ? "time" : undefined,
       });
 
-      if (manualType === "reminder" && reminderKind === "time") {
+      if (manualType === "reminder") {
         await scheduleMemoryReminder(memory);
-      }
-
-      if (usesLocationReminder && selectedPlace) {
-        await createLocationReminder({
-          description: trimmed,
-          memoryId: memory._id,
-          place: selectedPlace,
-          title: memory.title,
-          triggerType: locationTriggerType,
-        });
       }
 
       await markHomeCacheStale();
@@ -623,6 +723,11 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
             key={item.label}
             style={styles.menuItem}
             onPress={() => {
+              if (item.label === "Voice Note") {
+                openVoiceCapture();
+                return;
+              }
+
               if (item.label === "Expense") {
                 setExpenseDraft({ amount: "", category: "general", merchant: "" });
                 setMode("expense");
@@ -681,56 +786,6 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
     );
   };
 
-  const renderPlacePicker = () => {
-    if (manualType !== "location" && !(manualType === "reminder" && reminderKind === "location")) {
-      return null;
-    }
-
-    return (
-      <>
-        <Text style={styles.label}>Trigger</Text>
-        <View style={styles.segmentRow}>
-          {(["enter", "exit"] as const).map((trigger) => {
-            const selected = locationTriggerType === trigger;
-
-            return (
-              <Pressable
-                key={trigger}
-                style={[styles.segmentButton, selected && styles.segmentButtonSelected]}
-                onPress={() => setLocationTriggerType(trigger)}
-              >
-                <Text style={[styles.segmentButtonText, selected && styles.segmentButtonTextSelected]}>
-                  {trigger === "enter" ? "Arrive" : "Leave"}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <Text style={styles.label}>Place</Text>
-        {places.length ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-            {places.map((place) => {
-              const selected = selectedPlaceId === place.id;
-
-              return (
-                <Pressable
-                  key={place.id}
-                  style={[styles.chip, selected && styles.selectedChip]}
-                  onPress={() => setSelectedPlaceId(place.id)}
-                >
-                  <Text style={[styles.chipText, selected && styles.selectedChipText]}>{place.name}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        ) : (
-          <Text style={styles.helpText}>No saved places yet. Add Home, Office, or Mall from Location first.</Text>
-        )}
-      </>
-    );
-  };
-
   const renderReminderFields = () => {
     if (manualType !== "reminder") {
       return null;
@@ -738,76 +793,52 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
 
     return (
       <>
-        <View style={styles.segmentRow}>
-          {(["time", "location"] as const).map((kind) => {
-            const selected = reminderKind === kind;
-
-            return (
-              <Pressable
-                key={kind}
-                style={[styles.segmentButton, selected && styles.segmentButtonSelected]}
-                onPress={() => setReminderKind(kind)}
-              >
-                <Text style={[styles.segmentButtonText, selected && styles.segmentButtonTextSelected]}>
-                  {kind === "time" ? "Time" : "Location"}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        {reminderKind === "time" ? (
-          <>
-            <Text style={styles.label}>Date</Text>
-            {Platform.OS === "ios" ? (
-              <View style={styles.pickerInline}>
-                <DateTimePicker
-                  accentColor={colors.primary}
-                  display="compact"
-                  minimumDate={new Date()}
-                  mode="date"
-                  onChange={(_event, date) => setReminderDatePart(date)}
-                  themeVariant="light"
-                  value={reminderAt}
-                />
-              </View>
-            ) : (
-              <Pressable style={styles.pickerButton} onPress={() => setActivePicker("date")}>
-                <Text style={styles.pickerButtonText}>{reminderDateFormatter.format(reminderAt)}</Text>
-              </Pressable>
-            )}
-
-            <Text style={styles.label}>Time</Text>
-            {Platform.OS === "ios" ? (
-              <View style={styles.pickerInline}>
-                <DateTimePicker
-                  accentColor={colors.primary}
-                  display="compact"
-                  mode="time"
-                  onChange={(_event, date) => setReminderTimePart(date)}
-                  themeVariant="light"
-                  value={reminderAt}
-                />
-              </View>
-            ) : (
-              <Pressable style={styles.pickerButton} onPress={() => setActivePicker("time")}>
-                <Text style={styles.pickerButtonText}>{reminderTimeFormatter.format(reminderAt)}</Text>
-              </Pressable>
-            )}
-
-            {Platform.OS !== "ios" && activePicker ? (
-              <DateTimePicker
-                display={activePicker === "date" ? "calendar" : "clock"}
-                minimumDate={activePicker === "date" ? new Date() : undefined}
-                mode={activePicker}
-                onChange={handleAndroidPickerChange}
-                value={reminderAt}
-              />
-            ) : null}
-          </>
+        <Text style={styles.label}>Date</Text>
+        {Platform.OS === "ios" ? (
+          <View style={styles.pickerInline}>
+            <DateTimePicker
+              accentColor={colors.primary}
+              display="compact"
+              minimumDate={new Date()}
+              mode="date"
+              onChange={(_event, date) => setReminderDatePart(date)}
+              themeVariant="light"
+              value={reminderAt}
+            />
+          </View>
         ) : (
-          renderPlacePicker()
+          <Pressable style={styles.pickerButton} onPress={() => setActivePicker("date")}>
+            <Text style={styles.pickerButtonText}>{reminderDateFormatter.format(reminderAt)}</Text>
+          </Pressable>
         )}
+
+        <Text style={styles.label}>Time</Text>
+        {Platform.OS === "ios" ? (
+          <View style={styles.pickerInline}>
+            <DateTimePicker
+              accentColor={colors.primary}
+              display="compact"
+              mode="time"
+              onChange={(_event, date) => setReminderTimePart(date)}
+              themeVariant="light"
+              value={reminderAt}
+            />
+          </View>
+        ) : (
+          <Pressable style={styles.pickerButton} onPress={() => setActivePicker("time")}>
+            <Text style={styles.pickerButtonText}>{reminderTimeFormatter.format(reminderAt)}</Text>
+          </Pressable>
+        )}
+
+        {Platform.OS !== "ios" && activePicker ? (
+          <DateTimePicker
+            display={activePicker === "date" ? "calendar" : "clock"}
+            minimumDate={activePicker === "date" ? new Date() : undefined}
+            mode={activePicker}
+            onChange={handleAndroidPickerChange}
+            value={reminderAt}
+          />
+        ) : null}
       </>
     );
   };
@@ -836,7 +867,6 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
           value={manualText}
         />
         {renderReminderFields()}
-        {manualType === "location" ? renderPlacePicker() : null}
         {renderPriorityPicker()}
         <View style={styles.actionRow}>
           <Pressable style={styles.secondaryButton} onPress={() => setMode("menu")}>
@@ -895,6 +925,112 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
     </>
   );
 
+  const renderVoiceCapture = () => {
+    const isBusy =
+      voicePhase === "checking" ||
+      voicePhase === "transcribing" ||
+      voicePhase === "saving";
+    const isRecording = voicePhase === "recording";
+    const hasTranscript = voiceTranscript.trim().length > 0;
+    const canSave =
+      hasTranscript && (voicePhase === "review" || voicePhase === "saving");
+
+    return (
+      <>
+        <View style={styles.voiceHeader}>
+          <View style={[styles.voiceOrb, isRecording && styles.voiceOrbRecording]}>
+            {isBusy ? (
+              <ActivityIndicator color={colors.white} />
+            ) : (
+              <Ionicons
+                color={colors.white}
+                name={isRecording ? "radio" : "mic"}
+                size={26}
+              />
+            )}
+          </View>
+          <View style={styles.manualHeaderText}>
+            <Text style={styles.eyebrow}>Voice note</Text>
+            <Text style={styles.title}>
+              {isRecording ? "I'm listening." : canSave ? "Save this memory?" : "Speak naturally."}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.voiceBubble}>
+          <TextInput
+            editable={voicePhase === "review"}
+            multiline
+            onChangeText={setVoiceTranscript}
+            placeholder={
+              isRecording
+                ? "Your words will appear here..."
+                : "Tap Start and say what Memory should keep."
+            }
+            placeholderTextColor={colors.textSoft}
+            style={styles.voiceTranscript}
+            textAlignVertical="top"
+            value={voiceTranscript}
+          />
+        </View>
+
+        {voiceError ? <Text style={styles.voiceError}>{voiceError}</Text> : null}
+
+        <View style={styles.actionRow}>
+          <Pressable style={styles.secondaryButton} onPress={close}>
+            <Text style={styles.secondaryText}>Discard</Text>
+          </Pressable>
+
+          {isRecording ? (
+            <Pressable style={styles.primaryButton} onPress={() => void stopVoiceCapture()}>
+              <Ionicons color={colors.white} name="stop" size={18} />
+              <Text style={styles.primaryText}>Stop</Text>
+            </Pressable>
+          ) : canSave ? (
+            <Pressable
+              disabled={voicePhase === "saving"}
+              style={[styles.primaryButton, voicePhase === "saving" && styles.disabledButton]}
+              onPress={() => void saveVoiceCapture()}
+            >
+              {voicePhase === "saving" ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <Text style={styles.primaryText}>Save</Text>
+              )}
+            </Pressable>
+          ) : (
+            <Pressable
+              disabled={isBusy}
+              style={[styles.primaryButton, isBusy && styles.disabledButton]}
+              onPress={() => void beginVoiceCapture()}
+            >
+              {isBusy ? (
+                <ActivityIndicator color={colors.white} />
+              ) : (
+                <>
+                  <Ionicons color={colors.white} name="mic" size={18} />
+                  <Text style={styles.primaryText}>Start</Text>
+                </>
+              )}
+            </Pressable>
+          )}
+        </View>
+
+        {voiceError ? (
+          <Pressable
+            accessibilityRole="button"
+            disabled={isBusy}
+            onPress={() => void beginSystemVoiceCapture()}
+            style={[styles.voiceFallbackButton, isBusy && styles.disabledButton]}
+          >
+            <Ionicons color={colors.primary} name="logo-google" size={16} />
+            <Text style={styles.voiceFallbackText}>Use system voice</Text>
+          </Pressable>
+        ) : null}
+      </>
+    );
+  };
+
   return (
     <Modal animationType="fade" transparent visible={visible} onRequestClose={dismissKeyboardOrClose}>
       <View style={[styles.backdrop, keyboardHeight > 0 && { paddingBottom: keyboardHeight + 12 }]}>
@@ -917,6 +1053,7 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
             {mode === "menu" ? renderMenu() : null}
             {mode === "expense" ? renderExpense() : null}
             {mode === "manual" ? renderManualCapture() : null}
+            {mode === "voice" ? renderVoiceCapture() : null}
           </ScrollView>
         </Animated.View>
       </View>
@@ -1046,6 +1183,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.black,
     borderRadius: 999,
     flex: 1,
+    flexDirection: "row",
+    gap: 8,
     justifyContent: "center",
     minHeight: 48,
     paddingHorizontal: 16,
@@ -1162,5 +1301,62 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: "900",
     marginBottom: 14,
+  },
+  voiceBubble: {
+    backgroundColor: colors.backgroundSoft,
+    borderBottomLeftRadius: 22,
+    borderBottomRightRadius: 22,
+    borderColor: colors.border,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 6,
+    borderWidth: 1,
+    marginTop: 14,
+    minHeight: 154,
+    padding: 14,
+  },
+  voiceError: {
+    color: colors.danger,
+    fontSize: 13,
+    fontWeight: "800",
+    lineHeight: 18,
+    marginTop: 10,
+  },
+  voiceFallbackButton: {
+    alignItems: "center",
+    alignSelf: "center",
+    flexDirection: "row",
+    gap: 7,
+    marginTop: 12,
+    minHeight: 40,
+    paddingHorizontal: 12,
+  },
+  voiceFallbackText: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  voiceHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+  },
+  voiceOrb: {
+    alignItems: "center",
+    backgroundColor: colors.primary,
+    borderRadius: 999,
+    height: 58,
+    justifyContent: "center",
+    width: 58,
+  },
+  voiceOrbRecording: {
+    backgroundColor: colors.danger,
+  },
+  voiceTranscript: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "800",
+    lineHeight: 25,
+    minHeight: 126,
+    padding: 0,
   },
 });

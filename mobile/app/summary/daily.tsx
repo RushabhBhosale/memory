@@ -18,7 +18,7 @@ export default function DailySummaryScreen() {
           <Text style={styles.title}>Daily dashboard</Text>
           <Text style={styles.copy}>
             Your high-level daily summary is now shown on Home. A deeper daily
-            recap view can build from the same memory, expense, and location data.
+            recap view can build from the same memory, task, and expense data.
           </Text>
         </View>
       </ScrollView>

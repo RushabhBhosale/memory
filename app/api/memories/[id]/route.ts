@@ -27,12 +27,6 @@ const allowedUpdateFields = [
   'reminderAt',
   'notificationEnabled',
   'reminderType',
-  'triggerType',
-  'placeId',
-  'placeName',
-  'latitude',
-  'longitude',
-  'radiusMeters',
   'status',
   'triggeredAt',
   'importance'

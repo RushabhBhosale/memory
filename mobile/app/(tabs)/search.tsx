@@ -32,7 +32,7 @@ const SUGGESTED_PROMPTS = [
   'Anything on ActiveX?',
   'What are my pending tasks?',
   'What did I spend this month?',
-  'Where did I go today?'
+  'What should I follow up on?'
 ] as const;
 
 type ChatMessage = {
@@ -115,9 +115,6 @@ const ANSWER_STOP_WORDS = new Set([
   'work'
 ]);
 const FOLLOW_UP_STOP_WORDS = new Set(['about', 'did', 'go', 'today', 'what', 'where', 'work']);
-const LOCATION_QUERY_PATTERN = /\b(where|go|went|visit|visited|location|place|places)\b/i;
-const LOCATION_SIGNAL_PATTERN =
-  /\b(at|to|near|visited|went|mall|restaurant|cafe|office|home|hotel|airport|station|pizza|donuts|lunch|dinner|outing)\b/i;
 
 const getAnswerKeywords = (question: string) =>
   question
@@ -162,22 +159,12 @@ const buildReadableAnswer = (question: string, response: AskMemoryResponse) => {
   }
 
   const keywords = getAnswerKeywords(question);
-  const isLocationQuestion = LOCATION_QUERY_PATTERN.test(question);
   const sourceLines = Array.from(
     new Set(response.sources.slice(0, 4).map((source) => getMatchedSourceLine(source, keywords)).filter(Boolean))
   );
-  const matchedLines = (isLocationQuestion
-    ? sourceLines.filter((line) => LOCATION_SIGNAL_PATTERN.test(line))
-    : sourceLines
-  ).slice(0, 3);
+  const matchedLines = sourceLines.slice(0, 3);
 
   if (!matchedLines.length) {
-    if (isLocationQuestion) {
-      return `I found ${response.count} saved item${
-        response.count === 1 ? '' : 's'
-      } for that date, but I couldn't find any saved place or visit details.`;
-    }
-
     return response.answer;
   }
 

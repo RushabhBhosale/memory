@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -8,9 +8,12 @@ import {
   SmartCaptureCenter,
   type SmartCaptureCenterHandle,
 } from "../../components/SmartCaptureCenter";
+import { SmartCaptureCenterContext } from "../../components/SmartCaptureCenterContext";
+import { hasVoiceTranscriptionSupport } from "../../services/voiceTranscription";
 import { colors } from "../../styles/theme";
 
 type IconName = keyof typeof Ionicons.glyphMap;
+const VOICE_CAPTURE_CHECK_TIMEOUT_MS = 1000;
 
 type TabRoute = {
   key: string;
@@ -41,7 +44,6 @@ type FloatingTabBarProps = {
     routes: TabRoute[];
   };
   onCaptureLongPress: () => void;
-  onCapturePress: () => void;
 };
 
 const tabConfig: Record<
@@ -59,19 +61,19 @@ const tabConfig: Record<
     label: "Home",
   },
   create: {
-    active: "add",
-    inactive: "add",
+    active: "aperture",
+    inactive: "aperture-outline",
     label: "",
   },
-  search: {
-    active: "search",
-    inactive: "search-outline",
-    label: "Search",
+  more: {
+    active: "grid",
+    inactive: "grid-outline",
+    label: "More",
   },
-  vault: {
-    active: "key",
-    inactive: "key-outline",
-    label: "Vault",
+  search: {
+    active: "sparkles",
+    inactive: "sparkles-outline",
+    label: "Ask",
   },
 };
 
@@ -80,7 +82,6 @@ function FloatingTabBar({
   descriptors,
   navigation,
   onCaptureLongPress,
-  onCapturePress,
 }: FloatingTabBarProps) {
   const insets = useSafeAreaInsets();
   const focusedRouteName = state.routes[state.index]?.name;
@@ -111,11 +112,6 @@ function FloatingTabBar({
           const config = tabConfig[route.name] ?? tabConfig.index;
 
           const onPress = () => {
-            if (isAdd) {
-              onCapturePress();
-              return;
-            }
-
             const event = navigation.emit({
               type: "tabPress",
               target: route.key,
@@ -180,9 +176,50 @@ function FloatingTabBar({
 
 export default function TabsLayout() {
   const captureRef = useRef<SmartCaptureCenterHandle>(null);
+  const checkingVoiceRef = useRef(false);
+
+  const openCaptureLongPress = () => {
+    if (checkingVoiceRef.current) {
+      return;
+    }
+
+    checkingVoiceRef.current = true;
+
+    void Promise.race([
+      hasVoiceTranscriptionSupport().then((supported) =>
+        supported ? "voice" : "menu",
+      ),
+      new Promise<"menu">((resolve) => {
+        setTimeout(resolve, VOICE_CAPTURE_CHECK_TIMEOUT_MS, "menu");
+      }),
+    ])
+      .then((target) => {
+        if (target === "voice") {
+          captureRef.current?.openVoiceCapture();
+          return;
+        }
+
+        captureRef.current?.openMenu();
+      })
+      .catch(() => {
+        captureRef.current?.openMenu();
+      })
+      .finally(() => {
+        checkingVoiceRef.current = false;
+      });
+  };
+
+  const captureActions = useMemo(
+    () => ({
+      openMenu: () => captureRef.current?.openMenu(),
+      openQuickCapture: () => captureRef.current?.openQuickCapture(),
+      openVoiceCapture: () => captureRef.current?.openVoiceCapture(),
+    }),
+    [],
+  );
 
   return (
-    <>
+    <SmartCaptureCenterContext.Provider value={captureActions}>
       <Tabs
         initialRouteName="index"
         screenOptions={{
@@ -192,21 +229,21 @@ export default function TabsLayout() {
         tabBar={(props) => (
           <FloatingTabBar
             {...props}
-            onCaptureLongPress={() => captureRef.current?.openMenu()}
-            onCapturePress={() => captureRef.current?.openQuickCapture()}
+            onCaptureLongPress={openCaptureLongPress}
           />
         )}
       >
         <Tabs.Screen name="index" options={{ title: "Home" }} />
-        <Tabs.Screen name="search" options={{ title: "Search" }} />
+        <Tabs.Screen name="search" options={{ title: "Ask" }} />
         <Tabs.Screen name="create" options={{ title: "Capture" }} />
-        <Tabs.Screen name="expenses" options={{ title: "Expenses" }} />
+        <Tabs.Screen name="tasks" options={{ title: "Tasks" }} />
         <Tabs.Screen name="calendar" options={{ title: "History" }} />
+        <Tabs.Screen name="more" options={{ title: "More" }} />
+        <Tabs.Screen name="expenses" options={{ title: "Spend" }} />
         <Tabs.Screen name="vault" options={{ title: "Vault" }} />
-        <Tabs.Screen name="location" options={{ href: null }} />
       </Tabs>
       <SmartCaptureCenter ref={captureRef} />
-    </>
+    </SmartCaptureCenterContext.Provider>
   );
 }
 
@@ -216,8 +253,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     borderColor: colors.white,
     borderRadius: 999,
-    borderWidth: 4,
-    height: 58,
+    borderWidth: 3,
+    height: 54,
     justifyContent: "center",
     shadowColor: "#000000",
     shadowOffset: {
@@ -226,7 +263,7 @@ const styles = StyleSheet.create({
     },
     shadowOpacity: 0.24,
     shadowRadius: 12,
-    width: 58,
+    width: 54,
     elevation: 9,
   },
   addItem: {
@@ -264,7 +301,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     height: 72,
     justifyContent: "space-around",
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     width: "100%",
   },
   tabBarShell: {
@@ -284,9 +321,10 @@ const styles = StyleSheet.create({
   },
   tabItem: {
     alignItems: "center",
+    flex: 1,
     height: 64,
     justifyContent: "center",
-    width: 58,
+    minWidth: 0,
   },
   tabLabel: {
     color: colors.textSoft,

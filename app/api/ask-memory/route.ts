@@ -67,9 +67,6 @@ const ANSWER_STOP_WORDS = new Set([
   'where',
   'with'
 ]);
-const LOCATION_QUERY_PATTERN = /\b(where|go|went|visit|visited|location|place|places)\b/i;
-const LOCATION_SIGNAL_PATTERN =
-  /\b(at|to|near|visited|went|mall|restaurant|cafe|office|home|hotel|airport|station|pizza|donuts|lunch|dinner|outing)\b/i;
 const MONEY_QUERY_PATTERN = /\b(spend|spent|expense|expenses|paid|payment|money|cost|costs|amount|total)\b/i;
 
 type SearchPlanType =
@@ -708,26 +705,18 @@ const buildGroundedFallbackAnswer = (query: string, items: ActivityItem[]): Answ
   const availableIds = items.map((item) => item._id).filter(Boolean);
   const availableTitles = items.map((item) => item.title).filter(Boolean);
   const keywords = getAnswerKeywords(query);
-  const isLocationQuestion = LOCATION_QUERY_PATTERN.test(query);
   const rawSnippets = uniq(
     items
       .slice(0, 4)
       .map((item) => getBestAnswerSnippet(item, keywords))
       .filter(Boolean)
   );
-  const snippets = (isLocationQuestion
-    ? rawSnippets.filter((snippet) => LOCATION_SIGNAL_PATTERN.test(snippet))
-    : rawSnippets
-  ).slice(0, 3);
+  const snippets = rawSnippets.slice(0, 3);
   const answer =
     snippets.length > 0
       ? `I found ${items.length} saved item${items.length === 1 ? '' : 's'} related to your question. ${snippets.join(
           ' '
         )}`
-      : isLocationQuestion
-        ? `I found ${items.length} saved item${
-            items.length === 1 ? '' : 's'
-          } for that date, but I couldn't find any saved place or visit details.`
       : `I found ${items.length} saved item${items.length === 1 ? '' : 's'} related to that.`;
 
   return {
@@ -821,7 +810,6 @@ Rules:
 - use only the provided records
 - never invent facts
 - if the records are not enough, say "I couldn't find anything saved about that."
-- if the question asks where the user went and the records do not mention places or visits, say that no saved place details were found
 - answer should be concise, natural, and human; do not dump raw logs
 - if a record is long, summarize the relevant part in your own words instead of copying or truncating it
 - for "what did I do" style questions, write it like "This is what you did..."

@@ -166,6 +166,8 @@ const buildActivityUpdates = (type: ActivityType, body: Record<string, unknown>)
   if (type === 'memory') {
     const kind = pickString(body.kind);
     const reminderAt = pickString(body.reminderAt);
+    const status = pickString(body.status);
+    const triggeredAt = pickString(body.triggeredAt);
 
     if (kind) {
       updates.kind = kind;
@@ -173,6 +175,14 @@ const buildActivityUpdates = (type: ActivityType, body: Record<string, unknown>)
 
     if (reminderAt) {
       updates.reminderAt = reminderAt;
+    }
+
+    if (status) {
+      updates.status = status;
+    }
+
+    if (triggeredAt) {
+      updates.triggeredAt = triggeredAt;
     }
 
     if (typeof body.notificationEnabled === 'boolean') {

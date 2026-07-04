@@ -104,7 +104,9 @@ export const toMemoryActivity = (memory: RawRecord) => ({
   notificationEnabled: Boolean(memory.notificationEnabled),
   reminderAt: toIsoString(memory.reminderAt),
   screenshotUri: toStringValue(memory.screenshotUri),
+  status: toStringValue(memory.status),
   title: toStringValue(memory.title, 'Untitled memory'),
+  triggeredAt: toIsoString(memory.triggeredAt),
   type: 'memory' as const
 });
 

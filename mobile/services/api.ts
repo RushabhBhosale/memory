@@ -36,13 +36,7 @@ export type Memory = {
   kind: MemoryKind;
   reminderAt?: string;
   notificationEnabled?: boolean;
-  reminderType?: 'time' | 'location';
-  triggerType?: 'enter' | 'exit';
-  placeId?: string;
-  placeName?: string;
-  latitude?: number;
-  longitude?: number;
-  radiusMeters?: number;
+  reminderType?: 'time';
   status?: 'pending' | 'triggered' | 'completed';
   triggeredAt?: string;
   importance?: number;
@@ -126,13 +120,7 @@ export type CreateMemoryInput = {
   kind?: MemoryKind;
   reminderAt?: string;
   notificationEnabled?: boolean;
-  reminderType?: 'time' | 'location';
-  triggerType?: 'enter' | 'exit';
-  placeId?: string;
-  placeName?: string;
-  latitude?: number;
-  longitude?: number;
-  radiusMeters?: number;
+  reminderType?: 'time';
   status?: 'pending' | 'triggered' | 'completed';
   triggeredAt?: string;
   importance?: number;
@@ -284,8 +272,6 @@ export const getApiConfig = () => {
     dailySummaryUrl: `${apiRoot}/api/memories/daily-summary`,
     desktopActivityUrl: `${apiRoot}/api/desktop-activity`,
     expensesUrl: `${apiRoot}/api/expenses`,
-    locationPlacesUrl: `${apiRoot}/api/location/places`,
-    locationTimelineUrl: `${apiRoot}/api/location/timeline`,
     memoriesUrl: `${apiRoot}/api/memories`,
     screenshotsUrl: `${apiRoot}/api/screenshots`
   };
@@ -477,6 +463,24 @@ export const getActivityItem = async (type: ActivityType, id: string) => {
   const response = await request<SingleActivityResponse>(
     activityUrl,
     `/${encodeURIComponent(type)}/${encodeURIComponent(id)}`
+  );
+
+  return response.data;
+};
+
+export const updateActivityItem = async (
+  type: Exclude<ActivityType, 'expense'>,
+  id: string,
+  input: Partial<CreateMemoryInput>
+) => {
+  const { activityUrl } = getApiConfig();
+  const response = await request<SingleActivityResponse>(
+    activityUrl,
+    `/${encodeURIComponent(type)}/${encodeURIComponent(id)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(input)
+    }
   );
 
   return response.data;

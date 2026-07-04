@@ -11,7 +11,7 @@ class AppUsagePackage : ReactPackage {
       AppUsageModule(reactContext),
       ExpenseSmsModule(reactContext),
       ScreenshotWatcherModule(reactContext),
-      MemoryLocationModule(reactContext)
+      VoiceNoteModule(reactContext)
     )
 
   @Deprecated("Required by the ReactPackage interface")

@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -30,6 +30,7 @@ type CalendarCell = {
 const filters = ["All", "Daily Summaries", "Notes", "Tasks", "Expenses", "Meetings", "Credentials"];
 const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const calendarColumnGap = 4;
+const HISTORY_MONTH_LIMIT = 250;
 
 const monthFormatter = new Intl.DateTimeFormat("en-US", {
   month: "long",
@@ -65,6 +66,17 @@ const getDateKey = (date: Date) =>
 
 const getMonthKey = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+
+const getMonthRange = (date: Date) => {
+  const from = new Date(date.getFullYear(), date.getMonth(), 1);
+  const to = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+  to.setHours(23, 59, 59, 999);
+
+  return {
+    from: from.toISOString(),
+    to: to.toISOString(),
+  };
+};
 
 const parseDateKey = (key: string) => {
   const [year, month, day] = key.split("-").map(Number);
@@ -241,6 +253,9 @@ const getInsight = (
 
 export default function CalendarScreen() {
   const { width: screenWidth } = useWindowDimensions();
+  const activityCacheRef = useRef<Record<string, ActivityItem[]>>({});
+  const requestIdRef = useRef(0);
+  const visibleMonthRef = useRef(new Date());
 
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [selectedDay, setSelectedDay] = useState(() => getDateKey(new Date()));
@@ -328,32 +343,52 @@ export default function CalendarScreen() {
   );
 
   const loadActivity = useCallback(
-    async (options?: { refreshing?: boolean }) => {
+    async (options?: { force?: boolean; month?: Date; refreshing?: boolean }) => {
+      const targetMonth = options?.month || visibleMonthRef.current;
+      const targetMonthKey = getMonthKey(targetMonth);
+      const cachedActivity = activityCacheRef.current[targetMonthKey];
+
+      if (cachedActivity && !options?.force && !options?.refreshing) {
+        setActivity(cachedActivity);
+        setLoading(false);
+        return;
+      }
+
+      const requestId = requestIdRef.current + 1;
+      requestIdRef.current = requestId;
+      const isLatestRequest = () => requestId === requestIdRef.current;
+
       try {
         if (options?.refreshing) {
           setRefreshing(true);
         } else {
-          setLoading(true);
+          setLoading(!cachedActivity);
         }
 
         setError("");
-        const nextActivity = await listActivity({ limit: 500 });
-        setActivity(nextActivity);
+        const range = getMonthRange(targetMonth);
+        const nextActivity = await listActivity({
+          ...range,
+          limit: HISTORY_MONTH_LIMIT,
+        });
+        activityCacheRef.current[targetMonthKey] = nextActivity;
 
-        const latest = nextActivity[0];
-
-        if (latest?.createdAt) {
-          const latestDate = new Date(latest.timestamp || latest.createdAt);
-          setSelectedDay(getDateKey(latestDate));
-          setVisibleMonth(
-            new Date(latestDate.getFullYear(), latestDate.getMonth(), 1),
-          );
+        if (!isLatestRequest()) {
+          return;
         }
+
+        setActivity(nextActivity);
       } catch (err) {
+        if (!isLatestRequest()) {
+          return;
+        }
+
         setError(err instanceof Error ? err.message : "Unable to load history");
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (isLatestRequest()) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     [],
@@ -361,28 +396,27 @@ export default function CalendarScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      loadActivity();
+      void loadActivity({ force: true });
     }, [loadActivity]),
   );
 
   const changeMonth = (offset: number) => {
-    setVisibleMonth((current) => {
-      const next = new Date(
-        current.getFullYear(),
-        current.getMonth() + offset,
-        1,
-      );
-      const nextMonthKey = getMonthKey(next);
-      const nextSelectedDay =
-        nextMonthKey === getMonthKey(new Date())
-          ? todayKey
-          : getDateKey(new Date(next));
+    const next = new Date(
+      visibleMonth.getFullYear(),
+      visibleMonth.getMonth() + offset,
+      1,
+    );
+    const nextMonthKey = getMonthKey(next);
+    const nextSelectedDay =
+      nextMonthKey === getMonthKey(new Date())
+        ? todayKey
+        : getDateKey(new Date(next));
 
-      setSelectedDay(nextSelectedDay);
-      setShowAllPrevious(false);
-
-      return next;
-    });
+    visibleMonthRef.current = next;
+    setVisibleMonth(next);
+    setSelectedDay(nextSelectedDay);
+    setShowAllPrevious(false);
+    void loadActivity({ month: next });
   };
 
   const selectCalendarDay = (cell: CalendarCell) => {
@@ -390,9 +424,10 @@ export default function CalendarScreen() {
     setShowAllPrevious(false);
 
     if (!cell.inMonth) {
-      setVisibleMonth(
-        new Date(cell.date.getFullYear(), cell.date.getMonth(), 1),
-      );
+      const next = new Date(cell.date.getFullYear(), cell.date.getMonth(), 1);
+      visibleMonthRef.current = next;
+      setVisibleMonth(next);
+      void loadActivity({ month: next });
     }
   };
 
