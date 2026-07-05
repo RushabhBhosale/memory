@@ -11,7 +11,7 @@ const { app } = electron;
 export class ActivityRepository {
   private db: Database.Database;
 
-  constructor(dbPath = path.join(app.getPath("userData"), "memoryos-companion.sqlite")) {
+  constructor(dbPath = path.join(app.getPath("userData"), "memonest-companion.sqlite")) {
     this.db = new Database(dbPath);
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("synchronous = NORMAL");

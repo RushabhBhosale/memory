@@ -39,7 +39,7 @@ const createWindow = () => {
   mainWindow = new BrowserWindow({
     width: 1080,
     height: 760,
-    title: "MemoryOS Companion",
+    title: "Memonest Companion",
     backgroundColor: "#ffffff",
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),

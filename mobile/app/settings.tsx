@@ -55,13 +55,6 @@ const categories: SettingCategory[] = [
     title: "AI",
   },
   {
-    detail: "Android wake word, speech replies, and listening controls.",
-    icon: "mic-circle-outline",
-    id: "jarvis-assistant",
-    route: "/settings/jarvis-assistant",
-    title: "Jarvis Assistant",
-  },
-  {
     detail: "Sync status, imports, exports, and backup choices.",
     icon: "cloud-outline",
     id: "backup-sync",

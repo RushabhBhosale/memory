@@ -112,7 +112,7 @@ export const startScreenshotWatcher = async () => {
 
   if (hasStarted) {
     const emitter = new NativeEventEmitter(NativeModules.ScreenshotWatcherModule);
-    const subscription = emitter.addListener("MemoryOSScreenshotDetected", () => {
+    const subscription = emitter.addListener("MemonestScreenshotDetected", () => {
       void syncLocalScreenshotInbox();
     });
 

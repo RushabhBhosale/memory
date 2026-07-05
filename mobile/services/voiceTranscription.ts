@@ -68,7 +68,7 @@ export const captureVoiceWithSystemPrompt = async (languageTag?: string | null) 
 export const addVoiceTranscriptListener = (
   listener: (transcript: string) => void,
 ) =>
-  DeviceEventEmitter.addListener("MemoryOSVoiceTranscript", (event) => {
+  DeviceEventEmitter.addListener("MemonestVoiceTranscript", (event) => {
     if (event && typeof event.transcript === "string") {
       listener(event.transcript);
     }

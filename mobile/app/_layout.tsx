@@ -3,7 +3,6 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { JarvisAssistantOverlay } from '../components/JarvisAssistantOverlay';
 import { colors } from '../styles/theme';
 import { startScreenshotWatcher } from '../services/screenshotWatcher';
 
@@ -32,13 +31,13 @@ export default function RootLayout() {
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="add" options={{ title: 'Add Memory' }} />
+        <Stack.Screen name="assistant" options={{ headerShown: false }} />
         <Stack.Screen name="app-usage" options={{ title: 'App Usage' }} />
         <Stack.Screen name="daily-summaries" options={{ headerShown: false }} />
         <Stack.Screen name="daily-summaries/[date]" options={{ headerShown: false }} />
         <Stack.Screen name="expense-add" options={{ headerShown: false }} />
         <Stack.Screen name="screenshots" options={{ headerShown: false }} />
         <Stack.Screen name="settings" options={{ headerShown: false }} />
-        <Stack.Screen name="settings/jarvis-assistant" options={{ headerShown: false }} />
         <Stack.Screen name="settings/[category]" options={{ headerShown: false }} />
         <Stack.Screen name="settings/permissions" options={{ headerShown: false }} />
         <Stack.Screen name="sms-tracking-debug" options={{ headerShown: false }} />
@@ -49,7 +48,6 @@ export default function RootLayout() {
         <Stack.Screen name="vault-add" options={{ headerShown: false }} />
         <Stack.Screen name="vault-settings" options={{ headerShown: false }} />
       </Stack>
-      <JarvisAssistantOverlay />
     </SafeAreaProvider>
   );
 }

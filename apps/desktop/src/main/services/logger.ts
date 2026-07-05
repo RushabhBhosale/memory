@@ -5,7 +5,7 @@ import { electron } from "../../shared/electron.js";
 
 const { app } = electron;
 
-const LOG_FILE = "memoryos-companion.log";
+const LOG_FILE = "memonest-companion.log";
 
 const toLine = (level: string, scope: string, message: string, details?: Record<string, unknown>) => {
   const suffix = details ? ` ${JSON.stringify(details)}` : "";
@@ -21,7 +21,7 @@ const writeLine = (line: string) => {
     fs.mkdirSync(path.dirname(getLogPath()), { recursive: true });
     fs.appendFileSync(getLogPath(), `${line}\n`);
   } catch (error) {
-    console.error("[memoryos-desktop] failed to write log file", error);
+    console.error("[memonest-desktop] failed to write log file", error);
   }
 };
 

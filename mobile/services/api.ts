@@ -1,13 +1,25 @@
 export type MemoryKind =
-  | 'note'
-  | 'task'
-  | 'work_done'
-  | 'requirement'
-  | 'credential'
-  | 'daily_summary';
+  | "note"
+  | "task"
+  | "work_done"
+  | "requirement"
+  | "credential"
+  | "daily_summary";
 
-export type ActivityType = 'memory' | 'task' | 'note' | 'meeting' | 'expense' | 'daily_summary';
-export type SaveItemType = 'memory' | 'log' | 'task' | 'note' | 'meeting' | 'reminder';
+export type ActivityType =
+  | "memory"
+  | "task"
+  | "note"
+  | "meeting"
+  | "expense"
+  | "daily_summary";
+export type SaveItemType =
+  | "memory"
+  | "log"
+  | "task"
+  | "note"
+  | "meeting"
+  | "reminder";
 export type DesktopActivity = {
   _id: string;
   date: string;
@@ -36,8 +48,8 @@ export type Memory = {
   kind: MemoryKind;
   reminderAt?: string;
   notificationEnabled?: boolean;
-  reminderType?: 'time';
-  status?: 'pending' | 'triggered' | 'completed';
+  reminderType?: "time";
+  status?: "pending" | "triggered" | "completed";
   triggeredAt?: string;
   importance?: number;
   createdAt: string;
@@ -72,7 +84,7 @@ export type DailySummary = {
   tasks: DailySummaryTask[];
   title: string;
   topics: DailySummaryTopic[];
-  type: 'daily_summary';
+  type: "daily_summary";
   updatedAt: string;
 };
 
@@ -83,7 +95,7 @@ export type ActivityItem = Memory & {
   merchant?: string;
   originalSmsPreview?: string;
   timestamp?: string;
-  transactionType?: 'expense' | 'income';
+  transactionType?: "expense" | "income";
   bodyMarkdown?: string;
   date?: string;
   decisions?: string[];
@@ -99,7 +111,14 @@ export type ActivityItem = Memory & {
 export type AskMemoryPlan = {
   keywords: string[];
   types: SaveItemType[];
-  timeframe: 'today' | 'tomorrow' | 'this_week' | 'this_month' | 'past_months' | 'upcoming' | 'all_time';
+  timeframe:
+    | "today"
+    | "tomorrow"
+    | "this_week"
+    | "this_month"
+    | "past_months"
+    | "upcoming"
+    | "all_time";
   monthsBack?: number;
 };
 
@@ -120,8 +139,8 @@ export type CreateMemoryInput = {
   kind?: MemoryKind;
   reminderAt?: string;
   notificationEnabled?: boolean;
-  reminderType?: 'time';
-  status?: 'pending' | 'triggered' | 'completed';
+  reminderType?: "time";
+  status?: "pending" | "triggered" | "completed";
   triggeredAt?: string;
   importance?: number;
   capturedAt?: string;
@@ -199,13 +218,13 @@ export type ScreenshotInboxInput = {
 export type ScreenshotInboxUpdate = Partial<
   Pick<
     ScreenshotInboxItem,
-    | 'dismissed'
-    | 'extractedText'
-    | 'generatedCategory'
-    | 'generatedTags'
-    | 'generatedTitle'
-    | 'memoryId'
-    | 'processed'
+    | "dismissed"
+    | "extractedText"
+    | "generatedCategory"
+    | "generatedTags"
+    | "generatedTitle"
+    | "memoryId"
+    | "processed"
   >
 >;
 
@@ -226,9 +245,9 @@ export type RemoteExpenseInput = {
   merchant: string;
   note?: string;
   originalSmsPreview?: string;
-  source: 'sms' | 'manual';
+  source: "sms" | "manual";
   timestamp: string;
-  type: 'expense' | 'income';
+  type: "expense" | "income";
 };
 
 export type RemoteExpense = RemoteExpenseInput & {
@@ -243,24 +262,24 @@ type ExpenseListResponse = {
 };
 
 const getApiRoot = (value: string) => {
-  const baseUrl = value.replace(/\/$/, '');
+  const baseUrl = value.replace(/\/$/, "");
 
-  if (baseUrl.endsWith('/api/memories')) {
-    return baseUrl.slice(0, -'/api/memories'.length);
+  if (baseUrl.endsWith("/api/memories")) {
+    return baseUrl.slice(0, -"/api/memories".length);
   }
 
-  if (baseUrl.endsWith('/api')) {
-    return baseUrl.slice(0, -'/api'.length);
+  if (baseUrl.endsWith("/api")) {
+    return baseUrl.slice(0, -"/api".length);
   }
 
   return baseUrl;
 };
 
 export const getApiConfig = () => {
-  const apiUrl = process.env.EXPO_PUBLIC_API_URL;
+  const apiUrl = "https://memory-green-kappa.vercel.app";
 
   if (!apiUrl) {
-    throw new Error('EXPO_PUBLIC_API_URL is not set');
+    throw new Error("EXPO_PUBLIC_API_URL is not set");
   }
 
   const apiRoot = getApiRoot(apiUrl);
@@ -275,21 +294,21 @@ export const getApiConfig = () => {
     desktopActivityUrl: `${apiRoot}/api/desktop-activity`,
     expensesUrl: `${apiRoot}/api/expenses`,
     memoriesUrl: `${apiRoot}/api/memories`,
-    screenshotsUrl: `${apiRoot}/api/screenshots`
+    screenshotsUrl: `${apiRoot}/api/screenshots`,
   };
 };
 
 export const request = async <T>(
   baseUrl: string,
   path: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
 ): Promise<T> => {
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
-      ...options.headers
-    }
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   });
 
   const text = await response.text();
@@ -306,8 +325,8 @@ export const request = async <T>(
   if (!response.ok) {
     const errorBody = body as { error?: unknown; message?: unknown } | null;
     const message =
-      (typeof errorBody?.error === 'string' && errorBody.error) ||
-      (typeof errorBody?.message === 'string' && errorBody.message) ||
+      (typeof errorBody?.error === "string" && errorBody.error) ||
+      (typeof errorBody?.message === "string" && errorBody.message) ||
       `Request failed with status ${response.status}`;
 
     throw new Error(message);
@@ -318,28 +337,35 @@ export const request = async <T>(
 
 export const listMemories = async () => {
   const { memoriesUrl } = getApiConfig();
-  const response = await request<ListResponse>(memoriesUrl, '');
+  const response = await request<ListResponse>(memoriesUrl, "");
   return response.data;
 };
 
-export const listActivity = async (params?: { from?: string; limit?: number; to?: string }) => {
+export const listActivity = async (params?: {
+  from?: string;
+  limit?: number;
+  to?: string;
+}) => {
   const { activityUrl } = getApiConfig();
   const searchParams = new URLSearchParams();
 
   if (params?.from) {
-    searchParams.set('from', params.from);
+    searchParams.set("from", params.from);
   }
 
   if (params?.to) {
-    searchParams.set('to', params.to);
+    searchParams.set("to", params.to);
   }
 
   if (params?.limit) {
-    searchParams.set('limit', String(params.limit));
+    searchParams.set("limit", String(params.limit));
   }
 
   const query = searchParams.toString();
-  const response = await request<ActivityListResponse>(activityUrl, query ? `?${query}` : '');
+  const response = await request<ActivityListResponse>(
+    activityUrl,
+    query ? `?${query}` : "",
+  );
 
   return response.data;
 };
@@ -349,13 +375,13 @@ export const listDesktopActivity = async (params?: { limit?: number }) => {
   const searchParams = new URLSearchParams();
 
   if (params?.limit) {
-    searchParams.set('limit', String(params.limit));
+    searchParams.set("limit", String(params.limit));
   }
 
   const query = searchParams.toString();
   const response = await request<DesktopActivityListResponse>(
     desktopActivityUrl,
-    query ? `?${query}` : ''
+    query ? `?${query}` : "",
   );
 
   return response.data;
@@ -374,37 +400,37 @@ export const listDailySummaries = async (params?: {
   const searchParams = new URLSearchParams();
 
   if (params?.from) {
-    searchParams.set('from', params.from);
+    searchParams.set("from", params.from);
   }
 
   if (params?.limit) {
-    searchParams.set('limit', String(params.limit));
+    searchParams.set("limit", String(params.limit));
   }
 
   if (params?.project) {
-    searchParams.set('project', params.project);
+    searchParams.set("project", params.project);
   }
 
   if (params?.q) {
-    searchParams.set('q', params.q);
+    searchParams.set("q", params.q);
   }
 
   if (params?.source) {
-    searchParams.set('source', params.source);
+    searchParams.set("source", params.source);
   }
 
   if (params?.tag) {
-    searchParams.set('tag', params.tag);
+    searchParams.set("tag", params.tag);
   }
 
   if (params?.to) {
-    searchParams.set('to', params.to);
+    searchParams.set("to", params.to);
   }
 
   const query = searchParams.toString();
   const response = await request<DailySummaryListResponse>(
     dailySummaryUrl,
-    query ? `?${query}` : ''
+    query ? `?${query}` : "",
   );
 
   return response.data;
@@ -414,7 +440,7 @@ export const getDailySummary = async (date: string) => {
   const { dailySummaryUrl } = getApiConfig();
   const response = await request<DailySummarySingleResponse>(
     dailySummaryUrl,
-    `/${encodeURIComponent(date)}`
+    `/${encodeURIComponent(date)}`,
   );
 
   return response.data;
@@ -423,20 +449,24 @@ export const getDailySummary = async (date: string) => {
 export const syncChatGptDailyBrief = async (date?: string) => {
   const { chatGptDailyBriefSyncUrl } = getApiConfig();
   const apiKey = process.env.EXPO_PUBLIC_MEMORY_API_KEY;
-  const response = await request<DailyBriefSyncResponse>(chatGptDailyBriefSyncUrl, '', {
-    body: JSON.stringify(date ? { date } : {}),
-    headers: apiKey ? { 'x-api-key': apiKey } : undefined,
-    method: 'POST'
-  });
+  const response = await request<DailyBriefSyncResponse>(
+    chatGptDailyBriefSyncUrl,
+    "",
+    {
+      body: JSON.stringify(date ? { date } : {}),
+      headers: apiKey ? { "x-api-key": apiKey } : undefined,
+      method: "POST",
+    },
+  );
 
   return response;
 };
 
 export const upsertExpense = async (input: RemoteExpenseInput) => {
   const { expensesUrl } = getApiConfig();
-  const response = await request<{ data: unknown }>(expensesUrl, '', {
-    method: 'POST',
-    body: JSON.stringify(input)
+  const response = await request<{ data: unknown }>(expensesUrl, "", {
+    method: "POST",
+    body: JSON.stringify(input),
   });
 
   return response.data;
@@ -444,7 +474,7 @@ export const upsertExpense = async (input: RemoteExpenseInput) => {
 
 export const listRemoteExpenses = async () => {
   const { expensesUrl } = getApiConfig();
-  const response = await request<ExpenseListResponse>(expensesUrl, '');
+  const response = await request<ExpenseListResponse>(expensesUrl, "");
 
   return response.data;
 };
@@ -455,8 +485,8 @@ export const deleteRemoteExpense = async (deviceExpenseId: string) => {
     expensesUrl,
     `/${encodeURIComponent(deviceExpenseId)}`,
     {
-      method: 'DELETE'
-    }
+      method: "DELETE",
+    },
   );
 };
 
@@ -464,25 +494,25 @@ export const getActivityItem = async (type: ActivityType, id: string) => {
   const { activityUrl } = getApiConfig();
   const response = await request<SingleActivityResponse>(
     activityUrl,
-    `/${encodeURIComponent(type)}/${encodeURIComponent(id)}`
+    `/${encodeURIComponent(type)}/${encodeURIComponent(id)}`,
   );
 
   return response.data;
 };
 
 export const updateActivityItem = async (
-  type: Exclude<ActivityType, 'expense'>,
+  type: Exclude<ActivityType, "expense">,
   id: string,
-  input: Partial<CreateMemoryInput>
+  input: Partial<CreateMemoryInput>,
 ) => {
   const { activityUrl } = getApiConfig();
   const response = await request<SingleActivityResponse>(
     activityUrl,
     `/${encodeURIComponent(type)}/${encodeURIComponent(id)}`,
     {
-      method: 'PATCH',
-      body: JSON.stringify(input)
-    }
+      method: "PATCH",
+      body: JSON.stringify(input),
+    },
   );
 
   return response.data;
@@ -495,8 +525,8 @@ export const deleteActivityItem = async (type: ActivityType, id: string) => {
     activityUrl,
     `/${encodeURIComponent(type)}/${encodeURIComponent(id)}`,
     {
-      method: 'DELETE'
-    }
+      method: "DELETE",
+    },
   );
 };
 
@@ -504,7 +534,7 @@ export const searchMemories = async (query: string) => {
   const { memoriesUrl } = getApiConfig();
   const response = await request<ListResponse>(
     memoriesUrl,
-    `/search?q=${encodeURIComponent(query)}`
+    `/search?q=${encodeURIComponent(query)}`,
   );
   return response.data;
 };
@@ -513,16 +543,16 @@ export const searchActivity = async (query: string) => {
   const { activityUrl } = getApiConfig();
   const response = await request<ActivityListResponse>(
     activityUrl,
-    `/search?q=${encodeURIComponent(query)}`
+    `/search?q=${encodeURIComponent(query)}`,
   );
   return response.data;
 };
 
 export const askMemory = async (query: string) => {
   const { askMemoryUrl } = getApiConfig();
-  return request<AskMemoryResponse>(askMemoryUrl, '', {
-    method: 'POST',
-    body: JSON.stringify({ query })
+  return request<AskMemoryResponse>(askMemoryUrl, "", {
+    method: "POST",
+    body: JSON.stringify({ query }),
   });
 };
 
@@ -534,9 +564,9 @@ export const getMemory = async (id: string) => {
 
 export const createMemory = async (input: CreateMemoryInput) => {
   const { memoriesUrl } = getApiConfig();
-  const response = await request<SingleResponse>(memoriesUrl, '', {
-    method: 'POST',
-    body: JSON.stringify(input)
+  const response = await request<SingleResponse>(memoriesUrl, "", {
+    method: "POST",
+    body: JSON.stringify(input),
   });
 
   return response.data;
@@ -545,46 +575,63 @@ export const createMemory = async (input: CreateMemoryInput) => {
 export const deleteMemory = async (id: string) => {
   const { memoriesUrl } = getApiConfig();
   await request<{ message: string; data: Memory }>(memoriesUrl, `/${id}`, {
-    method: 'DELETE'
+    method: "DELETE",
   });
 };
 
-export const updateMemory = async (id: string, input: Partial<CreateMemoryInput>) => {
+export const updateMemory = async (
+  id: string,
+  input: Partial<CreateMemoryInput>,
+) => {
   const { memoriesUrl } = getApiConfig();
   const response = await request<SingleResponse>(memoriesUrl, `/${id}`, {
-    method: 'PATCH',
-    body: JSON.stringify(input)
+    method: "PATCH",
+    body: JSON.stringify(input),
   });
 
   return response.data;
 };
 
-export const listScreenshotInbox = async (params?: { includeDismissed?: boolean }) => {
+export const listScreenshotInbox = async (params?: {
+  includeDismissed?: boolean;
+}) => {
   const { screenshotsUrl } = getApiConfig();
-  const query = params?.includeDismissed ? '?includeDismissed=true' : '';
-  const response = await request<ScreenshotInboxListResponse>(screenshotsUrl, query);
+  const query = params?.includeDismissed ? "?includeDismissed=true" : "";
+  const response = await request<ScreenshotInboxListResponse>(
+    screenshotsUrl,
+    query,
+  );
   return response.data;
 };
 
-export const createScreenshotInboxItem = async (input: ScreenshotInboxInput) => {
+export const createScreenshotInboxItem = async (
+  input: ScreenshotInboxInput,
+) => {
   const { screenshotsUrl } = getApiConfig();
-  const response = await request<ScreenshotInboxSingleResponse>(screenshotsUrl, '', {
-    method: 'POST',
-    body: JSON.stringify(input)
-  });
+  const response = await request<ScreenshotInboxSingleResponse>(
+    screenshotsUrl,
+    "",
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
 
   return response.data;
 };
 
-export const updateScreenshotInboxItem = async (id: string, input: ScreenshotInboxUpdate) => {
+export const updateScreenshotInboxItem = async (
+  id: string,
+  input: ScreenshotInboxUpdate,
+) => {
   const { screenshotsUrl } = getApiConfig();
   const response = await request<ScreenshotInboxSingleResponse>(
     screenshotsUrl,
     `/${encodeURIComponent(id)}`,
     {
-      method: 'PATCH',
-      body: JSON.stringify(input)
-    }
+      method: "PATCH",
+      body: JSON.stringify(input),
+    },
   );
 
   return response.data;
@@ -596,7 +643,7 @@ export const deleteScreenshotInboxItem = async (id: string) => {
     screenshotsUrl,
     `/${encodeURIComponent(id)}`,
     {
-      method: 'DELETE'
-    }
+      method: "DELETE",
+    },
   );
 };

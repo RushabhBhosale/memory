@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Memory App",
-    "slug": "memory-mobile",
+    "name": "Memonest",
+    "slug": "memonest-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/logo.jpg",
-    "scheme": "memorymobile",
+    "scheme": "memonest",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "plugins": [
@@ -21,20 +21,16 @@
         "backgroundColor": "#FFFFFF"
       },
       "permissions": [
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
         "android.permission.PACKAGE_USAGE_STATS",
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.QUERY_ALL_PACKAGES",
         "android.permission.RECORD_AUDIO",
-        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
-        "android.permission.VIBRATE",
-        "android.permission.WAKE_LOCK"
+        "android.permission.VIBRATE"
       ],
-      "package": "com.anonymous.memorymobile"
+      "package": "com.anonymous.memonest"
     },
     "ios": {
-      "bundleIdentifier": "com.anonymous.memorymobile"
+      "bundleIdentifier": "com.anonymous.memonest"
     }
   }
 }

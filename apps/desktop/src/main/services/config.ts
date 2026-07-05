@@ -6,7 +6,7 @@ import { electron } from "../../shared/electron.js";
 
 const { app } = electron;
 
-const CONFIG_FILE = "memoryos-companion.config.json";
+const CONFIG_FILE = "memonest-companion.config.json";
 
 const getConfigPath = () => path.join(app.getPath("userData"), CONFIG_FILE);
 

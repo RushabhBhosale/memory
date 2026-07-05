@@ -304,5 +304,5 @@ export const subscribeToExpenseChanges = (listener: () => void) => {
   }
 
   const emitter = new NativeEventEmitter(NativeModules.ExpenseSmsModule);
-  return emitter.addListener("MemoryOSExpensesChanged", listener);
+  return emitter.addListener("MemonestExpensesChanged", listener);
 };

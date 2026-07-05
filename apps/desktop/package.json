@@ -1,12 +1,12 @@
 {
-  "name": "memoryos-desktop-companion",
+  "name": "memonest-desktop-companion",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "engines": {
     "node": ">=20.19.0"
   },
-  "description": "macOS menu bar companion for MemoryOS activity tracking.",
+  "description": "macOS menu bar companion for Memonest activity tracking.",
   "main": "dist/main/main/index.js",
   "scripts": {
     "postinstall": "electron-rebuild -f -w better-sqlite3",
@@ -20,8 +20,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.main.json && tsc --noEmit -p tsconfig.renderer.json"
   },
   "build": {
-    "appId": "com.memoryos.companion",
-    "productName": "MemoryOS Companion",
+    "appId": "com.memonest.companion",
+    "productName": "Memonest Companion",
     "directories": {
       "output": "release"
     },

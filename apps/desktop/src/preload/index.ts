@@ -2,7 +2,7 @@ import { electron } from "../shared/electron.js";
 
 const { contextBridge, ipcRenderer } = electron;
 
-console.info("[memoryos-desktop] preload initialized");
+console.info("[memonest-desktop] preload initialized");
 
 contextBridge.exposeInMainWorld("memoryOS", {
   getStats: () => ipcRenderer.invoke("dashboard:get-stats"),

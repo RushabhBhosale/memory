@@ -212,7 +212,9 @@ export default function TabsLayout() {
   const captureActions = useMemo(
     () => ({
       openMenu: () => captureRef.current?.openMenu(),
-      openQuickCapture: () => captureRef.current?.openQuickCapture(),
+      openQuickCapture: (initialText?: string) => captureRef.current?.openQuickCapture(initialText),
+      openAssistantLogCapture: (draft: { description?: string; name?: string }) =>
+        captureRef.current?.openAssistantLogCapture(draft),
       openVoiceCapture: () => captureRef.current?.openVoiceCapture(),
     }),
     [],

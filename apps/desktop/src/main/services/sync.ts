@@ -136,7 +136,7 @@ export class SyncService {
         });
 
         if (!response.ok) {
-          throw new Error(`MemoryOS sync failed with ${response.status}`);
+          throw new Error(`Memonest sync failed with ${response.status}`);
         }
 
         this.lastSyncedAt = new Date().toISOString();

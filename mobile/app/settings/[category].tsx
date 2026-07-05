@@ -85,13 +85,6 @@ const categoryConfig: Record<string, CategoryConfig> = {
         title: "Ask Memory",
       },
       {
-        detail: "Android wake word, speech replies, and listening controls.",
-        icon: "mic-circle-outline",
-        key: "jarvis-assistant",
-        route: "/settings/jarvis-assistant",
-        title: "Jarvis Assistant",
-      },
-      {
         detail: "Review imported ChatGPT daily briefs.",
         icon: "calendar-clear-outline",
         key: "briefs",

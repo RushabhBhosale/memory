@@ -151,7 +151,7 @@ function App() {
     return (
       <main className="shell loading">
         <div className="error-panel">
-          <strong>MemoryOS Companion could not finish loading.</strong>
+          <strong>Memonest Companion could not finish loading.</strong>
           <p>{error}</p>
           <button onClick={() => void refresh()}>Retry</button>
         </div>
@@ -160,7 +160,7 @@ function App() {
   }
 
   if (loading || !stats) {
-    return <main className="shell loading">Loading MemoryOS Companion...</main>;
+    return <main className="shell loading">Loading Memonest Companion...</main>;
   }
 
   if (!SHOW_DESKTOP_DASHBOARD) {
@@ -168,7 +168,7 @@ function App() {
       <main className="shell">
         <header className="hero simple-hero">
           <div>
-            <p className="eyebrow">MemoryOS Companion</p>
+            <p className="eyebrow">Memonest Companion</p>
             <h1>Companion settings</h1>
             <p className="subtitle">
               Desktop activity tracking is temporarily hidden from the app UI. The underlying code is still kept in the project for later.
@@ -251,7 +251,7 @@ function App() {
     <main className="shell">
       <header className="hero">
         <div>
-          <p className="eyebrow">MemoryOS Companion</p>
+          <p className="eyebrow">Memonest Companion</p>
           <h1>Work activity dashboard</h1>
           <p className="subtitle">
             Tracks app usage locally, summarizes work patterns, and syncs only aggregate summaries.

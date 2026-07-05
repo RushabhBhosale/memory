@@ -374,7 +374,7 @@ export default function ExpensesScreen() {
           <View style={styles.permissionPanel}>
             <Text style={styles.panelTitle}>Enable SMS transaction approval</Text>
             <Text style={styles.panelText}>
-              MemoryOS will only process transaction-looking SMS, skip OTP/login messages, and ask
+              Memonest will only process transaction-looking SMS, skip OTP/login messages, and ask
               before adding anything.
             </Text>
             <Pressable style={styles.primaryButton} onPress={() => void requestPermissions()}>

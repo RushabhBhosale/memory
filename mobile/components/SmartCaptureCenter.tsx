@@ -51,7 +51,8 @@ type VoiceCapturePhase = "idle" | "checking" | "recording" | "transcribing" | "r
 
 export type SmartCaptureCenterHandle = {
   openMenu: () => void;
-  openQuickCapture: () => void;
+  openQuickCapture: (initialText?: string) => void;
+  openAssistantLogCapture: (draft: { description?: string; name?: string }) => void;
   openVoiceCapture: () => void;
 };
 
@@ -153,6 +154,23 @@ const getDefaultTitle = (value: string, fallback: string) => {
   }
   return firstLine.length > 64 ? `${firstLine.slice(0, 61)}...` : firstLine;
 };
+
+const getAssistantLogText = (draft: { description?: string; name?: string }) =>
+  [draft.name, draft.description]
+    .map((item) => item?.trim())
+    .filter(Boolean)
+    .join("\n\n");
+
+const getAssistantLogClassification = (
+  text: string,
+  fallbackTitle?: string,
+): CaptureClassification => ({
+  category: "work",
+  confidence: 1,
+  tags: ["assistant", "google-assistant", "log"],
+  title: getDefaultTitle(fallbackTitle?.trim() || text, "Assistant Capture"),
+  type: "Work Log",
+});
 
 const getCaptureKind = (type: CaptureClassificationType) => {
   switch (type) {
@@ -380,6 +398,28 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
     }
   };
 
+  const openQuickCapture = (initialText = "") => {
+    setContent(initialText);
+    setClassification(null);
+    setExpenseDraft({ amount: "", category: "general", merchant: "" });
+    open("quick");
+  };
+
+  const openAssistantLogCapture = (draft: { description?: string; name?: string }) => {
+    const text = getAssistantLogText(draft);
+
+    if (!text.trim()) {
+      openQuickCapture();
+      return;
+    }
+
+    Vibration.vibrate(12);
+    setContent(text);
+    setClassification(getAssistantLogClassification(text, draft.name));
+    setExpenseDraft(parseExpenseDraft(text));
+    open("confirm");
+  };
+
   const openVoiceCapture = () => {
     resetVoiceCapture();
     Vibration.vibrate(12);
@@ -407,6 +447,8 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
     }).start(() => {
       setVisible(false);
       setMode("quick");
+      setContent("");
+      setManualText("");
       setClassification(null);
       setSaving(false);
       setActivePicker(null);
@@ -428,7 +470,8 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
       Vibration.vibrate(12);
       open("menu");
     },
-    openQuickCapture: () => open("quick"),
+    openQuickCapture,
+    openAssistantLogCapture,
     openVoiceCapture,
   }));
 

@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+  <capability android:name="actions.intent.OPEN_APP_FEATURE">
+    <intent
+      android:action="android.intent.action.VIEW"
+      android:targetClass="com.anonymous.memonest.MainActivity"
+      android:targetPackage="com.anonymous.memonest">
+      <url-template android:value="memonest://assistant?action=open&amp;feature={feature}" />
+      <parameter
+        android:key="feature"
+        android:name="feature" />
+    </intent>
+  </capability>
+
+  <capability android:name="actions.intent.GET_THING">
+    <intent
+      android:action="android.intent.action.VIEW"
+      android:targetClass="com.anonymous.memonest.MainActivity"
+      android:targetPackage="com.anonymous.memonest">
+      <url-template android:value="memonest://assistant?action=search&amp;name={name}" />
+      <parameter
+        android:key="name"
+        android:name="thing.name" />
+    </intent>
+  </capability>
+
+  <capability android:name="actions.intent.CREATE_THING">
+    <intent
+      android:action="android.intent.action.VIEW"
+      android:targetClass="com.anonymous.memonest.MainActivity"
+      android:targetPackage="com.anonymous.memonest">
+      <url-template android:value="memonest://assistant?action=log&amp;name={name}&amp;description={description}" />
+      <parameter
+        android:key="name"
+        android:name="thing.name" />
+      <parameter
+        android:key="description"
+        android:name="thing.description" />
+    </intent>
+  </capability>
+
+  <shortcut
+    android:enabled="true"
+    android:icon="@mipmap/app_logo"
+    android:shortcutDisabledMessage="@string/shortcut_capture_disabled_message"
+    android:shortcutId="capture"
+    android:shortcutLongLabel="@string/shortcut_capture_long_label"
+    android:shortcutShortLabel="@string/shortcut_capture_short_label">
+    <intent
+      android:action="android.intent.action.VIEW"
+      android:data="memonest://assistant?action=open&amp;feature=capture" />
+    <capability-binding android:key="actions.intent.OPEN_APP_FEATURE">
+      <parameter-binding
+        android:key="feature"
+        android:value="@array/app_action_capture_features" />
+    </capability-binding>
+  </shortcut>
+
+  <shortcut
+    android:enabled="true"
+    android:icon="@mipmap/app_logo"
+    android:shortcutDisabledMessage="@string/shortcut_expenses_disabled_message"
+    android:shortcutId="expenses"
+    android:shortcutLongLabel="@string/shortcut_expenses_long_label"
+    android:shortcutShortLabel="@string/shortcut_expenses_short_label">
+    <intent
+      android:action="android.intent.action.VIEW"
+      android:data="memonest://assistant?action=open&amp;feature=expenses" />
+    <capability-binding android:key="actions.intent.OPEN_APP_FEATURE">
+      <parameter-binding
+        android:key="feature"
+        android:value="@array/app_action_expenses_features" />
+    </capability-binding>
+  </shortcut>
+
+  <shortcut
+    android:enabled="true"
+    android:icon="@mipmap/app_logo"
+    android:shortcutDisabledMessage="@string/shortcut_history_disabled_message"
+    android:shortcutId="history"
+    android:shortcutLongLabel="@string/shortcut_history_long_label"
+    android:shortcutShortLabel="@string/shortcut_history_short_label">
+    <intent
+      android:action="android.intent.action.VIEW"
+      android:data="memonest://assistant?action=open&amp;feature=history" />
+    <capability-binding android:key="actions.intent.OPEN_APP_FEATURE">
+      <parameter-binding
+        android:key="feature"
+        android:value="@array/app_action_history_features" />
+    </capability-binding>
+  </shortcut>
+</shortcuts>

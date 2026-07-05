@@ -20,7 +20,7 @@ const PRODUCTIVE_APPS = new Set([
   "Google Chrome",
   "Arc",
   "ChatGPT",
-  "MemoryOS"
+  "Memonest"
 ]);
 
 const DISTRACTING_APPS = new Set([
@@ -48,7 +48,7 @@ const EDITOR_APPS = new Set([
 
 const SYSTEM_APP_NAME_MAP: Record<string, string> = {
   loginwindow: "Locked Screen",
-  electron: "MemoryOS Companion"
+  electron: "Memonest Companion"
 };
 
 const splitTitle = (title: string) => title.split(/\s(?:-|—|\|)\s/g).map((part) => part.trim()).filter(Boolean);

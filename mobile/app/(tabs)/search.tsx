@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -52,6 +52,9 @@ type StoredConversation = {
 };
 
 const makeMessageId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const getParamValue = (value?: string | string[]) =>
+  Array.isArray(value) ? value[0] : value;
 
 const normalizeStoredMessages = (value: unknown) => {
   if (!Array.isArray(value)) {
@@ -280,7 +283,13 @@ function MessageBubble({
 }
 
 export default function SearchScreen() {
+  const params = useLocalSearchParams<{
+    assistantId?: string;
+    assistantQuery?: string;
+    assistantRun?: string;
+  }>();
   const scrollRef = useRef<ScrollView | null>(null);
+  const handledAssistantRef = useRef("");
   const [input, setInput] = useState('');
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -414,6 +423,25 @@ export default function SearchScreen() {
       scrollToLatest();
     }
   };
+
+  useEffect(() => {
+    const query = getParamValue(params.assistantQuery)?.trim();
+    const shouldRun = getParamValue(params.assistantRun) === "1";
+    const id = getParamValue(params.assistantId) || query;
+
+    if (!query || !id || handledAssistantRef.current === id) {
+      return;
+    }
+
+    handledAssistantRef.current = id;
+    console.log("[AppActions] Search deep link parsed", { query, shouldRun });
+    setInput(query);
+
+    if (shouldRun) {
+      console.log("[AppActions] Running Assistant search", { query });
+      void runAskMemory(query);
+    }
+  }, [params.assistantId, params.assistantQuery, params.assistantRun]);
 
   const latestFollowUps =
     [...messages]

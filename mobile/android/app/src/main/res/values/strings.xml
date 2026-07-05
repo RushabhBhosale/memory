@@ -1,3 +1,30 @@
 <resources>
-  <string name="app_name">Memory App</string>
+  <string name="app_name">Memonest</string>
+  <string name="shortcut_capture_short_label">Capture</string>
+  <string name="shortcut_capture_long_label">Open capture in Memonest</string>
+  <string name="shortcut_capture_disabled_message">Capture is unavailable.</string>
+  <string name="shortcut_expenses_short_label">Expenses</string>
+  <string name="shortcut_expenses_long_label">Open expenses in Memonest</string>
+  <string name="shortcut_expenses_disabled_message">Expenses are unavailable.</string>
+  <string name="shortcut_history_short_label">History</string>
+  <string name="shortcut_history_long_label">Open history in Memonest</string>
+  <string name="shortcut_history_disabled_message">History is unavailable.</string>
+  <string-array name="app_action_capture_features">
+    <item>capture</item>
+    <item>quick capture</item>
+    <item>add memory</item>
+    <item>save memory</item>
+  </string-array>
+  <string-array name="app_action_expenses_features">
+    <item>expenses</item>
+    <item>expense</item>
+    <item>spend</item>
+    <item>transactions</item>
+  </string-array>
+  <string-array name="app_action_history_features">
+    <item>history</item>
+    <item>timeline</item>
+    <item>calendar</item>
+    <item>memories</item>
+  </string-array>
 </resources>

@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useCallback, useRef } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -7,8 +8,57 @@ import { AppHeader } from "../../components/AppHeader";
 import { useSmartCaptureCenter } from "../../components/SmartCaptureCenterContext";
 import { colors } from "../../styles/theme";
 
+const getParamValue = (value?: string | string[]) =>
+  Array.isArray(value) ? value[0] : value;
+
 export default function CreateTab() {
   const captureCenter = useSmartCaptureCenter();
+  const params = useLocalSearchParams<{
+    assistantAction?: string;
+    assistantDescription?: string;
+    assistantFeature?: string;
+    assistantId?: string;
+    assistantName?: string;
+  }>();
+  const handledAssistantRef = useRef("");
+
+  useFocusEffect(
+    useCallback(() => {
+      const action = getParamValue(params.assistantAction);
+      const feature = getParamValue(params.assistantFeature);
+      const id =
+        getParamValue(params.assistantId) ||
+        `${action || ""}:${feature || ""}:${getParamValue(params.assistantName) || ""}:${
+          getParamValue(params.assistantDescription) || ""
+        }`;
+
+      if (!action || handledAssistantRef.current === id) {
+        return;
+      }
+
+      handledAssistantRef.current = id;
+
+      if (action === "open" && feature === "capture") {
+        console.log("[AppActions] Navigated to capture from Assistant");
+        requestAnimationFrame(() => captureCenter.openQuickCapture());
+        return;
+      }
+
+      if (action === "log") {
+        const name = getParamValue(params.assistantName);
+        const description = getParamValue(params.assistantDescription);
+        console.log("[AppActions] Opening assistant log capture", { hasDescription: Boolean(description), name });
+        requestAnimationFrame(() => captureCenter.openAssistantLogCapture({ description, name }));
+      }
+    }, [
+      captureCenter,
+      params.assistantAction,
+      params.assistantDescription,
+      params.assistantFeature,
+      params.assistantId,
+      params.assistantName,
+    ]),
+  );
 
   return (
     <SafeAreaView edges={["top"]} style={styles.screen}>

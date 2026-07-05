@@ -22,7 +22,7 @@ export class TrayService {
   create() {
     const image = nativeImage.createEmpty();
     this.tray = new Tray(image);
-    this.tray.setToolTip("MemoryOS Companion");
+    this.tray.setToolTip("Memonest Companion");
     this.updateMenu();
   }
 
@@ -36,13 +36,13 @@ export class TrayService {
 
     this.tray.setContextMenu(
       Menu.buildFromTemplate([
-        { label: "MemoryOS Companion", enabled: false },
+        { label: "Memonest Companion", enabled: false },
         { label: `Status: ${this.tracker.isTracking() ? "Running" : "Paused"}`, enabled: false },
         { label: `Today's Coding Time: ${stats.todayCodingMinutes}m`, enabled: false },
         { label: `Today's Productive Time: ${stats.todayProductiveMinutes}m`, enabled: false },
         { type: "separator" },
         { label: "Open Dashboard", click: this.openDashboard },
-        { label: "Open MemoryOS", click: () => void shell.openExternal(config.dashboardUrl) },
+        { label: "Open Memonest", click: () => void shell.openExternal(config.dashboardUrl) },
         { type: "separator" },
         {
           label: "Pause Tracking",

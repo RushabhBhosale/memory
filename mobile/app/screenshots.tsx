@@ -132,7 +132,7 @@ export default function ScreenshotsScreen() {
             <View style={styles.permissionCopy}>
               <Text style={styles.permissionTitle}>Enable screenshot inbox</Text>
               <Text style={styles.permissionText}>
-                Allow image access so MemoryOS can detect new screenshots and ask before saving.
+                Allow image access so Memonest can detect new screenshots and ask before saving.
               </Text>
             </View>
           </Pressable>
@@ -195,7 +195,7 @@ export default function ScreenshotsScreen() {
             <Ionicons color={colors.textSoft} name="images-outline" size={28} />
             <Text style={styles.emptyTitle}>No pending screenshots</Text>
             <Text style={styles.stateText}>
-              New screenshots will appear here after MemoryOS detects them.
+              New screenshots will appear here after Memonest detects them.
             </Text>
           </View>
         )}
