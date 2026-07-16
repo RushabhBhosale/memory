@@ -1047,12 +1047,17 @@ export default function HomeScreen() {
                 key={`${item.type}-${item._id}`}
                 accessibilityRole="button"
                 style={styles.recentRow}
-                onPress={() =>
+                onPress={() => {
+                  if (item.type === "expense") {
+                    router.push("/(tabs)/expenses");
+                    return;
+                  }
+
                   router.push({
                     pathname: "/activity/[type]/[id]",
                     params: { id: item._id, type: item.type },
-                  })
-                }
+                  });
+                }}
               >
                 <View style={styles.recentDot} />
                 <View style={styles.recentCopy}>

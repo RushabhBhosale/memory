@@ -67,7 +67,11 @@ export default function SmsTrackingDebugScreen() {
 
       setStatus(await getSmsTrackingDebugStatus());
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to load SMS tracking status.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to load SMS tracking status.",
+      );
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -88,13 +92,15 @@ export default function SmsTrackingDebugScreen() {
       setScanned(0);
       setMatched(0);
 
-      const result = await testRecentSmsTracking(100);
+      const result = await testRecentSmsTracking(10);
       setMessages(result.messages);
       setScanned(result.scanned);
       setMatched(result.matched);
       await loadStatus({ refreshing: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to test SMS tracking.");
+      setError(
+        err instanceof Error ? err.message : "Unable to test SMS tracking.",
+      );
     } finally {
       setTesting(false);
     }
@@ -105,7 +111,9 @@ export default function SmsTrackingDebugScreen() {
       <SafeAreaView edges={["top"]} style={styles.screen}>
         <View style={styles.centerState}>
           <ScreenHeader mode="back" title="SMS Tracking Status" />
-          <Text style={styles.emptyText}>SMS tracking diagnostics are Android only.</Text>
+          <Text style={styles.emptyText}>
+            SMS tracking diagnostics are Android only.
+          </Text>
         </View>
       </SafeAreaView>
     );
@@ -137,11 +145,14 @@ export default function SmsTrackingDebugScreen() {
             <View style={styles.statusPanel}>
               <View style={styles.statusHeader}>
                 <View>
-                  <Text style={styles.panelEyebrow}>Current tracking status</Text>
+                  <Text style={styles.panelEyebrow}>
+                    Current tracking status
+                  </Text>
                   <Text
                     style={[
                       styles.statusTitle,
-                      status?.trackingStatus === "Running" && styles.runningText,
+                      status?.trackingStatus === "Running" &&
+                        styles.runningText,
                     ]}
                   >
                     {status?.trackingStatus ?? "Stopped"}
@@ -150,12 +161,21 @@ export default function SmsTrackingDebugScreen() {
                 <View
                   style={[
                     styles.statusIcon,
-                    status?.trackingStatus === "Running" && styles.statusIconRunning,
+                    status?.trackingStatus === "Running" &&
+                      styles.statusIconRunning,
                   ]}
                 >
                   <Ionicons
-                    color={status?.trackingStatus === "Running" ? colors.success : colors.danger}
-                    name={status?.trackingStatus === "Running" ? "pulse" : "pause-circle-outline"}
+                    color={
+                      status?.trackingStatus === "Running"
+                        ? colors.success
+                        : colors.danger
+                    }
+                    name={
+                      status?.trackingStatus === "Running"
+                        ? "pulse"
+                        : "pause-circle-outline"
+                    }
                     size={22}
                   />
                 </View>
@@ -169,7 +189,10 @@ export default function SmsTrackingDebugScreen() {
                 label="SMS tracking enabled"
                 value={status?.trackingEnabled ? "Enabled" : "Disabled"}
               />
-              <StatusRow label="Last SMS scan time" value={formatDateTime(status?.lastSmsScanTime)} />
+              <StatusRow
+                label="Last SMS scan time"
+                value={formatDateTime(status?.lastSmsScanTime)}
+              />
               <StatusRow
                 label="Last detected expense time"
                 value={formatDateTime(status?.lastDetectedExpenseTime)}
@@ -186,12 +209,20 @@ export default function SmsTrackingDebugScreen() {
 
             {error ? (
               <View style={styles.errorPanel}>
-                <Ionicons color={colors.danger} name="warning-outline" size={18} />
+                <Ionicons
+                  color={colors.danger}
+                  name="warning-outline"
+                  size={18}
+                />
                 <Text style={styles.errorText}>{error}</Text>
               </View>
             ) : null}
 
-            <Pressable disabled={testing} style={styles.primaryButton} onPress={() => void runTest()}>
+            <Pressable
+              disabled={testing}
+              style={styles.primaryButton}
+              onPress={() => void runTest()}
+            >
               {testing ? (
                 <ActivityIndicator color={colors.white} size="small" />
               ) : (
@@ -205,16 +236,21 @@ export default function SmsTrackingDebugScreen() {
             <View style={styles.resultsHeader}>
               <Text style={styles.sectionTitle}>New SMS Parser Matches</Text>
               <Text style={styles.sectionMeta}>
-                {scanned ? `${matched} of ${scanned} need review` : "No test run yet"}
+                {scanned
+                  ? `${matched} of ${scanned} need review`
+                  : "No test run yet"}
               </Text>
             </View>
 
             {messages.length ? (
-              messages.map((message) => <MessageResult key={message.id} message={message} />)
+              messages.map((message) => (
+                <MessageResult key={message.id} message={message} />
+              ))
             ) : (
               <View style={styles.emptyPanel}>
                 <Text style={styles.emptyText}>
-                  Run the test to show latest transaction SMS that are not already added or pending.
+                  Run the test to show latest transaction SMS that are not
+                  already added or pending.
                 </Text>
               </View>
             )}
@@ -244,8 +280,18 @@ function MessageResult({ message }: { message: SmsTrackingDebugMessage }) {
             SMS {message.id} · {formatDateTime(message.timestamp)}
           </Text>
         </View>
-        <View style={[styles.resultPill, message.matched && styles.resultPillMatched]}>
-          <Text style={[styles.resultText, message.matched && styles.resultTextMatched]}>
+        <View
+          style={[
+            styles.resultPill,
+            message.matched && styles.resultPillMatched,
+          ]}
+        >
+          <Text
+            style={[
+              styles.resultText,
+              message.matched && styles.resultTextMatched,
+            ]}
+          >
             {message.matched ? "Detected" : "Skipped"}
           </Text>
         </View>
@@ -257,12 +303,15 @@ function MessageResult({ message }: { message: SmsTrackingDebugMessage }) {
       {message.transaction ? (
         <View style={styles.transactionBox}>
           <Text style={styles.transactionText}>
-            {formatCurrency(message.transaction.amount, message.transaction.currency)} ·{" "}
-            {message.transaction.type === "credit" ? "Income" : "Expense"}
+            {formatCurrency(
+              message.transaction.amount,
+              message.transaction.currency,
+            )}{" "}
+            · {message.transaction.type === "credit" ? "Income" : "Expense"}
           </Text>
           <Text style={styles.transactionMeta}>
-            {message.transaction.merchant} · {message.transaction.category} · confidence{" "}
-            {Math.round(message.transaction.confidence * 100)}%
+            {message.transaction.merchant} · {message.transaction.category} ·
+            confidence {Math.round(message.transaction.confidence * 100)}%
           </Text>
         </View>
       ) : null}

@@ -51,14 +51,20 @@ const formatDate = (timestamp: number) =>
 const isThisMonth = (timestamp: number) => {
   const date = new Date(timestamp);
   const now = new Date();
-  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+  return (
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth()
+  );
 };
 
 const getCategoryBreakdown = (expenses: ExpenseEntry[]) =>
   expenses
-    .filter((expense) => expense.type === "expense" && isThisMonth(expense.timestamp))
+    .filter(
+      (expense) => expense.type === "expense" && isThisMonth(expense.timestamp),
+    )
     .reduce<Record<string, number>>((breakdown, expense) => {
-      breakdown[expense.category] = (breakdown[expense.category] || 0) + expense.amount;
+      breakdown[expense.category] =
+        (breakdown[expense.category] || 0) + expense.amount;
       return breakdown;
     }, {});
 
@@ -87,40 +93,47 @@ export default function ExpensesScreen() {
   });
   const [error, setError] = useState("");
 
-  const loadData = useCallback(async (options?: { refreshing?: boolean; silent?: boolean }) => {
-    try {
-      if (options?.refreshing) {
-        setRefreshing(true);
-      } else if (!options?.silent) {
-        setLoading(true);
+  const loadData = useCallback(
+    async (options?: { refreshing?: boolean; silent?: boolean }) => {
+      try {
+        if (options?.refreshing) {
+          setRefreshing(true);
+        } else if (!options?.silent) {
+          setLoading(true);
+        }
+
+        setError("");
+
+        if (Platform.OS !== "android") {
+          setPending([]);
+          setExpenses([]);
+          setHasPermission(false);
+          return;
+        }
+
+        const [permission, nextPending, nextExpenses] = await Promise.all([
+          hasExpenseSmsPermissions(),
+          listPendingTransactions(),
+          listExpenses(),
+        ]);
+
+        setHasPermission(permission);
+        setPending(
+          nextPending.filter((item) => item.status === "pending").reverse(),
+        );
+        setExpenses(nextExpenses);
+        void syncExpensesToMongo(nextExpenses).catch(() => undefined);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Unable to load expenses",
+        );
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-
-      setError("");
-
-      if (Platform.OS !== "android") {
-        setPending([]);
-        setExpenses([]);
-        setHasPermission(false);
-        return;
-      }
-
-      const [permission, nextPending, nextExpenses] = await Promise.all([
-        hasExpenseSmsPermissions(),
-        listPendingTransactions(),
-        listExpenses(),
-      ]);
-
-      setHasPermission(permission);
-      setPending(nextPending.filter((item) => item.status === "pending").reverse());
-      setExpenses(nextExpenses);
-      void syncExpensesToMongo(nextExpenses).catch(() => undefined);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to load expenses");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -141,18 +154,27 @@ export default function ExpensesScreen() {
   const monthSpend = useMemo(
     () =>
       expenses
-        .filter((expense) => expense.type === "expense" && isThisMonth(expense.timestamp))
+        .filter(
+          (expense) =>
+            expense.type === "expense" && isThisMonth(expense.timestamp),
+        )
         .reduce((total, expense) => total + expense.amount, 0),
     [expenses],
   );
   const monthIncome = useMemo(
     () =>
       expenses
-        .filter((expense) => expense.type === "income" && isThisMonth(expense.timestamp))
+        .filter(
+          (expense) =>
+            expense.type === "income" && isThisMonth(expense.timestamp),
+        )
         .reduce((total, expense) => total + expense.amount, 0),
     [expenses],
   );
-  const categoryBreakdown = useMemo(() => getCategoryBreakdown(expenses), [expenses]);
+  const categoryBreakdown = useMemo(
+    () => getCategoryBreakdown(expenses),
+    [expenses],
+  );
   const recentExpenses = expenses.slice(0, 12);
 
   const requestPermissions = async () => {
@@ -167,7 +189,9 @@ export default function ExpensesScreen() {
         );
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to request permissions");
+      setError(
+        err instanceof Error ? err.message : "Unable to request permissions",
+      );
     }
   };
 
@@ -182,10 +206,15 @@ export default function ExpensesScreen() {
   };
 
   const confirmTransaction = async (item: PendingTransaction) => {
-    const amount = Number.parseFloat(editingId === item.id ? editing.amount : String(item.amount));
-    const nextCategory = editingId === item.id ? editing.category : item.category;
+    const amount = Number.parseFloat(
+      editingId === item.id ? editing.amount : String(item.amount),
+    );
+    const nextCategory =
+      editingId === item.id ? editing.category : item.category;
     const nextMerchant =
-      editingId === item.id ? editing.merchant.trim() || "Unknown Merchant" : item.merchant;
+      editingId === item.id
+        ? editing.merchant.trim() || "Unknown Merchant"
+        : item.merchant;
     const nextType = editingId === item.id ? editing.type : item.type;
 
     if (!Number.isFinite(amount) || amount <= 0) {
@@ -207,7 +236,9 @@ export default function ExpensesScreen() {
           : undefined,
       );
       setEditingId("");
-      setPending((current) => current.filter((pendingItem) => pendingItem.id !== item.id));
+      setPending((current) =>
+        current.filter((pendingItem) => pendingItem.id !== item.id),
+      );
       setExpenses((current) => [
         {
           amount,
@@ -230,7 +261,9 @@ export default function ExpensesScreen() {
         })
         .catch(() => undefined);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to add transaction");
+      setError(
+        err instanceof Error ? err.message : "Unable to add transaction",
+      );
     } finally {
       setSavingId("");
     }
@@ -251,13 +284,17 @@ export default function ExpensesScreen() {
               const deleted = await deleteExpense(expense.id);
 
               if (!deleted) {
-                Alert.alert("Delete failed", "This transaction was not found on this device.");
+                Alert.alert(
+                  "Delete failed",
+                  "This transaction was not found on this device.",
+                );
                 return;
               }
 
               await loadData();
             } catch (err) {
-              const message = err instanceof Error ? err.message : "Unable to delete expense";
+              const message =
+                err instanceof Error ? err.message : "Unable to delete expense";
               setError(message);
               Alert.alert("Delete failed", message);
             } finally {
@@ -273,12 +310,16 @@ export default function ExpensesScreen() {
     try {
       setSavingId(item.id);
       await ignorePendingTransaction(item.id);
-      setPending((current) => current.filter((pendingItem) => pendingItem.id !== item.id));
+      setPending((current) =>
+        current.filter((pendingItem) => pendingItem.id !== item.id),
+      );
       if (editingId === item.id) {
         setEditingId("");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to ignore transaction");
+      setError(
+        err instanceof Error ? err.message : "Unable to ignore transaction",
+      );
     } finally {
       setSavingId("");
     }
@@ -300,7 +341,7 @@ export default function ExpensesScreen() {
         return;
       }
 
-      const result = await scanRecentSms(100);
+      const result = await scanRecentSms(10);
       const ignoredSummary = Object.entries(result.ignoredReasons)
         .map(([reason, count]) => `${reason}: ${count}`)
         .join(", ");
@@ -312,7 +353,9 @@ export default function ExpensesScreen() {
       );
       await loadData();
     } catch (err) {
-      setSmsTestResult(err instanceof Error ? err.message : "Unable to check recent SMS");
+      setSmsTestResult(
+        err instanceof Error ? err.message : "Unable to check recent SMS",
+      );
     } finally {
       setScanningSms(false);
     }
@@ -323,7 +366,9 @@ export default function ExpensesScreen() {
       <SafeAreaView edges={["top"]} style={styles.screen}>
         <View style={styles.centerState}>
           <Text style={styles.title}>Expenses</Text>
-          <Text style={styles.mutedText}>SMS transaction approval is Android only.</Text>
+          <Text style={styles.mutedText}>
+            SMS transaction approval is Android only.
+          </Text>
         </View>
       </SafeAreaView>
     );
@@ -372,12 +417,17 @@ export default function ExpensesScreen() {
 
         {!hasPermission ? (
           <View style={styles.permissionPanel}>
-            <Text style={styles.panelTitle}>Enable SMS transaction approval</Text>
-            <Text style={styles.panelText}>
-              Memonest will only process transaction-looking SMS, skip OTP/login messages, and ask
-              before adding anything.
+            <Text style={styles.panelTitle}>
+              Enable SMS transaction approval
             </Text>
-            <Pressable style={styles.primaryButton} onPress={() => void requestPermissions()}>
+            <Text style={styles.panelText}>
+              Memonest will only process transaction-looking SMS, skip OTP/login
+              messages, and ask before adding anything.
+            </Text>
+            <Pressable
+              style={styles.primaryButton}
+              onPress={() => void requestPermissions()}
+            >
               <Text style={styles.primaryButtonText}>Allow SMS detection</Text>
             </Pressable>
           </View>
@@ -395,11 +445,15 @@ export default function ExpensesScreen() {
             </View>
             <View style={styles.quickActionCopy}>
               <Text style={styles.quickActionTitlePrimary}>Add manually</Text>
-              <Text style={styles.quickActionTextPrimary}>Cash, UPI, income</Text>
+              <Text style={styles.quickActionTextPrimary}>
+                Cash, UPI, income
+              </Text>
             </View>
           </Pressable>
 
-          {smsTestResult ? <Text style={styles.testResultText}>{smsTestResult}</Text> : null}
+          {smsTestResult ? (
+            <Text style={styles.testResultText}>{smsTestResult}</Text>
+          ) : null}
           <Pressable
             disabled={scanningSms}
             style={[styles.quickActionButton, styles.quickActionSecondary]}
@@ -424,7 +478,9 @@ export default function ExpensesScreen() {
         <View style={styles.summaryGrid}>
           <View style={styles.summaryCard}>
             <Text style={styles.summaryLabel}>This Month Spend</Text>
-            <Text style={styles.summaryValue}>{formatCurrency(monthSpend)}</Text>
+            <Text style={styles.summaryValue}>
+              {formatCurrency(monthSpend)}
+            </Text>
           </View>
           <View style={styles.summaryCard}>
             <Text style={styles.summaryLabel}>This Month Income</Text>
@@ -450,20 +506,32 @@ export default function ExpensesScreen() {
                     <Text style={styles.amountText}>
                       {formatCurrency(item.amount, item.currency)}
                     </Text>
-                    <Text style={styles.typePill}>{item.type === "credit" ? "Income" : "Expense"}</Text>
+                    <Text style={styles.typePill}>
+                      {item.type === "credit" ? "Income" : "Expense"}
+                    </Text>
                   </View>
 
                   {isEditing ? (
                     <View style={styles.editBox}>
                       <TextInput
                         keyboardType="decimal-pad"
-                        onChangeText={(value) => setEditing((current) => ({ ...current, amount: value }))}
+                        onChangeText={(value) =>
+                          setEditing((current) => ({
+                            ...current,
+                            amount: value,
+                          }))
+                        }
                         placeholder="Amount"
                         style={styles.input}
                         value={editing.amount}
                       />
                       <TextInput
-                        onChangeText={(value) => setEditing((current) => ({ ...current, merchant: value }))}
+                        onChangeText={(value) =>
+                          setEditing((current) => ({
+                            ...current,
+                            merchant: value,
+                          }))
+                        }
                         placeholder="Merchant"
                         style={styles.input}
                         value={editing.merchant}
@@ -472,13 +540,23 @@ export default function ExpensesScreen() {
                         {categories.map((category) => (
                           <Pressable
                             key={category}
-                            style={[styles.chip, editing.category === category && styles.selectedChip]}
-                            onPress={() => setEditing((current) => ({ ...current, category }))}
+                            style={[
+                              styles.chip,
+                              editing.category === category &&
+                                styles.selectedChip,
+                            ]}
+                            onPress={() =>
+                              setEditing((current) => ({
+                                ...current,
+                                category,
+                              }))
+                            }
                           >
                             <Text
                               style={[
                                 styles.chipText,
-                                editing.category === category && styles.selectedChipText,
+                                editing.category === category &&
+                                  styles.selectedChipText,
                               ]}
                             >
                               {category}
@@ -490,13 +568,19 @@ export default function ExpensesScreen() {
                         {(["debit", "credit"] as const).map((type) => (
                           <Pressable
                             key={type}
-                            style={[styles.chip, editing.type === type && styles.selectedChip]}
-                            onPress={() => setEditing((current) => ({ ...current, type }))}
+                            style={[
+                              styles.chip,
+                              editing.type === type && styles.selectedChip,
+                            ]}
+                            onPress={() =>
+                              setEditing((current) => ({ ...current, type }))
+                            }
                           >
                             <Text
                               style={[
                                 styles.chipText,
-                                editing.type === type && styles.selectedChipText,
+                                editing.type === type &&
+                                  styles.selectedChipText,
                               ]}
                             >
                               {type === "credit" ? "Income" : "Expense"}
@@ -508,7 +592,9 @@ export default function ExpensesScreen() {
                   ) : (
                     <>
                       <Text style={styles.merchantText}>{item.merchant}</Text>
-                      <Text style={styles.metaText}>{item.category} • {formatDate(item.timestamp)}</Text>
+                      <Text style={styles.metaText}>
+                        {item.category} • {formatDate(item.timestamp)}
+                      </Text>
                     </>
                   )}
 
@@ -523,7 +609,11 @@ export default function ExpensesScreen() {
                       onPress={() => void confirmTransaction(item)}
                     >
                       <Text style={styles.primaryActionText}>
-                        {isSaving ? "Saving..." : item.type === "credit" ? "Add income" : "Add expense"}
+                        {isSaving
+                          ? "Saving..."
+                          : item.type === "credit"
+                            ? "Add income"
+                            : "Add expense"}
                       </Text>
                     </Pressable>
                     <Pressable
@@ -536,16 +626,22 @@ export default function ExpensesScreen() {
                     <Pressable
                       disabled={isSaving}
                       style={styles.secondaryAction}
-                      onPress={() => (isEditing ? setEditingId("") : startEditing(item))}
+                      onPress={() =>
+                        isEditing ? setEditingId("") : startEditing(item)
+                      }
                     >
-                      <Text style={styles.secondaryActionText}>{isEditing ? "Cancel" : "Edit"}</Text>
+                      <Text style={styles.secondaryActionText}>
+                        {isEditing ? "Cancel" : "Edit"}
+                      </Text>
                     </Pressable>
                   </View>
                 </View>
               );
             })
           ) : (
-            <Text style={styles.emptyText}>Transaction SMS approvals will appear here.</Text>
+            <Text style={styles.emptyText}>
+              Transaction SMS approvals will appear here.
+            </Text>
           )}
         </View>
 
@@ -555,11 +651,15 @@ export default function ExpensesScreen() {
             Object.entries(categoryBreakdown).map(([category, amount]) => (
               <View key={category} style={styles.breakdownRow}>
                 <Text style={styles.breakdownLabel}>{category}</Text>
-                <Text style={styles.breakdownValue}>{formatCurrency(amount)}</Text>
+                <Text style={styles.breakdownValue}>
+                  {formatCurrency(amount)}
+                </Text>
               </View>
             ))
           ) : (
-            <Text style={styles.emptyText}>No spend categories this month yet.</Text>
+            <Text style={styles.emptyText}>
+              No spend categories this month yet.
+            </Text>
           )}
         </View>
 
@@ -570,16 +670,32 @@ export default function ExpensesScreen() {
               <View key={expense.id} style={styles.expenseRow}>
                 <View style={styles.expenseIcon}>
                   <Ionicons
-                    color={expense.type === "income" ? colors.success : colors.primary}
-                    name={expense.type === "income" ? "trending-up-outline" : "card-outline"}
+                    color={
+                      expense.type === "income"
+                        ? colors.success
+                        : colors.primary
+                    }
+                    name={
+                      expense.type === "income"
+                        ? "trending-up-outline"
+                        : "card-outline"
+                    }
                     size={18}
                   />
                 </View>
                 <View style={styles.expenseCopy}>
                   <Text style={styles.merchantText}>{expense.merchant}</Text>
-                  <Text style={styles.metaText}>{expense.category} • {formatDate(expense.timestamp)}</Text>
+                  <Text style={styles.metaText}>
+                    {expense.category} • {formatDate(expense.timestamp)}
+                  </Text>
                 </View>
-                <Text style={expense.type === "income" ? styles.incomeAmount : styles.expenseAmount}>
+                <Text
+                  style={
+                    expense.type === "income"
+                      ? styles.incomeAmount
+                      : styles.expenseAmount
+                  }
+                >
                   {expense.type === "income" ? "+" : "-"}
                   {formatCurrency(expense.amount, expense.currency)}
                 </Text>
@@ -588,12 +704,18 @@ export default function ExpensesScreen() {
                   style={styles.deleteButton}
                   onPress={() => removeExpense(expense)}
                 >
-                  <Ionicons color={colors.danger} name="trash-outline" size={18} />
+                  <Ionicons
+                    color={colors.danger}
+                    name="trash-outline"
+                    size={18}
+                  />
                 </Pressable>
               </View>
             ))
           ) : (
-            <Text style={styles.emptyText}>Confirmed SMS expenses will show up here.</Text>
+            <Text style={styles.emptyText}>
+              Confirmed SMS expenses will show up here.
+            </Text>
           )}
         </View>
       </ScrollView>

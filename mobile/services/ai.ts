@@ -1,4 +1,5 @@
 import { ALLOWED_CATEGORIES } from '../constants/memoryCategories';
+import { parseSmartVoiceNote } from '../utils/smartVoiceParser';
 
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 const FALLBACK_METADATA = {
@@ -252,41 +253,45 @@ export const getFallbackMetadata = () => FALLBACK_METADATA;
 const getFallbackCaptureClassification = (content: string): CaptureClassification => {
   const normalized = content.toLowerCase();
   const title = content.trim().slice(0, 64) || 'Quick Capture';
+  const smartIntent = parseSmartVoiceNote(content);
 
-  if (/(₹|rs\.?|inr)\s*\d+|\bspent\b|\bpaid\b/.test(normalized)) {
+  if (smartIntent.type === 'expense') {
     return {
       type: 'Expense',
       title,
-      category: normalized.includes('zomato') || normalized.includes('swiggy') ? 'food' : 'general',
+      category: smartIntent.category,
       tags: ['expense'],
       confidence: 0.72
     };
   }
 
-  if (/\b(need|remind|remember|when i|tomorrow|today|later)\b/.test(normalized)) {
+  if (smartIntent.type === 'reminder') {
     return {
       type: 'Reminder',
-      title,
+      title: smartIntent.title || title,
       category: 'reminder',
       tags: ['reminder'],
       confidence: 0.68
     };
   }
 
-  if (/\b(todo|task|call|follow up|finish|fix)\b/.test(normalized)) {
+  if (smartIntent.type === 'task') {
     return {
       type: 'Task',
-      title,
+      title: smartIntent.title || title,
       category: 'task',
       tags: ['task'],
       confidence: 0.66
     };
   }
 
-  if (/\b(finished|completed|shipped|implemented|built)\b/.test(normalized)) {
+  if (
+    smartIntent.category === 'work' ||
+    /\b(finished|completed|shipped|implemented|built)\b/.test(normalized)
+  ) {
     return {
       type: 'Work Log',
-      title,
+      title: smartIntent.note || title,
       category: 'work',
       tags: ['work-log'],
       confidence: 0.66

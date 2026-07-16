@@ -30,7 +30,7 @@ import {
   type CaptureClassificationType,
 } from "../services/ai";
 import { createMemory, type CreateMemoryInput } from "../services/api";
-import { addManualExpense } from "../services/expenses";
+import { addManualExpense, syncExpensesToMongo } from "../services/expenses";
 import { scheduleMemoryReminder } from "../services/notifications";
 import {
   addVoiceTranscriptListener,
@@ -44,6 +44,7 @@ import {
 } from "../services/voiceTranscription";
 import { colors, subtleShadow } from "../styles/theme";
 import { markHomeCacheStale } from "../utils/homeCache";
+import { parseSmartVoiceNote, type SmartVoiceIntent } from "../utils/smartVoiceParser";
 
 type CaptureMode = "quick" | "confirm" | "menu" | "expense" | "manual" | "voice";
 type ManualCaptureType = "memory" | "task" | "reminder";
@@ -215,6 +216,41 @@ const parseExpenseDraft = (content: string, classification?: CaptureClassificati
   };
 };
 
+const formatVoiceAmount = (amount: number) =>
+  `₹${amount.toLocaleString(undefined, {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+  })}`;
+
+const formatVoiceReminderAt = (date: Date) =>
+  `${reminderDateFormatter.format(date)} at ${reminderTimeFormatter.format(date)}`;
+
+const getVoiceIntentLabel = (intent: SmartVoiceIntent) => {
+  switch (intent.type) {
+    case "expense":
+      return "Expense";
+    case "reminder":
+      return "Reminder";
+    case "task":
+      return "Task";
+    case "log":
+      return "Memory Log";
+  }
+};
+
+const getVoiceSaveLabel = (intent: SmartVoiceIntent) => {
+  switch (intent.type) {
+    case "expense":
+      return "Save expense";
+    case "reminder":
+      return "Create reminder";
+    case "task":
+      return "Save task";
+    case "log":
+      return "Save log";
+  }
+};
+
 export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) => {
   const [visible, setVisible] = useState(false);
   const [mode, setMode] = useState<CaptureMode>("quick");
@@ -258,8 +294,14 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
   }, []);
 
   useEffect(() => {
-    const subscription = addVoiceTranscriptListener((transcript) => {
+    const subscription = addVoiceTranscriptListener((transcript, event) => {
       setVoiceTranscript(transcript);
+      if (event.isFinal) {
+        setVoiceError(null);
+        setVoicePhase((current) =>
+          current === "recording" || current === "transcribing" ? "review" : current,
+        );
+      }
     });
 
     return () => {
@@ -484,18 +526,58 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
     }
 
     try {
+      const intent = parseSmartVoiceNote(transcript);
       setVoiceError(null);
       setVoicePhase("saving");
-      await createMemory({
-        title: getDefaultTitle(transcript, "Voice Note"),
-        content: transcript,
-        category: "personal",
-        tags: ["voice"],
-        kind: "note",
-        type: "memory",
-        source: "voice",
-        capturedAt: new Date().toISOString(),
-      });
+
+      if (intent.type === "expense") {
+        const created = await addManualExpense({
+          amount: intent.amount,
+          category: intent.category,
+          merchant: intent.merchant,
+          note: intent.originalText,
+        });
+
+        void syncExpensesToMongo([created]).catch(() => undefined);
+      } else if (intent.type === "reminder") {
+        const memory = await createMemory({
+          title: intent.title,
+          content: intent.originalText,
+          category: "reminder",
+          tags: ["voice", "reminder"],
+          kind: "note",
+          type: "reminder",
+          reminderAt: intent.reminderAt.toISOString(),
+          reminderType: "time",
+          notificationEnabled: true,
+          source: "voice",
+          capturedAt: new Date().toISOString(),
+        });
+
+        await scheduleMemoryReminder(memory);
+      } else if (intent.type === "task") {
+        await createMemory({
+          title: intent.title,
+          content: intent.originalText,
+          category: "task",
+          tags: ["voice", "task"],
+          kind: "task",
+          type: "task",
+          source: "voice",
+          capturedAt: new Date().toISOString(),
+        });
+      } else {
+        await createMemory({
+          title: getDefaultTitle(intent.note || transcript, "Voice Note"),
+          content: intent.note || transcript,
+          category: intent.category,
+          tags: ["voice", "log"],
+          kind: intent.category === "work" ? "work_done" : "note",
+          source: "voice",
+          capturedAt: new Date().toISOString(),
+        });
+      }
+
       await markHomeCacheStale();
       await cancelVoiceTranscription();
       close();
@@ -968,6 +1050,56 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
     </>
   );
 
+  const renderVoiceIntentReview = (intent: SmartVoiceIntent | null) => {
+    if (!intent) {
+      return null;
+    }
+
+    return (
+      <View style={styles.reviewBox}>
+        <Text style={styles.eyebrow}>Detected: {getVoiceIntentLabel(intent)}</Text>
+        {intent.type === "expense" ? (
+          <>
+            <Text style={styles.reviewLabel}>Amount</Text>
+            <Text style={styles.reviewValue}>{formatVoiceAmount(intent.amount)}</Text>
+            <Text style={styles.reviewLabel}>Merchant / category</Text>
+            <Text style={styles.reviewValue}>
+              {intent.merchant} • {intent.category}
+            </Text>
+            <Text style={styles.reviewLabel}>Original</Text>
+            <Text style={styles.reviewValue}>{intent.originalText}</Text>
+          </>
+        ) : null}
+        {intent.type === "reminder" ? (
+          <>
+            <Text style={styles.reviewLabel}>Title</Text>
+            <Text style={styles.reviewValue}>{intent.title}</Text>
+            <Text style={styles.reviewLabel}>Date / time</Text>
+            <Text style={styles.reviewValue}>{formatVoiceReminderAt(intent.reminderAt)}</Text>
+            <Text style={styles.reviewLabel}>Original</Text>
+            <Text style={styles.reviewValue}>{intent.originalText}</Text>
+          </>
+        ) : null}
+        {intent.type === "task" ? (
+          <>
+            <Text style={styles.reviewLabel}>Task title</Text>
+            <Text style={styles.reviewValue}>{intent.title}</Text>
+            <Text style={styles.reviewLabel}>Original</Text>
+            <Text style={styles.reviewValue}>{intent.originalText}</Text>
+          </>
+        ) : null}
+        {intent.type === "log" ? (
+          <>
+            <Text style={styles.reviewLabel}>Cleaned note</Text>
+            <Text style={styles.reviewValue}>{intent.note}</Text>
+            <Text style={styles.reviewLabel}>Original</Text>
+            <Text style={styles.reviewValue}>{intent.originalText}</Text>
+          </>
+        ) : null}
+      </View>
+    );
+  };
+
   const renderVoiceCapture = () => {
     const isBusy =
       voicePhase === "checking" ||
@@ -977,6 +1109,7 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
     const hasTranscript = voiceTranscript.trim().length > 0;
     const canSave =
       hasTranscript && (voicePhase === "review" || voicePhase === "saving");
+    const voiceIntent = canSave ? parseSmartVoiceNote(voiceTranscript) : null;
 
     return (
       <>
@@ -995,7 +1128,11 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
           <View style={styles.manualHeaderText}>
             <Text style={styles.eyebrow}>Voice note</Text>
             <Text style={styles.title}>
-              {isRecording ? "I'm listening." : canSave ? "Save this memory?" : "Speak naturally."}
+              {isRecording
+                ? "I'm listening."
+                : voiceIntent
+                  ? `Save ${getVoiceIntentLabel(voiceIntent).toLowerCase()}?`
+                  : "Speak naturally."}
             </Text>
           </View>
         </View>
@@ -1016,6 +1153,8 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
             value={voiceTranscript}
           />
         </View>
+
+        {renderVoiceIntentReview(voiceIntent)}
 
         {voiceError ? <Text style={styles.voiceError}>{voiceError}</Text> : null}
 
@@ -1038,7 +1177,9 @@ export const SmartCaptureCenter = forwardRef<SmartCaptureCenterHandle>((_, ref) 
               {voicePhase === "saving" ? (
                 <ActivityIndicator color={colors.white} />
               ) : (
-                <Text style={styles.primaryText}>Save</Text>
+                <Text style={styles.primaryText}>
+                  {voiceIntent ? getVoiceSaveLabel(voiceIntent) : "Save"}
+                </Text>
               )}
             </Pressable>
           ) : (

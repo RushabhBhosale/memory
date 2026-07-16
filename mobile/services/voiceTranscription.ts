@@ -7,6 +7,11 @@ export type VoiceTranscriptionResult = {
   transcript: string;
 };
 
+export type VoiceTranscriptEvent = {
+  isFinal?: boolean;
+  transcript: string;
+};
+
 type NativeVoiceNoteModule = {
   cancelTranscription: () => Promise<boolean>;
   captureWithSystemPrompt: (languageTag?: string | null) => Promise<VoiceTranscriptionResult>;
@@ -66,10 +71,13 @@ export const captureVoiceWithSystemPrompt = async (languageTag?: string | null) 
   getVoiceNoteModule().captureWithSystemPrompt(languageTag);
 
 export const addVoiceTranscriptListener = (
-  listener: (transcript: string) => void,
+  listener: (transcript: string, event: VoiceTranscriptEvent) => void,
 ) =>
   DeviceEventEmitter.addListener("MemonestVoiceTranscript", (event) => {
     if (event && typeof event.transcript === "string") {
-      listener(event.transcript);
+      listener(event.transcript, {
+        isFinal: Boolean(event.isFinal),
+        transcript: event.transcript,
+      });
     }
   });

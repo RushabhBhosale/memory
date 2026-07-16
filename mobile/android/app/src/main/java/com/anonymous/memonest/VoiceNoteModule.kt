@@ -58,7 +58,7 @@ class VoiceNoteModule(private val reactContext: ReactApplicationContext) :
         }
 
         transcriptDraft = transcript
-        emitTranscript(transcript)
+        emitTranscript(transcript, isFinal = true)
         promise.resolve(toResultMap(transcript))
       }
     }
@@ -282,7 +282,7 @@ class VoiceNoteModule(private val reactContext: ReactApplicationContext) :
     lastErrorMessage = message
 
     if (transcriptDraft.isNotBlank()) {
-      emitTranscript(transcriptDraft)
+      emitTranscript(transcriptDraft, isFinal = true)
       resolveStop(transcriptDraft)
       return
     }
@@ -299,7 +299,7 @@ class VoiceNoteModule(private val reactContext: ReactApplicationContext) :
 
   override fun onResults(results: Bundle?) {
     transcriptDraft = extractTranscript(results).ifBlank { transcriptDraft }
-    emitTranscript(transcriptDraft)
+    emitTranscript(transcriptDraft, isFinal = true)
     resolveStop(transcriptDraft)
   }
 
@@ -391,7 +391,7 @@ class VoiceNoteModule(private val reactContext: ReactApplicationContext) :
       putBoolean("audioFileDeleted", true)
     }
 
-  private fun emitTranscript(transcript: String) {
+  private fun emitTranscript(transcript: String, isFinal: Boolean = false) {
     if (transcript.isBlank()) {
       return
     }
@@ -402,6 +402,7 @@ class VoiceNoteModule(private val reactContext: ReactApplicationContext) :
         "MemonestVoiceTranscript",
         Arguments.createMap().apply {
           putString("transcript", transcript.trim())
+          putBoolean("isFinal", isFinal)
         }
       )
   }
