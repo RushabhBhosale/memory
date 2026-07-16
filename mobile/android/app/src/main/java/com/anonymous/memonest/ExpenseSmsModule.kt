@@ -69,6 +69,12 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
+  fun setActiveExpenseUserId(userId: String, promise: Promise) {
+    ExpenseTransactionStore.setActiveUserId(reactContext, userId)
+    promise.resolve(null)
+  }
+
+  @ReactMethod
   fun getTrackingDebugStatus(promise: Promise) {
     try {
       val permissionGranted = hasRequiredPermissions()
@@ -142,7 +148,10 @@ class ExpenseSmsModule(private val reactContext: ReactApplicationContext) :
         type = if (input.hasKey("type")) input.getString("type") ?: "expense" else "expense",
         source = "manual",
         originalPreview = if (input.hasKey("note")) input.getString("note") ?: "" else "",
-        timestamp = System.currentTimeMillis()
+        timestamp = if (input.hasKey("timestamp")) input.getDouble("timestamp").toLong() else System.currentTimeMillis(),
+        id = if (input.hasKey("id")) input.getString("id") else null,
+        note = if (input.hasKey("note")) input.getString("note") ?: "" else "",
+        userId = if (input.hasKey("userId")) input.getString("userId") ?: "main" else "main"
       )
     emitExpensesChanged()
     promise.resolve(expense.toWritableMap())

@@ -8,10 +8,7 @@ import com.facebook.react.uimanager.ViewManager
 class AppUsagePackage : ReactPackage {
   override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> =
     listOf(
-      AppUsageModule(reactContext),
-      ExpenseSmsModule(reactContext),
-      ScreenshotWatcherModule(reactContext),
-      VoiceNoteModule(reactContext)
+      ExpenseSmsModule(reactContext)
     )
 
   @Deprecated("Required by the ReactPackage interface")

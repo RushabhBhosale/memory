@@ -45,10 +45,18 @@ object SmsTransactionParser {
       "balance in account",
       "balance is"
     )
+  private val promotionalPatterns =
+    listOf(
+      Regex("(?i)\\b(?:get|earn|enjoy|unlock)\\b.{0,50}\\bcashback\\b"),
+      Regex("(?i)\\bcashback\\b.{0,60}\\b(?:on|for|next|via|available)\\b"),
+      Regex("(?i)\\b(?:next recharge|recharge now|discount|limited time|top brands|open a bank account|promo code|coupon)\\b")
+    )
   private val debitKeywords =
     listOf("debited", "spent", "paid", "purchase", "withdrawn", "card used")
   private val creditKeywords =
-    listOf("credited", "received", "deposited", "refund", "cashback", "salary", "sent you")
+    listOf("credited", "received", "deposited", "refund", "salary", "sent you")
+  private val cashbackCreditRegex =
+    Regex("(?i)\\bcashback\\b.{0,60}\\b(?:credited|received|deposited)\\b|\\b(?:credited|received|deposited)\\b.{0,60}\\bcashback\\b")
   private val sentTransferRegex =
     Regex("(?i)\\bsent\\s+(?:₹|rs\\.?|inr)\\s*[0-9][0-9,]*(?:\\.\\d{1,2})?\\s+from\\s+.+?\\s+to\\s+\\S+")
   private val amountRegex =
@@ -74,7 +82,11 @@ object SmsTransactionParser {
       return ruleResult
     }
 
-    if (ruleResult.reason == "ignored_sensitive_message" || ruleResult.reason == "ignored_non_transaction_message") {
+    if (
+      ruleResult.reason == "ignored_sensitive_message" ||
+        ruleResult.reason == "ignored_non_transaction_message" ||
+        ruleResult.reason == "ignored_promotional_message"
+    ) {
       return ruleResult
     }
 
@@ -119,8 +131,16 @@ object SmsTransactionParser {
       return SmsTransactionParseResult(null, "ignored_non_transaction_message")
     }
 
+    val hasCompletedCreditSignal =
+      creditKeywords.any { normalized.contains(it) } || cashbackCreditRegex.containsMatchIn(messageBody)
+    val isPromotion = promotionalPatterns.any { it.containsMatchIn(messageBody) }
+
+    if (isPromotion && !hasCompletedCreditSignal) {
+      return SmsTransactionParseResult(null, "ignored_promotional_message")
+    }
+
     val debitMatch = debitKeywords.any { normalized.contains(it) } || sentTransferRegex.containsMatchIn(messageBody)
-    val creditMatch = creditKeywords.any { normalized.contains(it) }
+    val creditMatch = hasCompletedCreditSignal
 
     if (!debitMatch && !creditMatch) {
       return SmsTransactionParseResult(null, "missing_transaction_keyword")

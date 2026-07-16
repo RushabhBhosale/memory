@@ -13,6 +13,7 @@ export type ExpenseDocument = Document & {
   source: 'sms' | 'manual';
   timestamp: Date;
   type: ExpenseType;
+  userId: string;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -75,6 +76,12 @@ const expenseSchema = new Schema<ExpenseDocument>(
       default: 'expense',
       trim: true,
       index: true
+    },
+    userId: {
+      type: String,
+      default: 'main',
+      index: true,
+      trim: true
     }
   },
   {
@@ -83,6 +90,7 @@ const expenseSchema = new Schema<ExpenseDocument>(
 );
 
 expenseSchema.index({ createdAt: -1 });
+expenseSchema.index({ userId: 1, timestamp: -1 });
 expenseSchema.index({ merchant: 'text', category: 'text', note: 'text', originalSmsPreview: 'text' });
 
 const Expense =

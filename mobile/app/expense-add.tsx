@@ -1,11 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import { useState } from "react";
+import { router, useLocalSearchParams } from "expo-router";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -18,12 +17,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { ScreenHeader } from "../components/ScreenHeader";
 import {
   addManualExpense,
-  syncExpensesToMongo,
   type ExpenseType,
 } from "../services/expenses";
 import { colors, subtleShadow } from "../styles/theme";
 
-const categories = ["food", "shopping", "travel", "bills", "general"];
+const categories = ["food", "shopping", "travel", "bills", "salary", "general"];
 
 type ManualExpenseState = {
   amount: string;
@@ -33,7 +31,17 @@ type ManualExpenseState = {
   type: ExpenseType;
 };
 
+const getParamValue = (value?: string | string[]) =>
+  Array.isArray(value) ? value[0] : value;
+
 export default function ExpenseAddScreen() {
+  const params = useLocalSearchParams<{
+    amount?: string;
+    category?: string;
+    merchant?: string;
+    note?: string;
+    type?: string;
+  }>();
   const [expense, setExpense] = useState<ManualExpenseState>({
     amount: "",
     category: "general",
@@ -43,6 +51,27 @@ export default function ExpenseAddScreen() {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    const amount = getParamValue(params.amount);
+    const merchant = getParamValue(params.merchant);
+    const category = getParamValue(params.category);
+    const note = getParamValue(params.note);
+    const type = getParamValue(params.type);
+
+    if (!amount && !merchant && !category && !note && !type) {
+      return;
+    }
+
+    setExpense((current) => ({
+      ...current,
+      amount: amount || current.amount,
+      category: category || current.category,
+      merchant: merchant || current.merchant,
+      note: note || current.note,
+      type: type === "income" ? "income" : current.type,
+    }));
+  }, [params.amount, params.category, params.merchant, params.note, params.type]);
 
   const saveManualExpense = async () => {
     const amount = Number.parseFloat(expense.amount);
@@ -61,15 +90,13 @@ export default function ExpenseAddScreen() {
       setSaving(true);
       setError("");
 
-      const created = await addManualExpense({
+      await addManualExpense({
         amount,
         category: expense.category,
         merchant: expense.merchant.trim(),
         note: expense.note.trim(),
         type: expense.type,
       });
-
-      void syncExpensesToMongo([created]).catch(() => undefined);
 
       Alert.alert("Saved", "Transaction added.", [
         {
@@ -83,17 +110,6 @@ export default function ExpenseAddScreen() {
       setSaving(false);
     }
   };
-
-  if (Platform.OS !== "android") {
-    return (
-      <SafeAreaView edges={["top"]} style={styles.screen}>
-        <View style={styles.centerState}>
-          <Text style={styles.title}>Add transaction</Text>
-          <Text style={styles.mutedText}>Manual expense entry is available in the Android app build.</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   return (
     <SafeAreaView edges={["top"]} style={styles.screen}>
@@ -115,7 +131,7 @@ export default function ExpenseAddScreen() {
               <View style={styles.formCopy}>
                 <Text style={styles.formTitle}>Manual entry</Text>
                 <Text style={styles.formMeta}>
-                  Add cash, UPI, income, or anything SMS detection missed.
+                  Add cash, UPI, income, or anything SMS detection missed. It saves locally first.
                 </Text>
               </View>
             </View>

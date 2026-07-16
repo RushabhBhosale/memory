@@ -10,8 +10,24 @@ import kotlin.math.min
 private const val EXPENSE_PREFS = "memonest_expense_sms"
 private const val PENDING_KEY = "pending_transactions"
 private const val EXPENSES_KEY = "expenses"
+private const val ACTIVE_USER_ID_KEY = "active_user_id"
 
 object ExpenseTransactionStore {
+  fun setActiveUserId(context: Context, userId: String) {
+    context.getSharedPreferences(EXPENSE_PREFS, Context.MODE_PRIVATE)
+      .edit()
+      .putString(ACTIVE_USER_ID_KEY, userId.ifBlank { "main" })
+      .apply()
+  }
+
+  private fun activeUserId(context: Context): String =
+    context.getSharedPreferences(EXPENSE_PREFS, Context.MODE_PRIVATE)
+      .getString(ACTIVE_USER_ID_KEY, "main")
+      ?.ifBlank { "main" }
+      ?: "main"
+
+  private fun ownerId(item: JSONObject): String = item.optString("userId").ifBlank { "main" }
+
   fun addExpense(
     context: Context,
     amount: Double,
@@ -21,11 +37,14 @@ object ExpenseTransactionStore {
     type: String,
     source: String,
     originalPreview: String,
-    timestamp: Long
+    timestamp: Long,
+    id: String? = null,
+    note: String = "",
+    userId: String = "main"
   ): JSONObject {
     val now = System.currentTimeMillis()
     val expense = JSONObject().apply {
-      put("id", UUID.randomUUID().toString())
+      put("id", id?.ifBlank { null } ?: UUID.randomUUID().toString())
       put("amount", amount)
       put("currency", currency)
       put("merchant", merchant.ifBlank { "Unknown Merchant" })
@@ -33,8 +52,10 @@ object ExpenseTransactionStore {
       put("type", type)
       put("source", source)
       put("originalSmsPreview", safePreview(originalPreview))
+      put("note", note.trim())
       put("timestamp", timestamp)
       put("createdAt", now)
+      put("userId", userId.ifBlank { "main" })
     }
     val expenses = readArray(context, EXPENSES_KEY)
     expenses.put(expense)
@@ -75,6 +96,7 @@ object ExpenseTransactionStore {
       put("status", "pending")
       put("createdAt", now)
       put("updatedAt", now)
+      put("userId", activeUserId(context))
     }
 
     val pending = readArray(context, PENDING_KEY)
@@ -87,11 +109,29 @@ object ExpenseTransactionStore {
     val pending = readArray(context, PENDING_KEY)
     val visible = JSONArray()
     val seen = mutableSetOf<String>()
+    var changed = false
 
     for (index in 0 until pending.length()) {
       val item = pending.optJSONObject(index) ?: continue
 
+      if (ownerId(item) != activeUserId(context)) {
+        continue
+      }
+
       if (item.optString("status") != "pending") {
+        continue
+      }
+
+      val parserResult = SmsTransactionParser.parseWithRules(
+        item.optString("sender"),
+        item.optString("messagePreview"),
+        item.optLong("timestamp", System.currentTimeMillis())
+      )
+
+      if (parserResult.reason == "ignored_promotional_message") {
+        item.put("status", "ignored")
+        item.put("updatedAt", System.currentTimeMillis())
+        changed = true
         continue
       }
 
@@ -109,10 +149,28 @@ object ExpenseTransactionStore {
       visible.put(item)
     }
 
+    if (changed) {
+      writeArray(context, PENDING_KEY, pending)
+    }
+
     return visible
   }
 
-  fun listExpenses(context: Context): JSONArray = readArray(context, EXPENSES_KEY)
+  fun listExpenses(context: Context): JSONArray {
+    val expenses = readArray(context, EXPENSES_KEY)
+    val visible = JSONArray()
+    val currentUserId = activeUserId(context)
+
+    for (index in 0 until expenses.length()) {
+      val item = expenses.optJSONObject(index) ?: continue
+
+      if (ownerId(item) == currentUserId) {
+        visible.put(item)
+      }
+    }
+
+    return visible
+  }
 
   fun hasStoredTransaction(context: Context, parsed: ParsedSmsTransaction): Boolean {
     val preview = safePreview(parsed.messageBody)
@@ -231,6 +289,7 @@ object ExpenseTransactionStore {
         put("originalSmsPreview", item.optString("messagePreview"))
         put("timestamp", item.optLong("timestamp", now))
         put("createdAt", now)
+        put("userId", item.optString("userId").ifBlank { activeUserId(context) })
       }
 
       val expenses = readArray(context, EXPENSES_KEY)
@@ -271,6 +330,10 @@ object ExpenseTransactionStore {
     for (index in 0 until pending.length()) {
       val item = pending.optJSONObject(index) ?: continue
 
+      if (ownerId(item) != activeUserId(context)) {
+        continue
+      }
+
       if (
         item.optString("sender") == sender &&
           item.optString("messagePreview") == preview
@@ -293,6 +356,9 @@ object ExpenseTransactionStore {
 
     for (index in 0 until expenses.length()) {
       val item = expenses.optJSONObject(index) ?: continue
+      if (ownerId(item) != activeUserId(context)) {
+        continue
+      }
       val samePreview = item.optString("originalSmsPreview") == preview
       val sameAmount = kotlin.math.abs(item.optDouble("amount", 0.0) - parsed.amount) < 0.01
 
@@ -323,6 +389,9 @@ object ExpenseTransactionStore {
 
     for (index in 0 until expenses.length()) {
       val item = expenses.optJSONObject(index) ?: continue
+      if (ownerId(item) != activeUserId(context)) {
+        continue
+      }
       val samePreview = item.optString("originalSmsPreview") == preview
       val sameAmount = kotlin.math.abs(item.optDouble("amount", 0.0) - parsed.amount) < 0.01
 

@@ -19,10 +19,12 @@ import { AppHeader, HeaderIcon } from "../../components/AppHeader";
 import {
   confirmPendingTransaction,
   deleteExpense,
+  fetchRemoteExpensePage,
   hasExpenseSmsPermissions,
   ignorePendingTransaction,
-  listExpenses,
   listPendingTransactions,
+  listLocalExpenses,
+  mergeExpenseEntries,
   requestExpenseSmsPermissions,
   scanRecentSms,
   subscribeToExpenseChanges,
@@ -32,41 +34,18 @@ import {
   type PendingTransactionType,
 } from "../../services/expenses";
 import { colors, subtleShadow } from "../../styles/theme";
+import { formatCurrency, formatDate } from "../../utils/localization";
 
-const categories = ["food", "shopping", "travel", "bills", "general"];
-
-const formatCurrency = (amount: number, currency = "INR") =>
-  new Intl.NumberFormat("en-IN", {
-    currency,
-    maximumFractionDigits: amount % 1 === 0 ? 0 : 2,
-    style: "currency",
-  }).format(amount);
-
-const formatDate = (timestamp: number) =>
-  new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(timestamp));
+const categories = ["food", "shopping", "travel", "bills", "salary", "general"];
+const REMOTE_PAGE_SIZE = 50;
 
 const isThisMonth = (timestamp: number) => {
   const date = new Date(timestamp);
   const now = new Date();
-  return (
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth()
-  );
+  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
 };
 
-const getCategoryBreakdown = (expenses: ExpenseEntry[]) =>
-  expenses
-    .filter(
-      (expense) => expense.type === "expense" && isThisMonth(expense.timestamp),
-    )
-    .reduce<Record<string, number>>((breakdown, expense) => {
-      breakdown[expense.category] =
-        (breakdown[expense.category] || 0) + expense.amount;
-      return breakdown;
-    }, {});
+type Filter = "all" | "expense" | "income";
 
 type EditingState = {
   amount: string;
@@ -77,56 +56,47 @@ type EditingState = {
 
 export default function ExpensesScreen() {
   const [pending, setPending] = useState<PendingTransaction[]>([]);
-  const [expenses, setExpenses] = useState<ExpenseEntry[]>([]);
+  const [transactions, setTransactions] = useState<ExpenseEntry[]>([]);
+  const [filter, setFilter] = useState<Filter>("all");
   const [hasPermission, setHasPermission] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [remotePage, setRemotePage] = useState(0);
+  const [remoteHasMore, setRemoteHasMore] = useState(false);
+  const [syncingRemote, setSyncingRemote] = useState(false);
   const [savingId, setSavingId] = useState("");
   const [editingId, setEditingId] = useState("");
-  const [smsTestResult, setSmsTestResult] = useState("");
-  const [scanningSms, setScanningSms] = useState(false);
   const [editing, setEditing] = useState<EditingState>({
     amount: "",
     category: "general",
     merchant: "",
     type: "debit",
   });
+  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
   const loadData = useCallback(
     async (options?: { refreshing?: boolean; silent?: boolean }) => {
+      if (options?.refreshing) {
+        setRefreshing(true);
+      } else if (!options?.silent) {
+        setLoading(true);
+      }
+
       try {
-        if (options?.refreshing) {
-          setRefreshing(true);
-        } else if (!options?.silent) {
-          setLoading(true);
-        }
-
         setError("");
-
-        if (Platform.OS !== "android") {
-          setPending([]);
-          setExpenses([]);
-          setHasPermission(false);
-          return;
-        }
-
-        const [permission, nextPending, nextExpenses] = await Promise.all([
-          hasExpenseSmsPermissions(),
-          listPendingTransactions(),
-          listExpenses(),
-        ]);
-
-        setHasPermission(permission);
-        setPending(
-          nextPending.filter((item) => item.status === "pending").reverse(),
-        );
-        setExpenses(nextExpenses);
-        void syncExpensesToMongo(nextExpenses).catch(() => undefined);
+        const nextTransactions = await listLocalExpenses();
+        setTransactions(nextTransactions);
+        void Promise.all([
+          Platform.OS === "android" ? listPendingTransactions() : Promise.resolve([]),
+          Platform.OS === "android" ? hasExpenseSmsPermissions() : Promise.resolve(false),
+        ]).then(([nextPending, permission]) => {
+          setPending(nextPending.filter((item) => item.status === "pending").reverse());
+          setHasPermission(permission);
+        });
       } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Unable to load expenses",
-        );
+        setError(err instanceof Error ? err.message : "Unable to load transactions");
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -134,6 +104,32 @@ export default function ExpensesScreen() {
     },
     [],
   );
+
+  const syncCloud = async (page = 1) => {
+    try {
+      setSyncingRemote(true);
+      setError("");
+      const remote = await fetchRemoteExpensePage(page, REMOTE_PAGE_SIZE);
+      const local = await listLocalExpenses();
+
+      setTransactions((current) =>
+        mergeExpenseEntries(page === 1 ? local : current, remote.data),
+      );
+      setRemotePage(remote.page);
+      setRemoteHasMore(remote.hasMore);
+      void syncExpensesToMongo(local).catch(() => undefined);
+      setMessage(`Cloud sync complete · page ${remote.page} of ${Math.max(remote.totalPages, 1)}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to sync transactions");
+    } finally {
+      setSyncingRemote(false);
+    }
+  };
+
+  const refreshAll = async () => {
+    await loadData({ refreshing: true });
+    await syncCloud(1);
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -151,47 +147,59 @@ export default function ExpensesScreen() {
     }, [loadData]),
   );
 
-  const monthSpend = useMemo(
+  const visibleTransactions = useMemo(
     () =>
-      expenses
-        .filter(
-          (expense) =>
-            expense.type === "expense" && isThisMonth(expense.timestamp),
-        )
-        .reduce((total, expense) => total + expense.amount, 0),
-    [expenses],
+      transactions.filter((item) => filter === "all" || item.type === filter),
+    [filter, transactions],
   );
-  const monthIncome = useMemo(
-    () =>
-      expenses
-        .filter(
-          (expense) =>
-            expense.type === "income" && isThisMonth(expense.timestamp),
-        )
-        .reduce((total, expense) => total + expense.amount, 0),
-    [expenses],
-  );
-  const categoryBreakdown = useMemo(
-    () => getCategoryBreakdown(expenses),
-    [expenses],
-  );
-  const recentExpenses = expenses.slice(0, 12);
+  const monthIncome = transactions
+    .filter((item) => item.type === "income" && isThisMonth(item.timestamp))
+    .reduce((total, item) => total + item.amount, 0);
+  const monthExpense = transactions
+    .filter((item) => item.type === "expense" && isThisMonth(item.timestamp))
+    .reduce((total, item) => total + item.amount, 0);
 
   const requestPermissions = async () => {
     try {
       const granted = await requestExpenseSmsPermissions();
       setHasPermission(granted);
-
       if (!granted) {
-        Alert.alert(
-          "Permission needed",
-          "Allow SMS and notification permissions to detect transaction SMS and ask before adding expenses.",
-        );
+        Alert.alert("Permission needed", "Allow SMS access to review transaction alerts before saving them.");
       }
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Unable to request permissions",
+      setError(err instanceof Error ? err.message : "Unable to request SMS access");
+    }
+  };
+
+  const refreshSms = async () => {
+    if (Platform.OS !== "android") {
+      return;
+    }
+
+    try {
+      setScanning(true);
+      setMessage("");
+      let granted = hasPermission;
+      if (!granted) {
+        granted = await requestExpenseSmsPermissions();
+        setHasPermission(granted);
+      }
+      if (!granted) {
+        setMessage("SMS permission was not granted.");
+        return;
+      }
+
+      const result = await scanRecentSms(100);
+      setMessage(
+        result.matched
+          ? `${result.matched} transaction${result.matched === 1 ? "" : "s"} ready for review.`
+          : `Checked ${result.scanned} messages. No new transactions found.`,
       );
+      await loadData({ silent: true });
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Unable to read SMS");
+    } finally {
+      setScanning(false);
     }
   };
 
@@ -206,16 +214,10 @@ export default function ExpensesScreen() {
   };
 
   const confirmTransaction = async (item: PendingTransaction) => {
-    const amount = Number.parseFloat(
-      editingId === item.id ? editing.amount : String(item.amount),
-    );
-    const nextCategory =
-      editingId === item.id ? editing.category : item.category;
-    const nextMerchant =
-      editingId === item.id
-        ? editing.merchant.trim() || "Unknown Merchant"
-        : item.merchant;
-    const nextType = editingId === item.id ? editing.type : item.type;
+    const amount = Number.parseFloat(editingId === item.id ? editing.amount : String(item.amount));
+    const category = editingId === item.id ? editing.category : item.category;
+    const merchant = editingId === item.id ? editing.merchant.trim() || "Unknown Merchant" : item.merchant;
+    const type = editingId === item.id ? editing.type : item.type;
 
     if (!Number.isFinite(amount) || amount <= 0) {
       Alert.alert("Check amount", "Enter a valid transaction amount.");
@@ -226,53 +228,21 @@ export default function ExpensesScreen() {
       setSavingId(item.id);
       await confirmPendingTransaction(
         item.id,
-        editingId === item.id
-          ? {
-              amount,
-              category: nextCategory,
-              merchant: nextMerchant,
-              type: nextType,
-            }
-          : undefined,
+        editingId === item.id ? { amount, category, merchant, type } : undefined,
       );
       setEditingId("");
-      setPending((current) =>
-        current.filter((pendingItem) => pendingItem.id !== item.id),
-      );
-      setExpenses((current) => [
-        {
-          amount,
-          category: nextCategory,
-          createdAt: Date.now(),
-          currency: item.currency,
-          id: item.id,
-          merchant: nextMerchant,
-          originalSmsPreview: item.messagePreview,
-          source: "sms",
-          timestamp: item.timestamp,
-          type: nextType === "credit" ? "income" : "expense",
-        },
-        ...current.filter((expense) => expense.id !== item.id),
-      ]);
-      void listExpenses()
-        .then((nextExpenses) => {
-          setExpenses(nextExpenses);
-          void syncExpensesToMongo(nextExpenses).catch(() => undefined);
-        })
-        .catch(() => undefined);
+      await loadData({ silent: true });
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Unable to add transaction",
-      );
+      setError(err instanceof Error ? err.message : "Unable to save transaction");
     } finally {
       setSavingId("");
     }
   };
 
-  const removeExpense = (expense: ExpenseEntry) => {
+  const removeTransaction = (transaction: ExpenseEntry) => {
     Alert.alert(
       "Delete transaction?",
-      `${expense.merchant} • ${formatCurrency(expense.amount, expense.currency)}`,
+      `${transaction.merchant} • ${formatCurrency(transaction.amount, transaction.currency)}`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -280,21 +250,11 @@ export default function ExpensesScreen() {
           style: "destructive",
           onPress: async () => {
             try {
-              setSavingId(expense.id);
-              const deleted = await deleteExpense(expense.id);
-
-              if (!deleted) {
-                Alert.alert(
-                  "Delete failed",
-                  "This transaction was not found on this device.",
-                );
-                return;
-              }
-
-              await loadData();
+              setSavingId(transaction.id);
+              await deleteExpense(transaction.id);
+              await loadData({ silent: true });
             } catch (err) {
-              const message =
-                err instanceof Error ? err.message : "Unable to delete expense";
+              const message = err instanceof Error ? err.message : "Unable to delete transaction";
               setError(message);
               Alert.alert("Delete failed", message);
             } finally {
@@ -310,87 +270,25 @@ export default function ExpensesScreen() {
     try {
       setSavingId(item.id);
       await ignorePendingTransaction(item.id);
-      setPending((current) =>
-        current.filter((pendingItem) => pendingItem.id !== item.id),
-      );
-      if (editingId === item.id) {
-        setEditingId("");
-      }
+      setPending((current) => current.filter((pendingItem) => pendingItem.id !== item.id));
+      setEditingId("");
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Unable to ignore transaction",
-      );
+      setError(err instanceof Error ? err.message : "Unable to ignore transaction");
     } finally {
       setSavingId("");
     }
   };
 
-  const checkLastHundredSms = async () => {
-    try {
-      setScanningSms(true);
-      setSmsTestResult("");
-      let granted = hasPermission;
-
-      if (!granted) {
-        granted = await requestExpenseSmsPermissions();
-        setHasPermission(granted);
-      }
-
-      if (!granted) {
-        setSmsTestResult("SMS permission was not granted.");
-        return;
-      }
-
-      const result = await scanRecentSms(10);
-      const ignoredSummary = Object.entries(result.ignoredReasons)
-        .map(([reason, count]) => `${reason}: ${count}`)
-        .join(", ");
-
-      setSmsTestResult(
-        result.matched
-          ? `Checked ${result.scanned} SMS. Found ${result.matched} new transaction message${result.matched === 1 ? "" : "s"} to review.`
-          : `Checked ${result.scanned} SMS. No new transactions found${ignoredSummary ? ` (${ignoredSummary})` : ""}.`,
-      );
-      await loadData();
-    } catch (err) {
-      setSmsTestResult(
-        err instanceof Error ? err.message : "Unable to check recent SMS",
-      );
-    } finally {
-      setScanningSms(false);
-    }
-  };
-
-  if (Platform.OS !== "android") {
-    return (
-      <SafeAreaView edges={["top"]} style={styles.screen}>
-        <View style={styles.centerState}>
-          <Text style={styles.title}>Expenses</Text>
-          <Text style={styles.mutedText}>
-            SMS transaction approval is Android only.
-          </Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (loading) {
+  if (loading && !transactions.length) {
     return (
       <SafeAreaView edges={["top"]} style={styles.screen}>
         <View style={styles.centerState}>
           <ActivityIndicator color={colors.primary} />
-          <Text style={styles.mutedText}>Loading expenses...</Text>
+          <Text style={styles.mutedText}>Loading local transactions…</Text>
         </View>
       </SafeAreaView>
     );
   }
-
-  const handleSMSRefresh = () => {
-    void checkLastHundredSms();
-  };
-  const handleAddExpense = () => {
-    router.push("/expense-add");
-  };
 
   return (
     <SafeAreaView edges={["top"]} style={styles.screen}>
@@ -398,724 +296,297 @@ export default function ExpensesScreen() {
         contentContainerStyle={styles.content}
         refreshControl={
           <RefreshControl
-            refreshing={refreshing}
+            colors={[colors.primary]}
+            onRefresh={() => void refreshAll()}
+            refreshing={refreshing || syncingRemote}
             tintColor={colors.primary}
-            onRefresh={() => void loadData({ refreshing: true })}
           />
         }
         showsVerticalScrollIndicator={false}
       >
         <AppHeader
-          title="Expenses"
+          title="Transactions"
           rightIcons={
             <>
-              <HeaderIcon name="refresh-outline" onPress={handleSMSRefresh} />
-              <HeaderIcon name="add-outline" onPress={handleAddExpense} />
+              {Platform.OS === "android" ? (
+                <HeaderIcon name="refresh-outline" onPress={() => void refreshSms()} />
+              ) : null}
+              <HeaderIcon name="cloud-upload-outline" onPress={() => void syncCloud(1)} />
+              <HeaderIcon name="add-outline" onPress={() => router.push("/expense-add")} />
             </>
           }
         />
 
-        {!hasPermission ? (
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+        {Platform.OS === "android" && !hasPermission ? (
           <View style={styles.permissionPanel}>
-            <Text style={styles.panelTitle}>
-              Enable SMS transaction approval
-            </Text>
-            <Text style={styles.panelText}>
-              Memonest will only process transaction-looking SMS, skip OTP/login
-              messages, and ask before adding anything.
-            </Text>
-            <Pressable
-              style={styles.primaryButton}
-              onPress={() => void requestPermissions()}
-            >
-              <Text style={styles.primaryButtonText}>Allow SMS detection</Text>
+            <View style={styles.permissionIcon}>
+              <Ionicons color={colors.accent} name="chatbubble-ellipses-outline" size={20} />
+            </View>
+            <View style={styles.permissionCopy}>
+              <Text style={styles.panelTitle}>Import bank transaction SMS</Text>
+              <Text style={styles.panelText}>You review every detected item before it becomes a transaction.</Text>
+            </View>
+            <Pressable style={styles.smallButton} onPress={() => void requestPermissions()}>
+              <Text style={styles.smallButtonText}>Allow</Text>
             </Pressable>
           </View>
         ) : null}
 
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-        <View style={styles.quickActions}>
-          <Pressable
-            style={[styles.quickActionButton, styles.quickActionPrimary]}
-            onPress={() => router.push("/expense-add")}
-          >
-            <View style={styles.quickActionIcon}>
-              <Ionicons color={colors.white} name="add" size={20} />
-            </View>
-            <View style={styles.quickActionCopy}>
-              <Text style={styles.quickActionTitlePrimary}>Add manually</Text>
-              <Text style={styles.quickActionTextPrimary}>
-                Cash, UPI, income
-              </Text>
-            </View>
-          </Pressable>
-
-          {smsTestResult ? (
-            <Text style={styles.testResultText}>{smsTestResult}</Text>
-          ) : null}
-          <Pressable
-            disabled={scanningSms}
-            style={[styles.quickActionButton, styles.quickActionSecondary]}
-            onPress={() => void checkLastHundredSms()}
-          >
-            <View style={styles.quickActionIconSecondary}>
-              {scanningSms ? (
-                <ActivityIndicator color={colors.text} size="small" />
-              ) : (
-                <Ionicons color={colors.text} name="refresh" size={19} />
-              )}
-            </View>
-            <View style={styles.quickActionCopy}>
-              <Text style={styles.quickActionTitle}>Read SMS</Text>
-              <Text style={styles.quickActionText}>
-                {scanningSms ? "Checking latest messages" : "Refresh detection"}
-              </Text>
-            </View>
-          </Pressable>
-        </View>
+        {message ? <Text style={styles.messageText}>{message}</Text> : null}
 
         <View style={styles.summaryGrid}>
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>This Month Spend</Text>
-            <Text style={styles.summaryValue}>
-              {formatCurrency(monthSpend)}
-            </Text>
-          </View>
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>This Month Income</Text>
-            <Text style={[styles.summaryValue, styles.incomeText]}>
-              {formatCurrency(monthIncome)}
-            </Text>
-          </View>
+          <SummaryCard label="This month in" value={formatCurrency(monthIncome)} tone="income" />
+          <SummaryCard label="This month out" value={formatCurrency(monthExpense)} tone="expense" />
         </View>
 
-        <View style={styles.panel}>
-          <View style={styles.panelHeader}>
-            <Text style={styles.panelTitle}>Pending Transactions</Text>
-            <Text style={styles.panelCaption}>{pending.length}</Text>
-          </View>
-          {pending.length ? (
-            pending.map((item) => {
+        {pending.length ? (
+          <View style={styles.panel}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Needs review</Text>
+              <Text style={styles.sectionCaption}>{pending.length}</Text>
+            </View>
+            {pending.map((item) => {
               const isEditing = editingId === item.id;
               const isSaving = savingId === item.id;
 
               return (
                 <View key={item.id} style={styles.pendingCard}>
                   <View style={styles.pendingHeader}>
-                    <Text style={styles.amountText}>
-                      {formatCurrency(item.amount, item.currency)}
-                    </Text>
-                    <Text style={styles.typePill}>
-                      {item.type === "credit" ? "Income" : "Expense"}
-                    </Text>
+                    <Text style={styles.pendingAmount}>{formatCurrency(item.amount, item.currency)}</Text>
+                    <Text style={styles.pendingType}>{item.type === "credit" ? "Income" : "Expense"}</Text>
                   </View>
-
                   {isEditing ? (
                     <View style={styles.editBox}>
                       <TextInput
                         keyboardType="decimal-pad"
-                        onChangeText={(value) =>
-                          setEditing((current) => ({
-                            ...current,
-                            amount: value,
-                          }))
-                        }
+                        onChangeText={(amount) => setEditing((current) => ({ ...current, amount }))}
                         placeholder="Amount"
                         style={styles.input}
                         value={editing.amount}
                       />
                       <TextInput
-                        onChangeText={(value) =>
-                          setEditing((current) => ({
-                            ...current,
-                            merchant: value,
-                          }))
-                        }
-                        placeholder="Merchant"
+                        onChangeText={(merchant) => setEditing((current) => ({ ...current, merchant }))}
+                        placeholder="Merchant or person"
                         style={styles.input}
                         value={editing.merchant}
                       />
-                      <View style={styles.chipRow}>
-                        {categories.map((category) => (
-                          <Pressable
-                            key={category}
-                            style={[
-                              styles.chip,
-                              editing.category === category &&
-                                styles.selectedChip,
-                            ]}
-                            onPress={() =>
-                              setEditing((current) => ({
-                                ...current,
-                                category,
-                              }))
-                            }
-                          >
-                            <Text
-                              style={[
-                                styles.chipText,
-                                editing.category === category &&
-                                  styles.selectedChipText,
-                              ]}
-                            >
-                              {category}
-                            </Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                      <View style={styles.chipRow}>
-                        {(["debit", "credit"] as const).map((type) => (
-                          <Pressable
-                            key={type}
-                            style={[
-                              styles.chip,
-                              editing.type === type && styles.selectedChip,
-                            ]}
-                            onPress={() =>
-                              setEditing((current) => ({ ...current, type }))
-                            }
-                          >
-                            <Text
-                              style={[
-                                styles.chipText,
-                                editing.type === type &&
-                                  styles.selectedChipText,
-                              ]}
-                            >
-                              {type === "credit" ? "Income" : "Expense"}
-                            </Text>
-                          </Pressable>
-                        ))}
-                      </View>
+                      <ChipPicker
+                        options={categories}
+                        selected={editing.category}
+                        onSelect={(category) => setEditing((current) => ({ ...current, category }))}
+                      />
+                      <ChipPicker
+                        options={["debit", "credit"]}
+                        labels={{ credit: "Income", debit: "Expense" }}
+                        selected={editing.type}
+                        onSelect={(type) => setEditing((current) => ({ ...current, type: type as PendingTransactionType }))}
+                      />
                     </View>
                   ) : (
                     <>
-                      <Text style={styles.merchantText}>{item.merchant}</Text>
-                      <Text style={styles.metaText}>
-                        {item.category} • {formatDate(item.timestamp)}
-                      </Text>
+                      <Text style={styles.transactionTitle}>{item.merchant}</Text>
+                      <Text style={styles.transactionMeta}>{item.category} • {formatDate(item.timestamp)}</Text>
                     </>
                   )}
-
-                  <Text style={styles.previewText} numberOfLines={2}>
-                    {item.messagePreview}
-                  </Text>
-
+                  <Text numberOfLines={2} style={styles.previewText}>{item.messagePreview}</Text>
                   <View style={styles.actionRow}>
-                    <Pressable
-                      disabled={isSaving}
-                      style={styles.primaryAction}
-                      onPress={() => void confirmTransaction(item)}
-                    >
-                      <Text style={styles.primaryActionText}>
-                        {isSaving
-                          ? "Saving..."
-                          : item.type === "credit"
-                            ? "Add income"
-                            : "Add expense"}
-                      </Text>
+                    <Pressable disabled={isSaving} style={styles.primaryAction} onPress={() => void confirmTransaction(item)}>
+                      <Text style={styles.primaryActionText}>{isSaving ? "Saving…" : "Confirm"}</Text>
                     </Pressable>
-                    <Pressable
-                      disabled={isSaving}
-                      style={styles.secondaryAction}
-                      onPress={() => void ignoreTransaction(item)}
-                    >
+                    <Pressable disabled={isSaving} style={styles.secondaryAction} onPress={() => void ignoreTransaction(item)}>
                       <Text style={styles.secondaryActionText}>Ignore</Text>
                     </Pressable>
-                    <Pressable
-                      disabled={isSaving}
-                      style={styles.secondaryAction}
-                      onPress={() =>
-                        isEditing ? setEditingId("") : startEditing(item)
-                      }
-                    >
-                      <Text style={styles.secondaryActionText}>
-                        {isEditing ? "Cancel" : "Edit"}
-                      </Text>
+                    <Pressable disabled={isSaving} style={styles.secondaryAction} onPress={() => isEditing ? setEditingId("") : startEditing(item)}>
+                      <Text style={styles.secondaryActionText}>{isEditing ? "Cancel" : "Edit"}</Text>
                     </Pressable>
                   </View>
                 </View>
               );
-            })
-          ) : (
-            <Text style={styles.emptyText}>
-              Transaction SMS approvals will appear here.
-            </Text>
-          )}
+            })}
+          </View>
+        ) : null}
+
+        <View style={styles.filterRow}>
+          {(["all", "expense", "income"] as const).map((value) => (
+            <Pressable
+              key={value}
+              style={[styles.filterChip, filter === value && styles.filterChipSelected]}
+              onPress={() => setFilter(value)}
+            >
+              <Text style={[styles.filterText, filter === value && styles.filterTextSelected]}>
+                {value === "all" ? "All" : value === "income" ? "Income" : "Expenses"}
+              </Text>
+            </Pressable>
+          ))}
         </View>
 
         <View style={styles.panel}>
-          <Text style={styles.panelTitle}>Category Breakdown</Text>
-          {Object.entries(categoryBreakdown).length ? (
-            Object.entries(categoryBreakdown).map(([category, amount]) => (
-              <View key={category} style={styles.breakdownRow}>
-                <Text style={styles.breakdownLabel}>{category}</Text>
-                <Text style={styles.breakdownValue}>
-                  {formatCurrency(amount)}
-                </Text>
-              </View>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Ledger</Text>
+            <Text style={styles.sectionCaption}>{visibleTransactions.length}</Text>
+          </View>
+          {visibleTransactions.length ? (
+            visibleTransactions.map((transaction) => (
+              <TransactionRow
+                key={transaction.id}
+                saving={savingId === transaction.id}
+                transaction={transaction}
+                onDelete={() => removeTransaction(transaction)}
+              />
             ))
           ) : (
-            <Text style={styles.emptyText}>
-              No spend categories this month yet.
-            </Text>
+            <View style={styles.emptyState}>
+              <Ionicons color={colors.textSoft} name="receipt-outline" size={28} />
+              <Text style={styles.mutedText}>No {filter === "all" ? "" : `${filter} `}transactions yet.</Text>
+              <Pressable style={styles.primaryButton} onPress={() => router.push("/expense-add")}>
+                <Text style={styles.primaryActionText}>Add transaction</Text>
+              </Pressable>
+            </View>
           )}
-        </View>
-
-        <View style={styles.panel}>
-          <Text style={styles.panelTitle}>Recent Expenses</Text>
-          {recentExpenses.length ? (
-            recentExpenses.map((expense) => (
-              <View key={expense.id} style={styles.expenseRow}>
-                <View style={styles.expenseIcon}>
-                  <Ionicons
-                    color={
-                      expense.type === "income"
-                        ? colors.success
-                        : colors.primary
-                    }
-                    name={
-                      expense.type === "income"
-                        ? "trending-up-outline"
-                        : "card-outline"
-                    }
-                    size={18}
-                  />
-                </View>
-                <View style={styles.expenseCopy}>
-                  <Text style={styles.merchantText}>{expense.merchant}</Text>
-                  <Text style={styles.metaText}>
-                    {expense.category} • {formatDate(expense.timestamp)}
-                  </Text>
-                </View>
-                <Text
-                  style={
-                    expense.type === "income"
-                      ? styles.incomeAmount
-                      : styles.expenseAmount
-                  }
-                >
-                  {expense.type === "income" ? "+" : "-"}
-                  {formatCurrency(expense.amount, expense.currency)}
-                </Text>
-                <Pressable
-                  disabled={savingId === expense.id}
-                  style={styles.deleteButton}
-                  onPress={() => removeExpense(expense)}
-                >
-                  <Ionicons
-                    color={colors.danger}
-                    name="trash-outline"
-                    size={18}
-                  />
-                </Pressable>
-              </View>
-            ))
-          ) : (
-            <Text style={styles.emptyText}>
-              Confirmed SMS expenses will show up here.
-            </Text>
-          )}
+          {remoteHasMore ? (
+            <Pressable
+              disabled={syncingRemote}
+              onPress={() => void syncCloud(remotePage + 1)}
+              style={styles.loadMoreButton}
+            >
+              {syncingRemote ? <ActivityIndicator color={colors.primary} /> : null}
+              <Text style={styles.loadMoreText}>{syncingRemote ? "Loading…" : "Load more from cloud"}</Text>
+            </Pressable>
+          ) : null}
         </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
+function SummaryCard({ label, tone, value }: { label: string; tone: "expense" | "income"; value: string }) {
+  return (
+    <View style={styles.summaryCard}>
+      <Text style={styles.metricLabel}>{label}</Text>
+      <Text style={[styles.metricValue, tone === "income" ? styles.incomeAmount : styles.expenseAmount]}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function ChipPicker({
+  labels,
+  onSelect,
+  options,
+  selected,
+}: {
+  labels?: Record<string, string>;
+  onSelect: (value: string) => void;
+  options: string[];
+  selected: string;
+}) {
+  return (
+    <View style={styles.chipRow}>
+      {options.map((option) => (
+        <Pressable key={option} style={[styles.chip, selected === option && styles.selectedChip]} onPress={() => onSelect(option)}>
+          <Text style={[styles.chipText, selected === option && styles.selectedChipText]}>
+            {labels?.[option] || option}
+          </Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+function TransactionRow({
+  onDelete,
+  saving,
+  transaction,
+}: {
+  onDelete: () => void;
+  saving: boolean;
+  transaction: ExpenseEntry;
+}) {
+  const isIncome = transaction.type === "income";
+
+  return (
+    <View style={styles.transactionRow}>
+      <View style={[styles.transactionIcon, isIncome ? styles.incomeSurface : styles.expenseSurface]}>
+        <Ionicons color={isIncome ? colors.success : colors.primary} name={isIncome ? "arrow-down-outline" : "arrow-up-outline"} size={18} />
+      </View>
+      <View style={styles.transactionCopy}>
+        <Text numberOfLines={1} style={styles.transactionTitle}>{transaction.merchant}</Text>
+        <Text numberOfLines={1} style={styles.transactionMeta}>{transaction.category} • {formatDate(transaction.timestamp)}</Text>
+        {transaction.note ? <Text numberOfLines={1} style={styles.noteText}>{transaction.note}</Text> : null}
+      </View>
+      <View style={styles.amountCopy}>
+        <Text style={isIncome ? styles.incomeAmount : styles.expenseAmount}>
+          {isIncome ? "+" : "−"}{formatCurrency(transaction.amount, transaction.currency)}
+        </Text>
+        <Pressable disabled={saving} onPress={onDelete} style={styles.deleteButton}>
+          <Ionicons color={colors.danger} name="trash-outline" size={17} />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  actionRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginTop: 12,
-  },
-  amountText: {
-    color: colors.text,
-    fontSize: 20,
-    fontWeight: "900",
-  },
-  breakdownLabel: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: "800",
-    textTransform: "capitalize",
-  },
-  breakdownRow: {
-    alignItems: "center",
-    borderTopColor: colors.border,
-    borderTopWidth: 1,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingVertical: 12,
-  },
-  breakdownValue: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: "900",
-  },
-  centerState: {
-    alignItems: "center",
-    flex: 1,
-    gap: 12,
-    justifyContent: "center",
-    padding: 24,
-  },
-  chip: {
-    backgroundColor: colors.backgroundSoft,
-    borderColor: colors.border,
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  chipRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  chipText: {
-    color: colors.text,
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "capitalize",
-  },
-  content: {
-    padding: 18,
-    paddingBottom: 118,
-  },
-  editBox: {
-    gap: 10,
-    marginTop: 10,
-  },
-  deleteButton: {
-    alignItems: "center",
-    borderRadius: 999,
-    height: 36,
-    justifyContent: "center",
-    width: 36,
-  },
-  emptyText: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: "700",
-    lineHeight: 19,
-    marginTop: 10,
-  },
-  errorText: {
-    color: colors.danger,
-    fontSize: 13,
-    fontWeight: "800",
-    marginBottom: 12,
-  },
-  expenseAmount: {
-    color: colors.danger,
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  expenseCopy: {
-    flex: 1,
-  },
-  expenseIcon: {
-    alignItems: "center",
-    backgroundColor: colors.accentSurface,
-    borderRadius: 999,
-    height: 36,
-    justifyContent: "center",
-    width: 36,
-  },
-  expenseRow: {
-    alignItems: "center",
-    borderTopColor: colors.border,
-    borderTopWidth: 1,
-    flexDirection: "row",
-    gap: 10,
-    paddingVertical: 12,
-  },
-  header: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 18,
-  },
-  headerIcon: {
-    alignItems: "center",
-    backgroundColor: colors.accentSurface,
-    borderRadius: 999,
-    height: 44,
-    justifyContent: "center",
-    width: 44,
-  },
-  eyebrow: {
-    color: colors.primary,
-    fontSize: 12,
-    fontWeight: "900",
-    letterSpacing: 1,
-    textTransform: "uppercase",
-  },
-  incomeAmount: {
-    color: colors.success,
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  incomeText: {
-    color: colors.success,
-  },
-  input: {
-    backgroundColor: colors.backgroundSoft,
-    borderColor: colors.border,
-    borderRadius: 14,
-    borderWidth: 1,
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: "800",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  merchantText: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: "900",
-    marginTop: 4,
-  },
-  metaText: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "700",
-    marginTop: 4,
-  },
-  mutedText: {
-    color: colors.textMuted,
-    fontSize: 14,
-    fontWeight: "700",
-    textAlign: "center",
-  },
-  panel: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 22,
-    borderWidth: 1,
-    marginBottom: 16,
-    padding: 16,
-    ...subtleShadow,
-  },
-  panelCaption: {
-    color: colors.textSoft,
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  panelHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  panelText: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: "700",
-    lineHeight: 19,
-    marginBottom: 14,
-    marginTop: 6,
-  },
-  panelTitle: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: "900",
-  },
-  pendingCard: {
-    borderTopColor: colors.border,
-    borderTopWidth: 1,
-    marginTop: 14,
-    paddingTop: 14,
-  },
-  pendingHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  permissionPanel: {
-    backgroundColor: colors.accentSurface,
-    borderColor: colors.primary,
-    borderRadius: 22,
-    borderWidth: 1,
-    marginBottom: 16,
-    padding: 16,
-  },
-  previewText: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 18,
-    marginTop: 10,
-  },
-  quickActionButton: {
-    alignItems: "center",
-    borderRadius: 22,
-    flexDirection: "row",
-    gap: 12,
-    padding: 16,
-  },
-  quickActionCopy: {
-    flex: 1,
-  },
-  quickActionIcon: {
-    alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.18)",
-    borderRadius: 999,
-    height: 38,
-    justifyContent: "center",
-    width: 38,
-  },
-  quickActionIconSecondary: {
-    alignItems: "center",
-    backgroundColor: colors.backgroundSoft,
-    borderRadius: 999,
-    height: 38,
-    justifyContent: "center",
-    width: 38,
-  },
-  quickActionPrimary: {
-    backgroundColor: colors.black,
-  },
-  quickActionSecondary: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderWidth: 1,
-    ...subtleShadow,
-  },
-  quickActionText: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "800",
-    marginTop: 3,
-  },
-  quickActionTextPrimary: {
-    color: "rgba(255,255,255,0.72)",
-    fontSize: 12,
-    fontWeight: "800",
-    marginTop: 3,
-  },
-  quickActionTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: "900",
-  },
-  quickActionTitlePrimary: {
-    color: colors.white,
-    fontSize: 15,
-    fontWeight: "900",
-  },
-  quickActions: {
-    gap: 10,
-    marginBottom: 16,
-  },
-  primaryAction: {
-    alignItems: "center",
-    backgroundColor: colors.black,
-    borderRadius: 999,
-    flex: 1,
-    paddingVertical: 10,
-  },
-  primaryActionText: {
-    color: colors.white,
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  primaryButton: {
-    alignItems: "center",
-    backgroundColor: colors.black,
-    borderRadius: 999,
-    paddingVertical: 12,
-  },
-  primaryButtonText: {
-    color: colors.white,
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  secondaryButton: {
-    alignItems: "center",
-    backgroundColor: colors.backgroundSoft,
-    borderColor: colors.border,
-    borderRadius: 999,
-    borderWidth: 1,
-    marginBottom: 10,
-    paddingVertical: 12,
-  },
-  secondaryButtonText: {
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  screen: {
-    backgroundColor: colors.background,
-    flex: 1,
-  },
-  secondaryAction: {
-    alignItems: "center",
-    backgroundColor: colors.backgroundSoft,
-    borderColor: colors.border,
-    borderRadius: 999,
-    borderWidth: 1,
-    flex: 1,
-    paddingVertical: 10,
-  },
-  secondaryActionText: {
-    color: colors.text,
-    fontSize: 12,
-    fontWeight: "900",
-  },
-  selectedChip: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  selectedChipText: {
-    color: colors.white,
-  },
-  summaryCard: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 20,
-    borderWidth: 1,
-    flex: 1,
-    padding: 16,
-    ...subtleShadow,
-  },
-  summaryGrid: {
-    flexDirection: "row",
-    gap: 12,
-    marginBottom: 16,
-  },
-  summaryLabel: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  summaryValue: {
-    color: colors.text,
-    fontSize: 20,
-    fontWeight: "900",
-    marginTop: 8,
-  },
-  testResultText: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "800",
-    lineHeight: 18,
-    marginBottom: 10,
-    marginTop: 10,
-  },
-  title: {
-    color: colors.text,
-    fontSize: 34,
-    fontWeight: "900",
-  },
-  typePill: {
-    backgroundColor: colors.backgroundSoft,
-    borderRadius: 999,
-    color: colors.textMuted,
-    fontSize: 11,
-    fontWeight: "900",
-    overflow: "hidden",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
+  actionRow: { flexDirection: "row", gap: 8, marginTop: 12 },
+  amountCopy: { alignItems: "flex-end", gap: 8 },
+  centerState: { alignItems: "center", flex: 1, gap: 10, justifyContent: "center" },
+  chip: { backgroundColor: colors.backgroundSoft, borderColor: colors.border, borderRadius: 999, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 7 },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 8 },
+  chipText: { color: colors.textMuted, fontSize: 12, fontWeight: "800" },
+  content: { gap: 16, paddingBottom: 122, paddingHorizontal: 16, paddingTop: 10 },
+  deleteButton: { padding: 2 },
+  emptyState: { alignItems: "center", gap: 8, padding: 22 },
+  errorText: { color: colors.danger, fontSize: 13, fontWeight: "800" },
+  expenseAmount: { color: colors.primary, fontSize: 14, fontWeight: "900" },
+  expenseSurface: { backgroundColor: "#E7F5F2" },
+  editBox: { marginTop: 10 },
+  filterChip: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 999, borderWidth: 1, paddingHorizontal: 15, paddingVertical: 9 },
+  filterChipSelected: { backgroundColor: colors.black, borderColor: colors.black },
+  filterRow: { flexDirection: "row", gap: 8 },
+  filterText: { color: colors.textMuted, fontSize: 13, fontWeight: "800" },
+  filterTextSelected: { color: colors.white },
+  incomeAmount: { color: colors.success, fontSize: 14, fontWeight: "900" },
+  incomeSurface: { backgroundColor: colors.successSurface },
+  input: { backgroundColor: colors.backgroundSoft, borderColor: colors.border, borderRadius: 12, borderWidth: 1, color: colors.text, fontSize: 14, marginTop: 8, paddingHorizontal: 12, paddingVertical: 10 },
+  loadMoreButton: { alignItems: "center", borderTopColor: colors.border, borderTopWidth: 1, flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 6, paddingTop: 15 },
+  loadMoreText: { color: colors.primary, fontSize: 13, fontWeight: "900" },
+  messageText: { color: colors.primary, fontSize: 13, fontWeight: "800" },
+  metricLabel: { color: colors.textMuted, fontSize: 12, fontWeight: "800" },
+  metricValue: { fontSize: 19, fontWeight: "900", marginTop: 5 },
+  mutedText: { color: colors.textMuted, fontSize: 13, fontWeight: "600", textAlign: "center" },
+  panel: { ...subtleShadow, backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 20, borderWidth: 1, overflow: "hidden", padding: 15 },
+  panelText: { color: colors.textMuted, fontSize: 12, fontWeight: "600", lineHeight: 17, marginTop: 4 },
+  panelTitle: { color: colors.text, fontSize: 14, fontWeight: "900" },
+  pendingAmount: { color: colors.text, fontSize: 20, fontWeight: "900" },
+  pendingCard: { borderTopColor: colors.border, borderTopWidth: 1, marginTop: 13, paddingTop: 13 },
+  pendingHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  pendingType: { color: colors.accent, fontSize: 12, fontWeight: "900" },
+  permissionCopy: { flex: 1 },
+  permissionIcon: { alignItems: "center", backgroundColor: colors.accentSurface, borderRadius: 12, height: 40, justifyContent: "center", width: 40 },
+  permissionPanel: { alignItems: "center", backgroundColor: colors.accentSurface, borderColor: "#FED7AA", borderRadius: 17, borderWidth: 1, flexDirection: "row", gap: 10, padding: 13 },
+  primaryAction: { alignItems: "center", backgroundColor: colors.primary, borderRadius: 999, flex: 1, justifyContent: "center", minHeight: 38, paddingHorizontal: 13 },
+  primaryActionText: { color: colors.white, fontSize: 12, fontWeight: "900" },
+  primaryButton: { alignItems: "center", backgroundColor: colors.primary, borderRadius: 999, marginTop: 10, paddingHorizontal: 16, paddingVertical: 11 },
+  screen: { backgroundColor: colors.background, flex: 1 },
+  secondaryAction: { alignItems: "center", backgroundColor: colors.backgroundSoft, borderRadius: 999, justifyContent: "center", minHeight: 38, paddingHorizontal: 12 },
+  secondaryActionText: { color: colors.text, fontSize: 12, fontWeight: "900" },
+  sectionCaption: { color: colors.textMuted, fontSize: 12, fontWeight: "800" },
+  sectionHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  sectionTitle: { color: colors.text, fontSize: 18, fontWeight: "900" },
+  selectedChip: { backgroundColor: colors.primary, borderColor: colors.primary },
+  selectedChipText: { color: colors.white },
+  smallButton: { backgroundColor: colors.primary, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
+  smallButtonText: { color: colors.white, fontSize: 12, fontWeight: "900" },
+  summaryCard: { ...subtleShadow, backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 18, borderWidth: 1, flex: 1, padding: 15 },
+  summaryGrid: { flexDirection: "row", gap: 12 },
+  noteText: { color: colors.textSoft, fontSize: 11, fontWeight: "600", marginTop: 3 },
+  previewText: { color: colors.textMuted, fontSize: 12, fontWeight: "600", lineHeight: 17, marginTop: 9 },
+  transactionCopy: { flex: 1 },
+  transactionIcon: { alignItems: "center", borderRadius: 12, height: 38, justifyContent: "center", width: 38 },
+  transactionMeta: { color: colors.textMuted, fontSize: 11, fontWeight: "600", marginTop: 4 },
+  transactionRow: { alignItems: "center", borderBottomColor: colors.border, borderBottomWidth: 1, flexDirection: "row", gap: 10, minHeight: 74, paddingVertical: 11 },
+  transactionTitle: { color: colors.text, fontSize: 14, fontWeight: "900" },
 });

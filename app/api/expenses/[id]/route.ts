@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { validateApiKey } from '@/lib/apiKey';
+import { getExpenseOwnerFilter, getExpenseUser } from '@/lib/expenseAuth';
 import { connectDB } from '@/lib/mongodb';
 import Expense from '@/models/Expense';
 
@@ -17,10 +17,10 @@ const getErrorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Internal server error';
 
 export async function DELETE(request: Request, context: RouteContext) {
-  const authError = validateApiKey(request);
+  const user = getExpenseUser(request);
 
-  if (authError) {
-    return authError;
+  if (!user) {
+    return NextResponse.json({ error: 'Login required' }, { status: 401 });
   }
 
   try {
@@ -28,7 +28,10 @@ export async function DELETE(request: Request, context: RouteContext) {
 
     await connectDB();
 
-    const expense = await Expense.findOneAndDelete({ deviceExpenseId: id }).lean();
+    const expense = await Expense.findOneAndDelete({
+      deviceExpenseId: id,
+      ...getExpenseOwnerFilter(user.id)
+    }).lean();
 
     if (!expense) {
       return NextResponse.json({ error: 'Expense not found' }, { status: 404 });

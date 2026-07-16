@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { validateApiKey } from '@/lib/apiKey';
+import { getExpenseOwnerFilter, getExpenseUser } from '@/lib/expenseAuth';
 import { connectDB } from '@/lib/mongodb';
 import Expense from '@/models/Expense';
 
@@ -30,7 +30,7 @@ const toDate = (value: unknown) => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
-const buildExpensePayload = (body: Record<string, unknown>) => {
+const buildExpensePayload = (body: Record<string, unknown>, userId: string) => {
   const timestamp = toDate(body.timestamp) || new Date();
   const type = toString(body.type) === 'income' ? 'income' : 'expense';
 
@@ -44,25 +44,42 @@ const buildExpensePayload = (body: Record<string, unknown>) => {
     originalSmsPreview: toString(body.originalSmsPreview),
     source: toString(body.source) === 'sms' ? 'sms' : 'manual',
     timestamp,
-    type
+    type,
+    userId
   };
 };
 
 export async function GET(request: Request) {
-  const authError = validateApiKey(request);
+  const user = getExpenseUser(request);
 
-  if (authError) {
-    return authError;
+  if (!user) {
+    return NextResponse.json({ error: 'Login required' }, { status: 401 });
   }
 
   try {
     await connectDB();
-
-    const expenses = await Expense.find().sort({ timestamp: -1 }).limit(1000).lean();
+    const searchParams = new URL(request.url).searchParams;
+    const page = Math.max(Number.parseInt(searchParams.get('page') || '1', 10) || 1, 1);
+    const pageSize = Math.min(
+      Math.max(Number.parseInt(searchParams.get('limit') || '50', 10) || 50, 1),
+      100
+    );
+    const filter = getExpenseOwnerFilter(user.id);
+    const total = await Expense.countDocuments(filter);
+    const expenses = await Expense.find(filter)
+      .sort({ timestamp: -1 })
+      .skip((page - 1) * pageSize)
+      .limit(pageSize)
+      .lean();
+    const totalPages = Math.ceil(total / pageSize);
 
     return NextResponse.json({
-      count: expenses.length,
-      data: expenses
+      count: total,
+      data: expenses,
+      hasMore: page < totalPages,
+      page,
+      pageSize,
+      totalPages
     });
   } catch (error) {
     return NextResponse.json({ error: getErrorMessage(error) }, { status: 500 });
@@ -70,10 +87,10 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const authError = validateApiKey(request);
+  const user = getExpenseUser(request);
 
-  if (authError) {
-    return authError;
+  if (!user) {
+    return NextResponse.json({ error: 'Login required' }, { status: 401 });
   }
 
   try {
@@ -83,7 +100,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
 
-    const payload = buildExpensePayload(body as Record<string, unknown>);
+    const payload = buildExpensePayload(body as Record<string, unknown>, user.id);
 
     if (!payload.deviceExpenseId || payload.amount <= 0) {
       return NextResponse.json(
@@ -93,6 +110,15 @@ export async function POST(request: Request) {
     }
 
     await connectDB();
+
+    const existing = await Expense.findOne({ deviceExpenseId: payload.deviceExpenseId })
+      .select({ userId: 1 })
+      .lean();
+    const existingUserId = existing?.userId || 'main';
+
+    if (existing && existingUserId !== user.id) {
+      return NextResponse.json({ error: 'This transaction belongs to another user' }, { status: 403 });
+    }
 
     const expense = await Expense.findOneAndUpdate(
       { deviceExpenseId: payload.deviceExpenseId },

@@ -69,6 +69,36 @@ class SmsTransactionParserTest {
   }
 
   @Test
+  fun rechargeCashbackPromotionIsNotARealIncome() {
+    val messages = listOf(
+      "Surprise! Up to Rs. 300 cashback on your next recharge. Available on Airtel app https://i.airtel.in/upto300back_3",
+      "Good News! Get up to Rs. 300 cashback on your next recharge via Airtel app. Recharge now https://i.airtel.in/upto300back_3",
+      "Open a bank account today & unlock Rs.50 cashback every month + Rs.15,000 discount on top brands. Limited time!"
+    )
+
+    messages.forEach { body ->
+      val result = SmsTransactionParser.parseWithReason("AD-AIRTEL", body, 1L)
+
+      assertNull(body, result.transaction)
+      assertEquals(body, "ignored_promotional_message", result.reason)
+    }
+  }
+
+  @Test
+  fun cashbackThatWasActuallyReceivedRemainsReviewable() {
+    val result = SmsTransactionParser.parseWithRules(
+      "VK-BANK",
+      "Rs.50 cashback has been credited to your account XX1234.",
+      1L
+    )
+
+    assertEquals("matched", result.reason)
+    assertNotNull(result.transaction)
+    assertEquals("credit", result.transaction?.type)
+    assertEquals(50.0, result.transaction?.amount ?: 0.0, 0.001)
+  }
+
+  @Test
   fun failedTransactionSmsIsNotRuleMatched() {
     val result = SmsTransactionParser.parseWithRules(
       "VK-BANK",

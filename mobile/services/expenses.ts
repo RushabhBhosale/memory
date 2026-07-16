@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { NativeEventEmitter, NativeModules, Platform } from "react-native";
 
 import {
@@ -7,6 +8,7 @@ import {
   type RemoteExpense,
   type RemoteExpenseInput,
 } from "./api";
+import { getExpenseSession } from "./auth";
 
 export type PendingTransactionStatus = "pending" | "confirmed" | "ignored";
 export type PendingTransactionType = "debit" | "credit";
@@ -36,20 +38,25 @@ export type ExpenseEntry = {
   currency: string;
   merchant: string;
   category: string;
+  note?: string;
   type: ExpenseType;
   source: "sms" | "manual";
   originalSmsPreview: string;
   timestamp: number;
   createdAt: number;
+  userId?: string;
 };
 
 export type ManualExpenseInput = {
   amount: number;
   category: string;
   currency?: string;
+  id?: string;
   merchant: string;
   note?: string;
+  timestamp?: number;
   type?: ExpenseType;
+  userId?: string;
 };
 
 export type PendingTransactionUpdate = Partial<
@@ -113,6 +120,7 @@ type ExpenseSmsNativeModule = {
   debugTestRecentSms?: (limit: number) => Promise<SmsTrackingDebugTestResult>;
   ignoreTransaction(id: string): Promise<boolean>;
   listExpenses(): Promise<ExpenseEntry[]>;
+  setActiveExpenseUserId?: (userId: string) => Promise<void>;
   listPendingTransactions(): Promise<PendingTransaction[]>;
   requestSmsPermissions(): Promise<boolean>;
   scanRecentSms(limit: number): Promise<ScanRecentSmsResult>;
@@ -124,6 +132,9 @@ type ExpenseSmsNativeModule = {
 };
 
 const nativeModule = NativeModules.ExpenseSmsModule as ExpenseSmsNativeModule | undefined;
+
+const createExpenseId = () =>
+  `manual-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
 const requireAndroidModule = () => {
   if (Platform.OS !== "android" || !nativeModule) {
@@ -147,7 +158,11 @@ export const requestExpenseSmsPermissions = async () =>
 export const listPendingTransactions = async () =>
   requireAndroidModule().listPendingTransactions();
 
-const listLocalExpenses = async () => requireAndroidModule().listExpenses();
+const LOCAL_EXPENSE_CACHE_KEY = "memonest.expense.cache";
+
+const getCurrentUserId = async () => (await getExpenseSession())?.user.id || "main";
+
+const getLocalOwnerId = (expense: ExpenseEntry) => expense.userId || "main";
 
 const getTimestamp = (value: string | number | undefined) => {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -169,13 +184,15 @@ const toExpenseEntryFromRemote = (expense: RemoteExpense): ExpenseEntry => ({
   currency: expense.currency || "INR",
   id: expense.deviceExpenseId || expense._id,
   merchant: expense.merchant || "Unknown Merchant",
+  note: expense.note || "",
   originalSmsPreview: expense.originalSmsPreview || "",
   source: expense.source === "sms" ? "sms" : "manual",
   timestamp: getTimestamp(expense.timestamp),
   type: expense.type === "income" ? "income" : "expense",
+  userId: expense.userId,
 });
 
-const mergeExpenses = (localExpenses: ExpenseEntry[], remoteExpenses: ExpenseEntry[]) => {
+export const mergeExpenseEntries = (localExpenses: ExpenseEntry[], remoteExpenses: ExpenseEntry[]) => {
   const byId = new Map<string, ExpenseEntry>();
 
   remoteExpenses.forEach((expense) => {
@@ -189,21 +206,56 @@ const mergeExpenses = (localExpenses: ExpenseEntry[], remoteExpenses: ExpenseEnt
   return [...byId.values()].sort((a, b) => b.timestamp - a.timestamp);
 };
 
-export const listExpenses = async () => {
-  const localPromise =
-    Platform.OS === "android" && nativeModule ? listLocalExpenses() : Promise.resolve([]);
-  const [localResult, remoteResult] = await Promise.allSettled([
-    localPromise,
-    listRemoteExpenses(),
-  ]);
+const readExpenseCache = async () => {
+  const raw = await AsyncStorage.getItem(LOCAL_EXPENSE_CACHE_KEY);
 
-  const localExpenses = localResult.status === "fulfilled" ? localResult.value : [];
-  const remoteExpenses =
-    remoteResult.status === "fulfilled"
-      ? remoteResult.value.map(toExpenseEntryFromRemote)
-      : [];
+  if (!raw) {
+    return [];
+  }
 
-  return mergeExpenses(localExpenses, remoteExpenses);
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as ExpenseEntry[]) : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeExpenseCache = async (expenses: ExpenseEntry[]) => {
+  await AsyncStorage.setItem(LOCAL_EXPENSE_CACHE_KEY, JSON.stringify(expenses));
+};
+
+export const listLocalExpenses = async () => {
+  const userId = await getCurrentUserId();
+  const nativeExpenses =
+    Platform.OS === "android" && nativeModule ? await nativeModule.listExpenses() : [];
+  const cachedExpenses = await readExpenseCache();
+
+  return mergeExpenseEntries(
+    [...nativeExpenses, ...cachedExpenses].filter((expense) => getLocalOwnerId(expense) === userId),
+    [],
+  );
+};
+
+export const listExpenses = async () => listLocalExpenses();
+
+export const cacheRemoteExpenses = async (remoteExpenses: RemoteExpense[]) => {
+  const cachedExpenses = await readExpenseCache();
+  const nextExpenses = mergeExpenseEntries(
+    cachedExpenses,
+    remoteExpenses.map(toExpenseEntryFromRemote),
+  );
+  await writeExpenseCache(nextExpenses);
+  return nextExpenses;
+};
+
+export const fetchRemoteExpensePage = async (page = 1, limit = 50) => {
+  const response = await listRemoteExpenses({ limit, page });
+  await cacheRemoteExpenses(response.data);
+  return {
+    ...response,
+    data: response.data.map(toExpenseEntryFromRemote),
+  };
 };
 
 const toRemoteExpenseInput = (expense: ExpenseEntry): RemoteExpenseInput => ({
@@ -212,6 +264,7 @@ const toRemoteExpenseInput = (expense: ExpenseEntry): RemoteExpenseInput => ({
   currency: expense.currency || "INR",
   deviceExpenseId: expense.id,
   merchant: expense.merchant || "Unknown Merchant",
+  note: expense.note || "",
   originalSmsPreview: expense.originalSmsPreview || "",
   source: expense.source,
   timestamp: new Date(expense.timestamp).toISOString(),
@@ -221,19 +274,50 @@ const toRemoteExpenseInput = (expense: ExpenseEntry): RemoteExpenseInput => ({
 export const syncExpensesToMongo = async (expenses?: ExpenseEntry[]) => {
   const localExpenses = expenses ?? (await listLocalExpenses());
 
-  await Promise.allSettled(
+  await Promise.all(
     localExpenses.map((expense) => upsertExpense(toRemoteExpenseInput(expense))),
   );
 
   return localExpenses;
 };
 
-export const addManualExpense = async (input: ManualExpenseInput) =>
-  requireAndroidModule().addManualExpense({
+export const addManualExpense = async (input: ManualExpenseInput) => {
+  const userId = input.userId || (await getCurrentUserId());
+  const normalizedInput = {
     currency: "INR",
-    type: "expense",
+    id: input.id || createExpenseId(),
+    type: "expense" as ExpenseType,
     ...input,
-  });
+    userId,
+  };
+  const now = Date.now();
+  const created =
+    Platform.OS === "android" && nativeModule
+      ? await nativeModule.addManualExpense(normalizedInput)
+      : {
+          amount: normalizedInput.amount,
+          category: normalizedInput.category || "general",
+          createdAt: now,
+          currency: normalizedInput.currency || "INR",
+          id: normalizedInput.id,
+          merchant: normalizedInput.merchant || "Unknown Merchant",
+          note: normalizedInput.note || "",
+          originalSmsPreview: normalizedInput.note || "",
+          source: "manual" as const,
+          timestamp: normalizedInput.timestamp || now,
+          type: normalizedInput.type,
+        };
+  const normalizedCreated: ExpenseEntry = {
+    ...created,
+    id: normalizedInput.id,
+    note: created.note || normalizedInput.note || "",
+    userId,
+  };
+
+  const cachedExpenses = await readExpenseCache();
+  await writeExpenseCache(mergeExpenseEntries(cachedExpenses, [normalizedCreated]));
+  return normalizedCreated;
+};
 
 export const deleteExpense = async (id: string) => {
   const module = Platform.OS === "android" ? nativeModule : undefined;
@@ -243,20 +327,15 @@ export const deleteExpense = async (id: string) => {
     deletedLocal = await module.deleteExpense(id);
   }
 
-  try {
-    await deleteRemoteExpense(id);
+  const cachedExpenses = await readExpenseCache();
+  await writeExpenseCache(cachedExpenses.filter((expense) => expense.id !== id));
+  void deleteRemoteExpense(id).catch(() => undefined);
+
+  if (deletedLocal || module?.deleteExpense || Platform.OS !== "android") {
     return true;
-  } catch (error) {
-    if (deletedLocal) {
-      return true;
-    }
-
-    if (!module?.deleteExpense) {
-      throw new Error("Delete requires a rebuilt Android app. Reinstall the latest APK and try again.");
-    }
-
-    return false;
   }
+
+  throw new Error("Delete requires a rebuilt Android app. Reinstall the latest APK and try again.");
 };
 
 export const confirmPendingTransaction = async (

@@ -1,8 +1,20 @@
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
+type OpenRouterContentPart =
+  | {
+      type: 'text';
+      text: string;
+    }
+  | {
+      type: 'image_url';
+      image_url: {
+        url: string;
+      };
+    };
+
 type OpenRouterMessage = {
   role: 'system' | 'user' | 'assistant';
-  content: string;
+  content: string | OpenRouterContentPart[];
 };
 
 type RequestOptions = {

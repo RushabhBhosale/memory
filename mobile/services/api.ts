@@ -1,3 +1,5 @@
+import { getExpenseSessionToken } from "./auth";
+
 export type MemoryKind =
   | "note"
   | "task"
@@ -254,12 +256,27 @@ export type RemoteExpense = RemoteExpenseInput & {
   _id: string;
   createdAt: string;
   updatedAt: string;
+  userId: string;
+};
+
+export type BillAiExtraction = {
+  amount: number | null;
+  category: string;
+  confidence: number;
+  evidence: string;
+  merchant: string;
 };
 
 type ExpenseListResponse = {
   count: number;
   data: RemoteExpense[];
+  hasMore: boolean;
+  page: number;
+  pageSize: number;
+  totalPages: number;
 };
+
+export type RemoteExpensePage = ExpenseListResponse;
 
 const getApiRoot = (value: string) => {
   const baseUrl = value.replace(/\/$/, "");
@@ -293,6 +310,7 @@ export const getApiConfig = () => {
     dailySummaryUrl: `${apiRoot}/api/memories/daily-summary`,
     desktopActivityUrl: `${apiRoot}/api/desktop-activity`,
     expensesUrl: `${apiRoot}/api/expenses`,
+    loginUrl: `${apiRoot}/api/auth/login`,
     memoriesUrl: `${apiRoot}/api/memories`,
     screenshotsUrl: `${apiRoot}/api/screenshots`,
   };
@@ -303,10 +321,12 @@ export const request = async <T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> => {
+  const sessionToken = await getExpenseSessionToken();
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
+      ...(sessionToken ? { "x-expense-session": sessionToken } : {}),
       ...options.headers,
     },
   });
@@ -338,7 +358,7 @@ export const request = async <T>(
 export const listMemories = async () => {
   const { memoriesUrl } = getApiConfig();
   const response = await request<ListResponse>(memoriesUrl, "");
-  return response.data;
+  return response;
 };
 
 export const listActivity = async (params?: {
@@ -464,7 +484,7 @@ export const syncChatGptDailyBrief = async (date?: string) => {
 
 export const upsertExpense = async (input: RemoteExpenseInput) => {
   const { expensesUrl } = getApiConfig();
-  const response = await request<{ data: unknown }>(expensesUrl, "", {
+  const response = await request<{ data: RemoteExpense }>(expensesUrl, "", {
     method: "POST",
     body: JSON.stringify(input),
   });
@@ -472,11 +492,39 @@ export const upsertExpense = async (input: RemoteExpenseInput) => {
   return response.data;
 };
 
-export const listRemoteExpenses = async () => {
-  const { expensesUrl } = getApiConfig();
-  const response = await request<ExpenseListResponse>(expensesUrl, "");
+export const loginExpenseUser = async (username: string, password: string) => {
+  const { loginUrl } = getApiConfig();
+  const response = await request<{
+    data: {
+      token: string;
+      user: { id: string; username: string };
+    };
+  }>(loginUrl, "", {
+    body: JSON.stringify({ password, username }),
+    method: "POST",
+  });
 
   return response.data;
+};
+
+export const parseBillImageWithAi = async (imageDataUri: string) => {
+  const { expensesUrl } = getApiConfig();
+  const response = await request<{ data: BillAiExtraction }>(expensesUrl, "/parse-bill", {
+    method: "POST",
+    body: JSON.stringify({ imageDataUri }),
+  });
+
+  return response.data;
+};
+
+export const listRemoteExpenses = async (params?: { limit?: number; page?: number }) => {
+  const { expensesUrl } = getApiConfig();
+  const searchParams = new URLSearchParams();
+  searchParams.set("limit", String(Math.min(Math.max(params?.limit || 50, 1), 100)));
+  searchParams.set("page", String(Math.max(params?.page || 1, 1)));
+  const response = await request<ExpenseListResponse>(expensesUrl, `?${searchParams.toString()}`);
+
+  return response;
 };
 
 export const deleteRemoteExpense = async (deviceExpenseId: string) => {
