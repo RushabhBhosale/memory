@@ -293,7 +293,7 @@ const getApiRoot = (value: string) => {
 };
 
 export const getApiConfig = () => {
-  const apiUrl = "https://memory-green-kappa.vercel.app";
+  const apiUrl = "https://memory-li5d.vercel.app/";
 
   if (!apiUrl) {
     throw new Error("EXPO_PUBLIC_API_URL is not set");
@@ -509,20 +509,33 @@ export const loginExpenseUser = async (username: string, password: string) => {
 
 export const parseBillImageWithAi = async (imageDataUri: string) => {
   const { expensesUrl } = getApiConfig();
-  const response = await request<{ data: BillAiExtraction }>(expensesUrl, "/parse-bill", {
-    method: "POST",
-    body: JSON.stringify({ imageDataUri }),
-  });
+  const response = await request<{ data: BillAiExtraction }>(
+    expensesUrl,
+    "/parse-bill",
+    {
+      method: "POST",
+      body: JSON.stringify({ imageDataUri }),
+    },
+  );
 
   return response.data;
 };
 
-export const listRemoteExpenses = async (params?: { limit?: number; page?: number }) => {
+export const listRemoteExpenses = async (params?: {
+  limit?: number;
+  page?: number;
+}) => {
   const { expensesUrl } = getApiConfig();
   const searchParams = new URLSearchParams();
-  searchParams.set("limit", String(Math.min(Math.max(params?.limit || 50, 1), 100)));
+  searchParams.set(
+    "limit",
+    String(Math.min(Math.max(params?.limit || 50, 1), 100)),
+  );
   searchParams.set("page", String(Math.max(params?.page || 1, 1)));
-  const response = await request<ExpenseListResponse>(expensesUrl, `?${searchParams.toString()}`);
+  const response = await request<ExpenseListResponse>(
+    expensesUrl,
+    `?${searchParams.toString()}`,
+  );
 
   return response;
 };
