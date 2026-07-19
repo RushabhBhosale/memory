@@ -3,7 +3,7 @@ import { router, Tabs } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { colors } from "../../styles/theme";
+import { colors, subtleShadow } from "../../styles/theme";
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
@@ -51,10 +51,15 @@ const tabConfig: Record<
     inactive: "home-outline",
     label: "Home",
   },
+  analytics: {
+    active: "stats-chart",
+    inactive: "stats-chart-outline",
+    label: "Insights",
+  },
   create: {
     active: "add-circle",
     inactive: "add-circle-outline",
-    label: "Capture",
+    label: "Add",
   },
   investments: {
     active: "pie-chart",
@@ -136,6 +141,7 @@ export default function TabsLayout() {
     >
       <Tabs.Screen name="index" options={{ title: "Home" }} />
       <Tabs.Screen name="expenses" options={{ title: "Transactions" }} />
+      <Tabs.Screen name="analytics" options={{ title: "Insights" }} />
       <Tabs.Screen name="investments" options={{ title: "Portfolio" }} />
       <Tabs.Screen name="create" options={{ title: "Add transaction" }} />
     </Tabs>
@@ -150,21 +156,23 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   tabBar: {
+    ...subtleShadow,
     alignItems: "center",
     backgroundColor: colors.surface,
     borderColor: colors.borderStrong,
-    borderRadius: 0,
-    borderTopWidth: 1,
+    borderRadius: 18,
+    borderWidth: 1,
     flexDirection: "row",
     justifyContent: "space-around",
-    minHeight: 66,
-    paddingHorizontal: 12,
+    minHeight: 68,
+    paddingHorizontal: 6,
   },
   tabBarShell: {
     bottom: 0,
     left: 0,
     position: "absolute",
     right: 0,
+    paddingHorizontal: 10,
   },
   tabItem: {
     alignItems: "center",
@@ -175,7 +183,7 @@ const styles = StyleSheet.create({
   },
   tabLabel: {
     color: colors.textSoft,
-    fontSize: 11,
+    fontSize: 9,
     fontWeight: "800",
   },
 });

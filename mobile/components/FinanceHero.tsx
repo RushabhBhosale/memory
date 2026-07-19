@@ -35,7 +35,7 @@ export function FinanceHero({
       {rightContent ??
         (actionIcon && onAction ? (
           <Pressable accessibilityLabel={actionLabel || label} accessibilityRole="button" onPress={onAction} style={styles.action}>
-            <Ionicons color={colors.primaryDark} name={actionIcon} size={24} />
+            <Ionicons color={colors.primary} name={actionIcon} size={22} />
           </Pressable>
         ) : null)}
     </View>
@@ -45,8 +45,10 @@ export function FinanceHero({
 const styles = StyleSheet.create({
   action: {
     alignItems: "center",
-    backgroundColor: colors.white,
-    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.10)",
+    borderColor: "rgba(255,255,255,0.12)",
+    borderRadius: 12,
+    borderWidth: 1,
     height: 42,
     justifyContent: "center",
     width: 42,
@@ -58,19 +60,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: colors.primaryDark,
     flexDirection: "row",
-    minHeight: 142,
+    minHeight: 158,
     overflow: "hidden",
-    paddingBottom: 30,
-    paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingBottom: 36,
+    paddingHorizontal: 18,
+    paddingTop: 20,
   },
   label: {
-    color: "rgba(255,255,255,0.78)",
-    fontSize: 12,
+    color: "rgba(255,255,255,0.66)",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.3,
     lineHeight: 18,
+    textTransform: "uppercase",
   },
   orbitLarge: {
-    borderColor: "rgba(255,255,255,0.12)",
+    borderColor: "rgba(111,224,171,0.13)",
     borderRadius: 250,
     borderWidth: 1,
     height: 310,
@@ -80,7 +85,7 @@ const styles = StyleSheet.create({
     width: 310,
   },
   orbitSmall: {
-    borderColor: "rgba(255,255,255,0.10)",
+    borderColor: "rgba(111,224,171,0.10)",
     borderRadius: 180,
     borderWidth: 1,
     height: 220,
@@ -91,15 +96,15 @@ const styles = StyleSheet.create({
   },
   title: {
     color: colors.white,
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: "700",
-    marginBottom: 8,
+    marginBottom: 10,
   },
   value: {
     color: colors.white,
-    fontSize: 23,
-    fontWeight: "800",
-    letterSpacing: -0.4,
-    lineHeight: 30,
+    fontSize: 29,
+    fontWeight: "900",
+    letterSpacing: -0.7,
+    lineHeight: 36,
   },
 });

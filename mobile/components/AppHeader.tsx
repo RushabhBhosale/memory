@@ -19,7 +19,7 @@ type AppHeaderProps = {
 
 export const HeaderIcon = ({ accessibilityLabel, name, onPress }: HeaderIconProps) => (
   <Pressable accessibilityLabel={accessibilityLabel || name} accessibilityRole="button" hitSlop={8} onPress={onPress} style={styles.headerIcon}>
-    <Ionicons color={colors.textMuted} name={name} size={20} />
+    <Ionicons color={colors.white} name={name} size={19} />
   </Pressable>
 );
 
@@ -85,7 +85,15 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   headerIcon: {
-    marginLeft: 12,
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.10)",
+    borderColor: "rgba(255,255,255,0.12)",
+    borderRadius: 10,
+    borderWidth: 1,
+    height: 38,
+    justifyContent: "center",
+    marginLeft: 7,
+    width: 38,
   },
   leftSlot: {
     minWidth: 36,

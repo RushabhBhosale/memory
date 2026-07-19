@@ -1,10 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router, useFocusEffect } from "expo-router";
+import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   ActivityIndicator,
-  AppState,
   Platform,
   Pressable,
   RefreshControl,
@@ -17,26 +16,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { FinanceHero } from "../../components/FinanceHero";
 import { getTransactionCategory } from "../../constants/transactionCategories";
-import {
-  fetchAllRemoteExpenses,
-  listLocalExpenses,
-  mergeExpenseEntries,
-  subscribeToExpenseChanges,
-  type ExpenseEntry,
-} from "../../services/expenses";
+import { useAuth } from "../../context/AuthContext";
+import { useExpenseData } from "../../hooks/useExpenseData";
+import type { ExpenseEntry } from "../../services/expenses";
 import { colors, subtleShadow } from "../../styles/theme";
+import { getDateKey, getMonthKey } from "../../utils/financeAnalytics";
 import { formatCurrency } from "../../utils/localization";
-const getDateKey = (value: number | Date) => {
-  const date = value instanceof Date ? value : new Date(value);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
-    date.getDate(),
-  ).padStart(2, "0")}`;
-};
-
-const getMonthKey = (value: number | Date) => {
-  const date = value instanceof Date ? value : new Date(value);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-};
 
 const formatDate = (timestamp: number) =>
   new Intl.DateTimeFormat(undefined, {
@@ -79,71 +64,18 @@ const getSummary = (transactions: ExpenseEntry[]) => {
 };
 
 export default function HomeScreen() {
-  const [transactions, setTransactions] = useState<ExpenseEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
-
-  const loadTransactions = useCallback(
-    async (options?: { refreshing?: boolean; silent?: boolean }) => {
-      if (options?.refreshing) {
-        setRefreshing(true);
-      } else if (!options?.silent) {
-        setLoading(true);
-      }
-
-      try {
-        setError("");
-        const local = await listLocalExpenses();
-        setTransactions(local);
-
-        try {
-          const remote = await fetchAllRemoteExpenses(100);
-          setTransactions(mergeExpenseEntries(local, remote.data));
-        } catch (err) {
-          setError(
-            err instanceof Error
-              ? `${err.message}. Showing transactions saved on this device.`
-              : "Unable to load cloud transactions. Showing transactions saved on this device.",
-          );
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Unable to load transactions");
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    [],
-  );
-
-  useFocusEffect(
-    useCallback(() => {
-      void loadTransactions();
-    }, [loadTransactions]),
-  );
-
-  useEffect(() => {
-    const expenseSubscription = subscribeToExpenseChanges(() => {
-      void loadTransactions({ silent: true });
-    });
-    const appStateSubscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") {
-        void loadTransactions({ silent: true });
-      }
-    });
-
-    return () => {
-      expenseSubscription.remove();
-      appStateSubscription.remove();
-    };
-  }, [loadTransactions]);
+  const { session } = useAuth();
+  const { error, loading, loadTransactions, refreshing, transactions } = useExpenseData();
 
   const summary = useMemo(() => getSummary(transactions), [transactions]);
   const balance = summary.monthIncome - summary.monthExpense;
   const spendRatio = summary.monthIncome > 0
     ? Math.min((summary.monthExpense / summary.monthIncome) * 100, 100)
     : 0;
+  const today = new Date();
+  const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+  const daysRemaining = Math.max(daysInMonth - today.getDate() + 1, 1);
+  const safeToSpend = Math.max(balance, 0) / daysRemaining;
   const recentTransactions = transactions.slice(0, 6);
 
   if (loading && !transactions.length) {
@@ -176,9 +108,9 @@ export default function HomeScreen() {
         <FinanceHero
           actionIcon="settings-outline"
           actionLabel="Open settings"
-          label="This month balance"
+          label="Available this month"
           onAction={() => router.push("/settings")}
-          title="Money"
+          title={`Hi, ${session?.user.username || "there"}`}
           value={formatCurrency(balance)}
         />
 
@@ -192,14 +124,27 @@ export default function HomeScreen() {
         ) : null}
 
         <View style={styles.cashflowCard}>
+          <View style={styles.safeSpendHeader}>
+            <View style={styles.safeSpendIcon}>
+              <Ionicons color={colors.primary} name="speedometer-outline" size={20} />
+            </View>
+            <View style={styles.safeSpendCopy}>
+              <Text style={styles.cashflowTitle}>Safe to spend today</Text>
+              <Text style={styles.cashflowDetail}>Based on this month’s remaining balance</Text>
+            </View>
+            <View style={styles.daysBadge}>
+              <Text style={styles.daysBadgeText}>{daysRemaining} days</Text>
+            </View>
+          </View>
+          <Text style={styles.safeSpendValue}>{formatCurrency(safeToSpend)}</Text>
           <View style={styles.sectionHeader}>
-            <Text style={styles.cashflowTitle}>Monthly cash flow</Text>
-            <Text style={styles.cashflowPercent}>{spendRatio.toFixed(0)}% spent</Text>
+            <Text style={styles.cashflowDetail}>Monthly spending</Text>
+            <Text style={styles.cashflowPercent}>{spendRatio.toFixed(0)}%</Text>
           </View>
           <View style={styles.cashflowTrack}>
             <View style={[styles.cashflowFill, { width: `${spendRatio}%` as `${number}%` }]} />
           </View>
-          <Text style={styles.cashflowDetail}>
+          <Text style={styles.cashflowFooter}>
             {formatCurrency(summary.monthExpense)} of {formatCurrency(summary.monthIncome)} income
           </Text>
         </View>
@@ -219,7 +164,28 @@ export default function HomeScreen() {
           />
         </View>
 
-        <Pressable style={styles.portfolioBanner} onPress={() => router.push("/(tabs)/investments")}>
+        <Pressable
+          accessibilityLabel="Open spending insights"
+          accessibilityRole="button"
+          style={styles.insightsBanner}
+          onPress={() => router.push("/(tabs)/analytics" as never)}
+        >
+          <View style={styles.insightsIcon}>
+            <Ionicons color={colors.white} name="stats-chart" size={20} />
+          </View>
+          <View style={styles.portfolioCopy}>
+            <Text style={styles.insightsTitle}>Explore spending insights</Text>
+            <Text style={styles.insightsText}>Calendar, cash flow, and category trends</Text>
+          </View>
+          <Ionicons color={colors.textSoft} name="chevron-forward" size={18} />
+        </Pressable>
+
+        <Pressable
+          accessibilityLabel="Open investment portfolio"
+          accessibilityRole="button"
+          style={styles.portfolioBanner}
+          onPress={() => router.push("/(tabs)/investments")}
+        >
           <View style={styles.portfolioIcon}>
             <Ionicons color={colors.primary} name="pie-chart-outline" size={21} />
           </View>
@@ -351,13 +317,14 @@ function TransactionRow({ transaction }: { transaction: ExpenseEntry }) {
 type IconName = keyof typeof Ionicons.glyphMap;
 
 const styles = StyleSheet.create({
-  body: { gap: 16, marginTop: -24, paddingBottom: 122, paddingHorizontal: 16 },
-  cashflowCard: { ...subtleShadow, backgroundColor: colors.surface, borderRadius: 10, padding: 14 },
+  body: { gap: 14, marginTop: -24, paddingBottom: 126, paddingHorizontal: 14 },
+  cashflowCard: { ...subtleShadow, backgroundColor: colors.surface, borderRadius: 16, padding: 16 },
   cashflowDetail: { color: colors.textMuted, fontSize: 11, marginTop: 8 },
-  cashflowFill: { backgroundColor: colors.primary, borderRadius: 3, height: 4 },
-  cashflowPercent: { color: colors.textMuted, fontSize: 11 },
-  cashflowTitle: { color: colors.text, fontSize: 16, fontWeight: "700" },
-  cashflowTrack: { backgroundColor: colors.background, borderRadius: 3, height: 4, marginTop: 13, overflow: "hidden" },
+  cashflowFill: { backgroundColor: colors.primary, borderRadius: 4, height: 6 },
+  cashflowFooter: { color: colors.textMuted, fontSize: 10, marginTop: 8 },
+  cashflowPercent: { color: colors.primary, fontSize: 11, fontWeight: "800" },
+  cashflowTitle: { color: colors.text, fontSize: 14, fontWeight: "800" },
+  cashflowTrack: { backgroundColor: colors.surfaceMuted, borderRadius: 4, height: 6, marginTop: 8, overflow: "hidden" },
   content: {
     backgroundColor: colors.background,
   },
@@ -404,8 +371,10 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
   expenseSurface: {
-    backgroundColor: "#E7F5F2",
+    backgroundColor: colors.accentSurface,
   },
+  daysBadge: { backgroundColor: colors.primarySurface, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 6 },
+  daysBadgeText: { color: colors.primary, fontSize: 10, fontWeight: "800" },
   incomeAmount: {
     color: colors.success,
     fontSize: 14,
@@ -414,6 +383,10 @@ const styles = StyleSheet.create({
   incomeSurface: {
     backgroundColor: colors.successSurface,
   },
+  insightsBanner: { alignItems: "center", backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 11, padding: 13 },
+  insightsIcon: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: 10, height: 42, justifyContent: "center", width: 42 },
+  insightsText: { color: colors.textMuted, fontSize: 11, marginTop: 3 },
+  insightsTitle: { color: colors.text, fontSize: 14, fontWeight: "800" },
   linkText: {
     color: colors.primary,
     fontSize: 13,
@@ -444,7 +417,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textAlign: "center",
   },
-  portfolioBanner: { alignItems: "center", backgroundColor: colors.surface, borderRadius: 10, flexDirection: "row", gap: 11, padding: 13 },
+  portfolioBanner: { alignItems: "center", backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 14, borderWidth: 1, flexDirection: "row", gap: 11, padding: 13 },
   portfolioCopy: { flex: 1 },
   portfolioIcon: { alignItems: "center", backgroundColor: colors.primarySurface, borderRadius: 9, height: 42, justifyContent: "center", width: 42 },
   portfolioText: { color: colors.textMuted, fontSize: 11, marginTop: 3 },
@@ -464,6 +437,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "900",
   },
+  safeSpendCopy: { flex: 1 },
+  safeSpendHeader: { alignItems: "center", flexDirection: "row", gap: 10 },
+  safeSpendIcon: { alignItems: "center", backgroundColor: colors.primarySurface, borderRadius: 10, height: 40, justifyContent: "center", width: 40 },
+  safeSpendValue: { color: colors.text, fontSize: 30, fontWeight: "900", letterSpacing: -0.7, marginBottom: 18, marginTop: 16 },
   screen: {
     backgroundColor: colors.background,
     flex: 1,
@@ -488,7 +465,7 @@ const styles = StyleSheet.create({
   smsBanner: {
     alignItems: "center",
     backgroundColor: colors.accentSurface,
-    borderColor: "#FED7AA",
+    borderColor: colors.border,
     borderRadius: 10,
     borderWidth: 1,
     flexDirection: "row",
@@ -522,7 +499,7 @@ const styles = StyleSheet.create({
     ...subtleShadow,
     backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderRadius: 10,
+    borderRadius: 14,
     borderWidth: 1,
     flex: 1,
     padding: 15,
@@ -542,7 +519,7 @@ const styles = StyleSheet.create({
   },
   todayPanel: {
     backgroundColor: colors.surfaceMuted,
-    borderRadius: 10,
+    borderRadius: 14,
     padding: 16,
   },
   todayRow: {
@@ -572,7 +549,7 @@ const styles = StyleSheet.create({
   transactionPanel: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderRadius: 10,
+    borderRadius: 14,
     overflow: "hidden",
   },
   transactionRow: {
