@@ -56,6 +56,11 @@ const tabConfig: Record<
     inactive: "add-circle-outline",
     label: "Capture",
   },
+  investments: {
+    active: "pie-chart",
+    inactive: "pie-chart-outline",
+    label: "Portfolio",
+  },
 };
 
 function FinanceTabBar({ state, descriptors, navigation }: FinanceTabBarProps) {
@@ -65,7 +70,7 @@ function FinanceTabBar({ state, descriptors, navigation }: FinanceTabBarProps) {
   return (
     <View
       pointerEvents="box-none"
-      style={[styles.tabBarShell, { bottom: Math.max(insets.bottom, 10) }]}
+      style={[styles.tabBarShell, { paddingBottom: Math.max(insets.bottom, 8) }]}
     >
       <View style={styles.tabBar}>
         {visibleRoutes.map((route) => {
@@ -131,6 +136,7 @@ export default function TabsLayout() {
     >
       <Tabs.Screen name="index" options={{ title: "Home" }} />
       <Tabs.Screen name="expenses" options={{ title: "Transactions" }} />
+      <Tabs.Screen name="investments" options={{ title: "Portfolio" }} />
       <Tabs.Screen name="create" options={{ title: "Add transaction" }} />
     </Tabs>
   );
@@ -147,24 +153,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: colors.surface,
     borderColor: colors.borderStrong,
-    borderRadius: 24,
-    borderWidth: 1,
+    borderRadius: 0,
+    borderTopWidth: 1,
     flexDirection: "row",
     justifyContent: "space-around",
-    minHeight: 70,
+    minHeight: 66,
     paddingHorizontal: 12,
   },
   tabBarShell: {
-    left: 18,
+    bottom: 0,
+    left: 0,
     position: "absolute",
-    right: 18,
+    right: 0,
   },
   tabItem: {
     alignItems: "center",
     flex: 1,
     gap: 3,
     justifyContent: "center",
-    minHeight: 64,
+    minHeight: 60,
   },
   tabLabel: {
     color: colors.textSoft,

@@ -1,49 +1,51 @@
 export const colors = {
-  primary: '#0F766E',
-  secondary: '#2563EB',
-  background: '#FFFFFF',
-  backgroundSoft: '#F7F8F5',
+  primary: '#8557A0',
+  primaryDark: '#6541A0',
+  primarySurface: '#F0E8F5',
+  secondary: '#489FCD',
+  background: '#F3F3F3',
+  backgroundSoft: '#F7F7F7',
   surface: '#FFFFFF',
-  surfaceRaised: '#FBFCF8',
-  surfaceMuted: '#F0F3EF',
-  border: '#E8ECE5',
-  borderStrong: '#D8E0D6',
-  text: '#181A17',
-  textMuted: '#526056',
-  textSoft: '#93A094',
-  accent: '#B45309',
-  accentPressed: '#92400E',
-  accentSurface: '#FFF7ED',
-  success: '#059669',
-  successSurface: '#EAFBF2',
-  danger: '#DC2626',
-  dangerSurface: '#FEF2F2',
+  surfaceRaised: '#FFFFFF',
+  surfaceMuted: '#EFEFEF',
+  border: '#E9E9E9',
+  borderStrong: '#D8D8D8',
+  text: '#242424',
+  textMuted: '#707070',
+  textSoft: '#A0A0A0',
+  accent: '#489FCD',
+  accentPressed: '#337FA8',
+  accentSurface: '#E7F4FA',
+  success: '#35B95B',
+  successSurface: '#E8F8EC',
+  danger: '#E25C5C',
+  dangerSurface: '#FDECEC',
   workTag: '#2563EB',
   personalTag: '#0F766E',
   reminderTag: '#EA580C',
   projectTag: '#059669',
-  black: '#181A17',
+  black: '#242424',
   white: '#FFFFFF'
 };
 
 export const cardShadow = {
-  shadowColor: '#0F172A',
+  shadowColor: '#3A2945',
   shadowOffset: {
     width: 0,
     height: 14
   },
-  shadowOpacity: 0.08,
+  shadowOpacity: 0.07,
   shadowRadius: 20,
   elevation: 2
 };
 
 export const subtleShadow = {
-  shadowColor: '#0F172A',
+  shadowColor: '#3A2945',
   shadowOffset: {
     width: 0,
     height: 8
   },
-  shadowOpacity: 0.06,
+  shadowOpacity: 0.045,
   shadowRadius: 14,
   elevation: 1
 };

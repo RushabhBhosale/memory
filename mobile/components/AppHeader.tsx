@@ -6,6 +6,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { colors } from "../styles/theme";
 
 type HeaderIconProps = {
+  accessibilityLabel?: string;
   name: keyof typeof Ionicons.glyphMap;
   onPress: () => void;
 };
@@ -16,8 +17,8 @@ type AppHeaderProps = {
   rightIcons?: ReactNode;
 };
 
-export const HeaderIcon = ({ name, onPress }: HeaderIconProps) => (
-  <Pressable hitSlop={8} onPress={onPress} style={styles.headerIcon}>
+export const HeaderIcon = ({ accessibilityLabel, name, onPress }: HeaderIconProps) => (
+  <Pressable accessibilityLabel={accessibilityLabel || name} accessibilityRole="button" hitSlop={8} onPress={onPress} style={styles.headerIcon}>
     <Ionicons color={colors.textMuted} name={name} size={20} />
   </Pressable>
 );

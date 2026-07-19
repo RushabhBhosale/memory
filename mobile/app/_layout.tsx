@@ -45,6 +45,7 @@ function AppNavigator() {
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="capture" options={{ headerShown: false }} />
       <Stack.Screen name="expense-add" options={{ headerShown: false }} />
+      <Stack.Screen name="investment-add" options={{ headerShown: false }} />
       <Stack.Screen name="settings" options={{ headerShown: false }} />
     </Stack>
   );

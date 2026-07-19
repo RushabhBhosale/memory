@@ -312,6 +312,7 @@ export const getApiConfig = () => {
     expensesUrl: `${apiRoot}/api/expenses`,
     loginUrl: `${apiRoot}/api/auth/login`,
     memoriesUrl: `${apiRoot}/api/memories`,
+    registerUrl: `${apiRoot}/api/auth/register`,
     screenshotsUrl: `${apiRoot}/api/screenshots`,
   };
 };
@@ -500,6 +501,21 @@ export const loginExpenseUser = async (username: string, password: string) => {
       user: { id: string; username: string };
     };
   }>(loginUrl, "", {
+    body: JSON.stringify({ password, username }),
+    method: "POST",
+  });
+
+  return response.data;
+};
+
+export const registerExpenseUser = async (username: string, password: string) => {
+  const { registerUrl } = getApiConfig();
+  const response = await request<{
+    data: {
+      token: string;
+      user: { id: string; username: string };
+    };
+  }>(registerUrl, "", {
     body: JSON.stringify({ password, username }),
     method: "POST",
   });

@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -15,11 +16,16 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { AppHeader, HeaderIcon } from "../../components/AppHeader";
+import { HeaderIcon } from "../../components/AppHeader";
+import { FinanceHero } from "../../components/FinanceHero";
+import {
+  getTransactionCategory,
+  transactionCategories,
+} from "../../constants/transactionCategories";
 import {
   confirmPendingTransaction,
   deleteExpense,
-  fetchRemoteExpensePage,
+  fetchAllRemoteExpenses,
   hasExpenseSmsPermissions,
   ignorePendingTransaction,
   listPendingTransactions,
@@ -29,6 +35,7 @@ import {
   scanRecentSms,
   subscribeToExpenseChanges,
   syncExpensesToMongo,
+  updateExpenseCategory,
   type ExpenseEntry,
   type PendingTransaction,
   type PendingTransactionType,
@@ -36,8 +43,7 @@ import {
 import { colors, subtleShadow } from "../../styles/theme";
 import { formatCurrency, formatDate } from "../../utils/localization";
 
-const categories = ["food", "shopping", "travel", "bills", "salary", "general"];
-const REMOTE_PAGE_SIZE = 50;
+const REMOTE_PAGE_SIZE = 100;
 
 const isThisMonth = (timestamp: number) => {
   const date = new Date(timestamp);
@@ -58,15 +64,15 @@ export default function ExpensesScreen() {
   const [pending, setPending] = useState<PendingTransaction[]>([]);
   const [transactions, setTransactions] = useState<ExpenseEntry[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
   const [hasPermission, setHasPermission] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [scanning, setScanning] = useState(false);
-  const [remotePage, setRemotePage] = useState(0);
-  const [remoteHasMore, setRemoteHasMore] = useState(false);
   const [syncingRemote, setSyncingRemote] = useState(false);
   const [savingId, setSavingId] = useState("");
   const [editingId, setEditingId] = useState("");
+  const [recategorizingId, setRecategorizingId] = useState("");
   const [editing, setEditing] = useState<EditingState>({
     amount: "",
     category: "general",
@@ -86,8 +92,8 @@ export default function ExpensesScreen() {
 
       try {
         setError("");
-        const nextTransactions = await listLocalExpenses();
-        setTransactions(nextTransactions);
+        const local = await listLocalExpenses();
+        setTransactions(local);
         void Promise.all([
           Platform.OS === "android" ? listPendingTransactions() : Promise.resolve([]),
           Platform.OS === "android" ? hasExpenseSmsPermissions() : Promise.resolve(false),
@@ -95,6 +101,17 @@ export default function ExpensesScreen() {
           setPending(nextPending.filter((item) => item.status === "pending").reverse());
           setHasPermission(permission);
         });
+
+        try {
+          const remote = await fetchAllRemoteExpenses(REMOTE_PAGE_SIZE);
+          setTransactions(mergeExpenseEntries(local, remote.data));
+        } catch (err) {
+          setError(
+            err instanceof Error
+              ? `${err.message}. Showing transactions saved on this device.`
+              : "Unable to load cloud transactions. Showing transactions saved on this device.",
+          );
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unable to load transactions");
       } finally {
@@ -105,20 +122,19 @@ export default function ExpensesScreen() {
     [],
   );
 
-  const syncCloud = async (page = 1) => {
+  const syncCloud = async () => {
     try {
       setSyncingRemote(true);
       setError("");
-      const remote = await fetchRemoteExpensePage(page, REMOTE_PAGE_SIZE);
+      const remote = await fetchAllRemoteExpenses(REMOTE_PAGE_SIZE);
       const local = await listLocalExpenses();
+      const merged = mergeExpenseEntries(local, remote.data);
 
-      setTransactions((current) =>
-        mergeExpenseEntries(page === 1 ? local : current, remote.data),
-      );
-      setRemotePage(remote.page);
-      setRemoteHasMore(remote.hasMore);
+      setTransactions(merged);
       void syncExpensesToMongo(local).catch(() => undefined);
-      setMessage(`Cloud sync complete · page ${remote.page} of ${Math.max(remote.totalPages, 1)}`);
+      setMessage(
+        `Cloud sync complete · ${remote.count} transaction${remote.count === 1 ? "" : "s"} loaded`,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sync transactions");
     } finally {
@@ -128,7 +144,8 @@ export default function ExpensesScreen() {
 
   const refreshAll = async () => {
     await loadData({ refreshing: true });
-    await syncCloud(1);
+    const local = await listLocalExpenses();
+    void syncExpensesToMongo(local).catch(() => undefined);
   };
 
   useFocusEffect(
@@ -148,9 +165,12 @@ export default function ExpensesScreen() {
   );
 
   const visibleTransactions = useMemo(
-    () =>
-      transactions.filter((item) => filter === "all" || item.type === filter),
-    [filter, transactions],
+    () => transactions.filter(
+      (item) =>
+        (filter === "all" || item.type === filter) &&
+        (categoryFilter === "all" || item.category === categoryFilter),
+    ),
+    [categoryFilter, filter, transactions],
   );
   const monthIncome = transactions
     .filter((item) => item.type === "income" && isThisMonth(item.timestamp))
@@ -158,6 +178,17 @@ export default function ExpensesScreen() {
   const monthExpense = transactions
     .filter((item) => item.type === "expense" && isThisMonth(item.timestamp))
     .reduce((total, item) => total + item.amount, 0);
+  const categoryTotals = useMemo(() => {
+    const totals = new Map<string, number>();
+    transactions
+      .filter((item) => item.type === "expense" && isThisMonth(item.timestamp))
+      .forEach((item) => totals.set(item.category, (totals.get(item.category) || 0) + item.amount));
+
+    return [...totals.entries()]
+      .map(([category, amount]) => ({ amount, category: getTransactionCategory(category) }))
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 4);
+  }, [transactions]);
 
   const requestPermissions = async () => {
     try {
@@ -266,6 +297,19 @@ export default function ExpensesScreen() {
     );
   };
 
+  const recategorizeTransaction = async (transaction: ExpenseEntry, category: string) => {
+    try {
+      setSavingId(transaction.id);
+      const updated = await updateExpenseCategory(transaction.id, category);
+      setTransactions((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setRecategorizingId("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to update category");
+    } finally {
+      setSavingId("");
+    }
+  };
+
   const ignoreTransaction = async (item: PendingTransaction) => {
     try {
       setSavingId(item.id);
@@ -291,7 +335,8 @@ export default function ExpensesScreen() {
   }
 
   return (
-    <SafeAreaView edges={["top"]} style={styles.screen}>
+    <SafeAreaView edges={["top"]} style={styles.safeArea}>
+      <StatusBar style="light" />
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={
@@ -303,19 +348,26 @@ export default function ExpensesScreen() {
           />
         }
         showsVerticalScrollIndicator={false}
+        style={styles.scroll}
       >
-        <AppHeader
+        <FinanceHero
+          label="Spent this month"
           title="Transactions"
-          rightIcons={
-            <>
-              {Platform.OS === "android" ? (
-                <HeaderIcon name="refresh-outline" onPress={() => void refreshSms()} />
-              ) : null}
-              <HeaderIcon name="cloud-upload-outline" onPress={() => void syncCloud(1)} />
-              <HeaderIcon name="add-outline" onPress={() => router.push("/expense-add")} />
-            </>
+          value={formatCurrency(monthExpense)}
+          rightContent={
+            <View style={styles.heroActions}>
+              <>
+                {Platform.OS === "android" ? (
+                  <HeaderIcon accessibilityLabel="Scan transaction messages" name="refresh-outline" onPress={() => void refreshSms()} />
+                ) : null}
+                <HeaderIcon accessibilityLabel="Sync transactions" name="cloud-upload-outline" onPress={() => void syncCloud()} />
+                <HeaderIcon accessibilityLabel="Add transaction" name="add-outline" onPress={() => router.push("/expense-add")} />
+              </>
+            </View>
           }
         />
+
+        <View style={styles.body}>
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
@@ -340,6 +392,35 @@ export default function ExpensesScreen() {
           <SummaryCard label="This month in" value={formatCurrency(monthIncome)} tone="income" />
           <SummaryCard label="This month out" value={formatCurrency(monthExpense)} tone="expense" />
         </View>
+
+        {categoryTotals.length ? (
+          <View style={styles.categoryBreakdown}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Spending by category</Text>
+              <Text style={styles.sectionCaption}>This month</Text>
+            </View>
+            <View style={styles.categoryBar}>
+              {categoryTotals.map((item) => (
+                <View
+                  key={item.category.key}
+                  style={{
+                    backgroundColor: item.category.color,
+                    flex: Math.max(item.amount, monthExpense * 0.03),
+                  }}
+                />
+              ))}
+            </View>
+            <View style={styles.categoryLegend}>
+              {categoryTotals.map((item) => (
+                <View key={item.category.key} style={styles.categoryLegendItem}>
+                  <Ionicons color={item.category.color} name={item.category.icon} size={15} />
+                  <Text style={styles.categoryLegendLabel}>{item.category.label}</Text>
+                  <Text style={styles.categoryLegendValue}>{formatCurrency(item.amount)}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
 
         {pending.length ? (
           <View style={styles.panel}>
@@ -372,8 +453,7 @@ export default function ExpensesScreen() {
                         style={styles.input}
                         value={editing.merchant}
                       />
-                      <ChipPicker
-                        options={categories}
+                      <CategoryPicker
                         selected={editing.category}
                         onSelect={(category) => setEditing((current) => ({ ...current, category }))}
                       />
@@ -387,7 +467,7 @@ export default function ExpensesScreen() {
                   ) : (
                     <>
                       <Text style={styles.transactionTitle}>{item.merchant}</Text>
-                      <Text style={styles.transactionMeta}>{item.category} • {formatDate(item.timestamp)}</Text>
+                      <Text style={styles.transactionMeta}>{getTransactionCategory(item.category).label} • {formatDate(item.timestamp)}</Text>
                     </>
                   )}
                   <Text numberOfLines={2} style={styles.previewText}>{item.messagePreview}</Text>
@@ -422,6 +502,30 @@ export default function ExpensesScreen() {
           ))}
         </View>
 
+        <ScrollView
+          contentContainerStyle={styles.categoryFilterContent}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+        >
+          <Pressable
+            onPress={() => setCategoryFilter("all")}
+            style={[styles.categoryFilter, categoryFilter === "all" && styles.categoryFilterSelected]}
+          >
+            <Ionicons color={categoryFilter === "all" ? colors.white : colors.textMuted} name="apps-outline" size={15} />
+            <Text style={[styles.categoryFilterText, categoryFilter === "all" && styles.categoryFilterTextSelected]}>All categories</Text>
+          </Pressable>
+          {transactionCategories.map((category) => (
+            <Pressable
+              key={category.key}
+              onPress={() => setCategoryFilter(category.key)}
+              style={[styles.categoryFilter, categoryFilter === category.key && styles.categoryFilterSelected]}
+            >
+              <Ionicons color={categoryFilter === category.key ? colors.white : category.color} name={category.icon} size={15} />
+              <Text style={[styles.categoryFilterText, categoryFilter === category.key && styles.categoryFilterTextSelected]}>{category.label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+
         <View style={styles.panel}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Ledger</Text>
@@ -431,6 +535,9 @@ export default function ExpensesScreen() {
             visibleTransactions.map((transaction) => (
               <TransactionRow
                 key={transaction.id}
+                categoryOpen={recategorizingId === transaction.id}
+                onCategoryPress={() => setRecategorizingId((current) => current === transaction.id ? "" : transaction.id)}
+                onCategorySelect={(category) => void recategorizeTransaction(transaction, category)}
                 saving={savingId === transaction.id}
                 transaction={transaction}
                 onDelete={() => removeTransaction(transaction)}
@@ -445,19 +552,27 @@ export default function ExpensesScreen() {
               </Pressable>
             </View>
           )}
-          {remoteHasMore ? (
-            <Pressable
-              disabled={syncingRemote}
-              onPress={() => void syncCloud(remotePage + 1)}
-              style={styles.loadMoreButton}
-            >
-              {syncingRemote ? <ActivityIndicator color={colors.primary} /> : null}
-              <Text style={styles.loadMoreText}>{syncingRemote ? "Loading…" : "Load more from cloud"}</Text>
-            </Pressable>
-          ) : null}
+        </View>
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function CategoryPicker({ onSelect, selected }: { onSelect: (value: string) => void; selected: string }) {
+  return (
+    <View style={styles.chipRow}>
+      {transactionCategories.map((category) => (
+        <Pressable
+          key={category.key}
+          onPress={() => onSelect(category.key)}
+          style={[styles.chip, selected === category.key && styles.selectedChip]}
+        >
+          <Ionicons color={selected === category.key ? colors.white : category.color} name={category.icon} size={14} />
+          <Text style={[styles.chipText, selected === category.key && styles.selectedChipText]}>{category.label}</Text>
+        </Pressable>
+      ))}
+    </View>
   );
 }
 
@@ -497,34 +612,49 @@ function ChipPicker({
 }
 
 function TransactionRow({
+  categoryOpen,
+  onCategoryPress,
+  onCategorySelect,
   onDelete,
   saving,
   transaction,
 }: {
+  categoryOpen: boolean;
+  onCategoryPress: () => void;
+  onCategorySelect: (category: string) => void;
   onDelete: () => void;
   saving: boolean;
   transaction: ExpenseEntry;
 }) {
   const isIncome = transaction.type === "income";
+  const category = getTransactionCategory(transaction.category);
 
   return (
+    <View style={styles.transactionItem}>
     <View style={styles.transactionRow}>
-      <View style={[styles.transactionIcon, isIncome ? styles.incomeSurface : styles.expenseSurface]}>
-        <Ionicons color={isIncome ? colors.success : colors.primary} name={isIncome ? "arrow-down-outline" : "arrow-up-outline"} size={18} />
-      </View>
+      <Pressable accessibilityLabel={`Change category for ${transaction.merchant}`} accessibilityRole="button" hitSlop={7} onPress={onCategoryPress} style={[styles.transactionIcon, { backgroundColor: isIncome ? colors.successSurface : category.surface }]}>
+        <Ionicons color={isIncome ? colors.success : category.color} name={isIncome ? "arrow-down-outline" : category.icon} size={18} />
+      </Pressable>
       <View style={styles.transactionCopy}>
         <Text numberOfLines={1} style={styles.transactionTitle}>{transaction.merchant}</Text>
-        <Text numberOfLines={1} style={styles.transactionMeta}>{transaction.category} • {formatDate(transaction.timestamp)}</Text>
+        <Text numberOfLines={1} style={styles.transactionMeta}>{category.label} • {formatDate(transaction.timestamp)}</Text>
         {transaction.note ? <Text numberOfLines={1} style={styles.noteText}>{transaction.note}</Text> : null}
       </View>
       <View style={styles.amountCopy}>
         <Text style={isIncome ? styles.incomeAmount : styles.expenseAmount}>
           {isIncome ? "+" : "−"}{formatCurrency(transaction.amount, transaction.currency)}
         </Text>
-        <Pressable disabled={saving} onPress={onDelete} style={styles.deleteButton}>
+        <Pressable accessibilityLabel={`Delete ${transaction.merchant}`} accessibilityRole="button" disabled={saving} onPress={onDelete} style={styles.deleteButton}>
           <Ionicons color={colors.danger} name="trash-outline" size={17} />
         </Pressable>
       </View>
+    </View>
+    {categoryOpen ? (
+      <View style={styles.recategorizePanel}>
+        <Text style={styles.recategorizeLabel}>Move to category</Text>
+        <CategoryPicker onSelect={onCategorySelect} selected={transaction.category} />
+      </View>
+    ) : null}
     </View>
   );
 }
@@ -533,31 +663,42 @@ const styles = StyleSheet.create({
   actionRow: { flexDirection: "row", gap: 8, marginTop: 12 },
   amountCopy: { alignItems: "flex-end", gap: 8 },
   centerState: { alignItems: "center", flex: 1, gap: 10, justifyContent: "center" },
-  chip: { backgroundColor: colors.backgroundSoft, borderColor: colors.border, borderRadius: 999, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 7 },
+  body: { gap: 16, marginTop: -24, paddingBottom: 122, paddingHorizontal: 16 },
+  categoryBar: { borderRadius: 3, flexDirection: "row", height: 5, marginTop: 14, overflow: "hidden" },
+  categoryBreakdown: { ...subtleShadow, backgroundColor: colors.surface, borderRadius: 10, padding: 14 },
+  categoryFilter: { alignItems: "center", backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 9, borderWidth: 1, flexDirection: "row", gap: 6, paddingHorizontal: 11, paddingVertical: 8 },
+  categoryFilterContent: { gap: 8, paddingRight: 16 },
+  categoryFilterSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  categoryFilterText: { color: colors.textMuted, fontSize: 12, fontWeight: "700" },
+  categoryFilterTextSelected: { color: colors.white },
+  categoryLegend: { flexDirection: "row", flexWrap: "wrap", gap: 12, marginTop: 12 },
+  categoryLegendItem: { alignItems: "center", flexDirection: "row", gap: 5 },
+  categoryLegendLabel: { color: colors.textMuted, fontSize: 11 },
+  categoryLegendValue: { color: colors.text, fontSize: 11, fontWeight: "700" },
+  chip: { alignItems: "center", backgroundColor: colors.backgroundSoft, borderColor: colors.border, borderRadius: 9, borderWidth: 1, flexDirection: "row", gap: 5, paddingHorizontal: 10, paddingVertical: 7 },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 8 },
   chipText: { color: colors.textMuted, fontSize: 12, fontWeight: "800" },
-  content: { gap: 16, paddingBottom: 122, paddingHorizontal: 16, paddingTop: 10 },
+  content: { backgroundColor: colors.background },
   deleteButton: { padding: 2 },
   emptyState: { alignItems: "center", gap: 8, padding: 22 },
   errorText: { color: colors.danger, fontSize: 13, fontWeight: "800" },
   expenseAmount: { color: colors.primary, fontSize: 14, fontWeight: "900" },
   expenseSurface: { backgroundColor: "#E7F5F2" },
   editBox: { marginTop: 10 },
-  filterChip: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 999, borderWidth: 1, paddingHorizontal: 15, paddingVertical: 9 },
-  filterChipSelected: { backgroundColor: colors.black, borderColor: colors.black },
+  filterChip: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 9, borderWidth: 1, paddingHorizontal: 15, paddingVertical: 9 },
+  filterChipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
   filterRow: { flexDirection: "row", gap: 8 },
   filterText: { color: colors.textMuted, fontSize: 13, fontWeight: "800" },
   filterTextSelected: { color: colors.white },
   incomeAmount: { color: colors.success, fontSize: 14, fontWeight: "900" },
   incomeSurface: { backgroundColor: colors.successSurface },
+  heroActions: { alignItems: "center", backgroundColor: colors.white, borderRadius: 10, flexDirection: "row", paddingHorizontal: 4 },
   input: { backgroundColor: colors.backgroundSoft, borderColor: colors.border, borderRadius: 12, borderWidth: 1, color: colors.text, fontSize: 14, marginTop: 8, paddingHorizontal: 12, paddingVertical: 10 },
-  loadMoreButton: { alignItems: "center", borderTopColor: colors.border, borderTopWidth: 1, flexDirection: "row", gap: 8, justifyContent: "center", marginTop: 6, paddingTop: 15 },
-  loadMoreText: { color: colors.primary, fontSize: 13, fontWeight: "900" },
   messageText: { color: colors.primary, fontSize: 13, fontWeight: "800" },
   metricLabel: { color: colors.textMuted, fontSize: 12, fontWeight: "800" },
   metricValue: { fontSize: 19, fontWeight: "900", marginTop: 5 },
   mutedText: { color: colors.textMuted, fontSize: 13, fontWeight: "600", textAlign: "center" },
-  panel: { ...subtleShadow, backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 20, borderWidth: 1, overflow: "hidden", padding: 15 },
+  panel: { ...subtleShadow, backgroundColor: colors.surface, borderRadius: 10, overflow: "hidden", padding: 14 },
   panelText: { color: colors.textMuted, fontSize: 12, fontWeight: "600", lineHeight: 17, marginTop: 4 },
   panelTitle: { color: colors.text, fontSize: 14, fontWeight: "900" },
   pendingAmount: { color: colors.text, fontSize: 20, fontWeight: "900" },
@@ -567,10 +708,12 @@ const styles = StyleSheet.create({
   permissionCopy: { flex: 1 },
   permissionIcon: { alignItems: "center", backgroundColor: colors.accentSurface, borderRadius: 12, height: 40, justifyContent: "center", width: 40 },
   permissionPanel: { alignItems: "center", backgroundColor: colors.accentSurface, borderColor: "#FED7AA", borderRadius: 17, borderWidth: 1, flexDirection: "row", gap: 10, padding: 13 },
-  primaryAction: { alignItems: "center", backgroundColor: colors.primary, borderRadius: 999, flex: 1, justifyContent: "center", minHeight: 38, paddingHorizontal: 13 },
+  primaryAction: { alignItems: "center", backgroundColor: colors.primary, borderRadius: 9, flex: 1, justifyContent: "center", minHeight: 38, paddingHorizontal: 13 },
   primaryActionText: { color: colors.white, fontSize: 12, fontWeight: "900" },
   primaryButton: { alignItems: "center", backgroundColor: colors.primary, borderRadius: 999, marginTop: 10, paddingHorizontal: 16, paddingVertical: 11 },
+  safeArea: { backgroundColor: colors.primaryDark, flex: 1 },
   screen: { backgroundColor: colors.background, flex: 1 },
+  scroll: { backgroundColor: colors.background },
   secondaryAction: { alignItems: "center", backgroundColor: colors.backgroundSoft, borderRadius: 999, justifyContent: "center", minHeight: 38, paddingHorizontal: 12 },
   secondaryActionText: { color: colors.text, fontSize: 12, fontWeight: "900" },
   sectionCaption: { color: colors.textMuted, fontSize: 12, fontWeight: "800" },
@@ -580,13 +723,16 @@ const styles = StyleSheet.create({
   selectedChipText: { color: colors.white },
   smallButton: { backgroundColor: colors.primary, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
   smallButtonText: { color: colors.white, fontSize: 12, fontWeight: "900" },
-  summaryCard: { ...subtleShadow, backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 18, borderWidth: 1, flex: 1, padding: 15 },
+  summaryCard: { ...subtleShadow, backgroundColor: colors.surface, borderRadius: 10, flex: 1, padding: 15 },
   summaryGrid: { flexDirection: "row", gap: 12 },
   noteText: { color: colors.textSoft, fontSize: 11, fontWeight: "600", marginTop: 3 },
   previewText: { color: colors.textMuted, fontSize: 12, fontWeight: "600", lineHeight: 17, marginTop: 9 },
+  recategorizeLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700" },
+  recategorizePanel: { backgroundColor: colors.backgroundSoft, borderRadius: 9, marginBottom: 10, padding: 10 },
   transactionCopy: { flex: 1 },
   transactionIcon: { alignItems: "center", borderRadius: 12, height: 38, justifyContent: "center", width: 38 },
+  transactionItem: { borderBottomColor: colors.border, borderBottomWidth: 1 },
   transactionMeta: { color: colors.textMuted, fontSize: 11, fontWeight: "600", marginTop: 4 },
-  transactionRow: { alignItems: "center", borderBottomColor: colors.border, borderBottomWidth: 1, flexDirection: "row", gap: 10, minHeight: 74, paddingVertical: 11 },
+  transactionRow: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 74, paddingVertical: 11 },
   transactionTitle: { color: colors.text, fontSize: 14, fontWeight: "900" },
 });

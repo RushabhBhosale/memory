@@ -15,13 +15,12 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ScreenHeader } from "../components/ScreenHeader";
+import { transactionCategories } from "../constants/transactionCategories";
 import {
   addManualExpense,
   type ExpenseType,
 } from "../services/expenses";
 import { colors, subtleShadow } from "../styles/theme";
-
-const categories = ["food", "shopping", "travel", "bills", "salary", "general"];
 
 type ManualExpenseState = {
   amount: string;
@@ -179,19 +178,24 @@ export default function ExpenseAddScreen() {
 
             <Text style={styles.label}>Category</Text>
             <View style={styles.chipRow}>
-              {categories.map((category) => (
+              {transactionCategories.map((category) => (
                 <Pressable
-                  key={category}
-                  style={[styles.chip, expense.category === category && styles.selectedChip]}
-                  onPress={() => setExpense((current) => ({ ...current, category }))}
+                  key={category.key}
+                  style={[styles.chip, expense.category === category.key && styles.selectedChip]}
+                  onPress={() => setExpense((current) => ({ ...current, category: category.key }))}
                 >
+                  <Ionicons
+                    color={expense.category === category.key ? colors.white : category.color}
+                    name={category.icon}
+                    size={15}
+                  />
                   <Text
                     style={[
                       styles.chipText,
-                      expense.category === category && styles.selectedChipText,
+                      expense.category === category.key && styles.selectedChipText,
                     ]}
                   >
-                    {category}
+                    {category.label}
                   </Text>
                 </Pressable>
               ))}
@@ -239,10 +243,13 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   chip: {
+    alignItems: "center",
     backgroundColor: colors.backgroundSoft,
     borderColor: colors.border,
-    borderRadius: 999,
+    borderRadius: 9,
     borderWidth: 1,
+    flexDirection: "row",
+    gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 9,
   },
@@ -298,8 +305,7 @@ const styles = StyleSheet.create({
   formPanel: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderRadius: 18,
-    borderWidth: 1,
+    borderRadius: 12,
     padding: 18,
     ...subtleShadow,
   },
@@ -343,8 +349,8 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     alignItems: "center",
-    backgroundColor: colors.black,
-    borderRadius: 999,
+    backgroundColor: colors.primary,
+    borderRadius: 10,
     flexDirection: "row",
     gap: 8,
     justifyContent: "center",
@@ -364,7 +370,7 @@ const styles = StyleSheet.create({
   segmentedControl: {
     backgroundColor: colors.backgroundSoft,
     borderColor: colors.border,
-    borderRadius: 999,
+    borderRadius: 10,
     borderWidth: 1,
     flexDirection: "row",
     marginBottom: 18,
@@ -377,7 +383,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   segmentButtonSelected: {
-    backgroundColor: colors.black,
+    backgroundColor: colors.primary,
   },
   segmentText: {
     color: colors.textMuted,

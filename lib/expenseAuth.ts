@@ -1,4 +1,6 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
+
+import ExpenseAccount from '@/models/ExpenseAccount';
 
 export type ExpenseUser = {
   id: string;
@@ -7,6 +9,27 @@ export type ExpenseUser = {
 
 type ConfiguredExpenseUser = ExpenseUser & {
   password: string;
+};
+
+const DEFAULT_MAIN_ACCOUNT = {
+  passwordHash: 'd551a87e58a31cfa05473a3bce253a50c8952706607d3c6886f5d49fdb13951346773a8a74907a1cee0bee8dd81a402cd7f257e95f2225696db4560c4d3fe322',
+  passwordSalt: '32e9c90e747bad96a17939652fd61225',
+  userId: 'main',
+  username: 'rushi',
+  usernameNormalized: 'rushi'
+} as const;
+
+const PASSWORD_KEY_LENGTH = 64;
+
+const normalizeUsername = (username: string) => username.trim().toLowerCase();
+
+const hashPassword = (password: string, salt: string) =>
+  scryptSync(password, salt, PASSWORD_KEY_LENGTH).toString('hex');
+
+const verifyPasswordHash = (password: string, salt: string, expectedHash: string) => {
+  const actual = Buffer.from(hashPassword(password, salt), 'hex');
+  const expected = Buffer.from(expectedHash, 'hex');
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
 };
 
 const getConfiguredUsers = (): ConfiguredExpenseUser[] => {
@@ -58,8 +81,27 @@ const equalSecrets = (left: string, right: string) => {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 };
 
-export const authenticateExpenseUser = (username: string, password: string) => {
-  const normalizedUsername = username.trim().toLowerCase();
+export const ensureMainExpenseUser = async () => {
+  await ExpenseAccount.findOneAndUpdate(
+    { userId: DEFAULT_MAIN_ACCOUNT.userId },
+    { $set: DEFAULT_MAIN_ACCOUNT },
+    { runValidators: true, setDefaultsOnInsert: true, upsert: true }
+  );
+};
+
+export const authenticateExpenseUser = async (username: string, password: string) => {
+  const normalizedUsername = normalizeUsername(username);
+  const account = await ExpenseAccount.findOne({ usernameNormalized: normalizedUsername })
+    .select('+passwordHash +passwordSalt')
+    .lean();
+
+  if (
+    account &&
+    verifyPasswordHash(password, account.passwordSalt, account.passwordHash)
+  ) {
+    return { id: account.userId, username: account.username } satisfies ExpenseUser;
+  }
+
   const user = getConfiguredUsers().find(
     (candidate) => candidate.username.toLowerCase() === normalizedUsername
   );
@@ -71,7 +113,34 @@ export const authenticateExpenseUser = (username: string, password: string) => {
   return { id: user.id, username: user.username } satisfies ExpenseUser;
 };
 
-export const hasConfiguredExpenseUsers = () => getConfiguredUsers().length > 0;
+export const registerExpenseUser = async (username: string, password: string) => {
+  const trimmedUsername = username.trim();
+  const usernameNormalized = normalizeUsername(username);
+
+  if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(trimmedUsername)) {
+    throw new Error('Username must be 3-32 characters and use only letters, numbers, ., _, or -');
+  }
+
+  if (password.length < 8 || password.length > 128) {
+    throw new Error('Password must be between 8 and 128 characters');
+  }
+
+  const existing = await ExpenseAccount.exists({ usernameNormalized });
+  if (existing) {
+    throw new Error('Username is already registered');
+  }
+
+  const passwordSalt = randomBytes(16).toString('hex');
+  const account = await ExpenseAccount.create({
+    passwordHash: hashPassword(password, passwordSalt),
+    passwordSalt,
+    userId: randomUUID(),
+    username: trimmedUsername,
+    usernameNormalized
+  });
+
+  return { id: account.userId, username: account.username } satisfies ExpenseUser;
+};
 
 export const createExpenseSession = (user: ExpenseUser) => {
   const secret = getSessionSecret();

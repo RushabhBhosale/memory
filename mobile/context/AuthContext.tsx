@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type PropsWithChildren } from "react";
 
-import { loginExpenseUser } from "../services/api";
+import { loginExpenseUser, registerExpenseUser } from "../services/api";
 import {
   clearExpenseSession,
   getExpenseSession,
@@ -13,6 +13,7 @@ type AuthContextValue = {
   ready: boolean;
   session: ExpenseSession | null;
   signIn: (username: string, password: string) => Promise<void>;
+  signUp: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -49,6 +50,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
       signOut: async () => {
         await clearExpenseSession();
         setSession(null);
+      },
+      signUp: async (username, password) => {
+        const response = await registerExpenseUser(username, password);
+        const nextSession: ExpenseSession = {
+          token: response.token,
+          user: response.user,
+        };
+        await saveExpenseSession(nextSession);
+        setSession(nextSession);
       },
     }),
     [ready, session],

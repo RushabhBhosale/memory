@@ -258,6 +258,36 @@ export const fetchRemoteExpensePage = async (page = 1, limit = 50) => {
   };
 };
 
+export const fetchAllRemoteExpenses = async (limit = 100) => {
+  const pageSize = Math.min(Math.max(limit, 1), 100);
+  let page = 1;
+  let expenses: ExpenseEntry[] = [];
+  let count = 0;
+  let totalPages = 0;
+
+  while (true) {
+    const response = await fetchRemoteExpensePage(page, pageSize);
+    expenses = mergeExpenseEntries(expenses, response.data);
+    count = response.count;
+    totalPages = response.totalPages;
+
+    if (!response.hasMore || page >= response.totalPages) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  return {
+    count,
+    data: expenses,
+    hasMore: false,
+    page,
+    pageSize,
+    totalPages,
+  };
+};
+
 const toRemoteExpenseInput = (expense: ExpenseEntry): RemoteExpenseInput => ({
   amount: expense.amount,
   category: expense.category || "general",
@@ -336,6 +366,22 @@ export const deleteExpense = async (id: string) => {
   }
 
   throw new Error("Delete requires a rebuilt Android app. Reinstall the latest APK and try again.");
+};
+
+export const updateExpenseCategory = async (id: string, category: string) => {
+  const userId = await getCurrentUserId();
+  const expenses = await listLocalExpenses();
+  const expense = expenses.find((item) => item.id === id && getLocalOwnerId(item) === userId);
+
+  if (!expense) {
+    throw new Error("Transaction not found.");
+  }
+
+  const updated: ExpenseEntry = { ...expense, category };
+  const cachedExpenses = await readExpenseCache();
+  await writeExpenseCache(mergeExpenseEntries(cachedExpenses, [updated]));
+  void upsertExpense(toRemoteExpenseInput(updated)).catch(() => undefined);
+  return updated;
 };
 
 export const confirmPendingTransaction = async (

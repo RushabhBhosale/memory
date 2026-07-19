@@ -1,5 +1,5 @@
 pluginManagement {
-    def nodeExecutable = "/Users/mac/.nvm/versions/node/v20.20.2/bin/node"
+    def nodeExecutable = providers.gradleProperty('NODE_BINARY').getOrElse(System.getenv('NODE_BINARY') ?: 'node')
 
     def reactNativeGradlePlugin = new File(
             providers.exec {

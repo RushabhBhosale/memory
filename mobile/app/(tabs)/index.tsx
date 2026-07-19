@@ -1,9 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   AppState,
   Platform,
   Pressable,
@@ -15,9 +15,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { AppHeader, HeaderIcon } from "../../components/AppHeader";
+import { FinanceHero } from "../../components/FinanceHero";
+import { getTransactionCategory } from "../../constants/transactionCategories";
 import {
+  fetchAllRemoteExpenses,
   listLocalExpenses,
+  mergeExpenseEntries,
   subscribeToExpenseChanges,
   type ExpenseEntry,
 } from "../../services/expenses";
@@ -91,8 +94,19 @@ export default function HomeScreen() {
 
       try {
         setError("");
-        const nextTransactions = await listLocalExpenses();
-        setTransactions(nextTransactions);
+        const local = await listLocalExpenses();
+        setTransactions(local);
+
+        try {
+          const remote = await fetchAllRemoteExpenses(100);
+          setTransactions(mergeExpenseEntries(local, remote.data));
+        } catch (err) {
+          setError(
+            err instanceof Error
+              ? `${err.message}. Showing transactions saved on this device.`
+              : "Unable to load cloud transactions. Showing transactions saved on this device.",
+          );
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unable to load transactions");
       } finally {
@@ -127,6 +141,9 @@ export default function HomeScreen() {
 
   const summary = useMemo(() => getSummary(transactions), [transactions]);
   const balance = summary.monthIncome - summary.monthExpense;
+  const spendRatio = summary.monthIncome > 0
+    ? Math.min((summary.monthExpense / summary.monthIncome) * 100, 100)
+    : 0;
   const recentTransactions = transactions.slice(0, 6);
 
   if (loading && !transactions.length) {
@@ -141,7 +158,8 @@ export default function HomeScreen() {
   }
 
   return (
-    <SafeAreaView edges={["top"]} style={styles.screen}>
+    <SafeAreaView edges={["top"]} style={styles.safeArea}>
+      <StatusBar style="light" />
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={
@@ -153,16 +171,18 @@ export default function HomeScreen() {
           />
         }
         showsVerticalScrollIndicator={false}
+        style={styles.scroll}
       >
-        <AppHeader
+        <FinanceHero
+          actionIcon="settings-outline"
+          actionLabel="Open settings"
+          label="This month balance"
+          onAction={() => router.push("/settings")}
           title="Money"
-          rightIcons={
-            <HeaderIcon
-              name="settings-outline"
-              onPress={() => router.push("/settings")}
-            />
-          }
+          value={formatCurrency(balance)}
         />
+
+        <View style={styles.body}>
 
         {error ? (
           <Pressable style={styles.errorPanel} onPress={() => void loadTransactions()}>
@@ -171,23 +191,16 @@ export default function HomeScreen() {
           </Pressable>
         ) : null}
 
-        <View style={styles.balanceCard}>
-          <View style={styles.balanceHeader}>
-            <View>
-              <Text style={styles.eyebrow}>This month</Text>
-              <Text style={styles.balanceLabel}>Net balance</Text>
-            </View>
-            <View style={styles.balanceIcon}>
-              <Ionicons color={colors.white} name="wallet-outline" size={23} />
-            </View>
+        <View style={styles.cashflowCard}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.cashflowTitle}>Monthly cash flow</Text>
+            <Text style={styles.cashflowPercent}>{spendRatio.toFixed(0)}% spent</Text>
           </View>
-          <Text style={[styles.balanceValue, balance < 0 && styles.negativeValue]}>
-            {formatCurrency(balance)}
-          </Text>
-          <Text style={styles.balanceDetail}>
-            {transactions.length
-              ? `${transactions.length} saved transaction${transactions.length === 1 ? "" : "s"}`
-              : "Your saved income and expenses will appear here."}
+          <View style={styles.cashflowTrack}>
+            <View style={[styles.cashflowFill, { width: `${spendRatio}%` as `${number}%` }]} />
+          </View>
+          <Text style={styles.cashflowDetail}>
+            {formatCurrency(summary.monthExpense)} of {formatCurrency(summary.monthIncome)} income
           </Text>
         </View>
 
@@ -205,6 +218,17 @@ export default function HomeScreen() {
             tone="expense"
           />
         </View>
+
+        <Pressable style={styles.portfolioBanner} onPress={() => router.push("/(tabs)/investments")}>
+          <View style={styles.portfolioIcon}>
+            <Ionicons color={colors.primary} name="pie-chart-outline" size={21} />
+          </View>
+          <View style={styles.portfolioCopy}>
+            <Text style={styles.portfolioTitle}>Your investment portfolio</Text>
+            <Text style={styles.portfolioText}>Track holdings, allocation, and returns</Text>
+          </View>
+          <Ionicons color={colors.accent} name="chevron-forward" size={18} />
+        </Pressable>
 
         <View style={styles.todayPanel}>
           <View style={styles.sectionHeader}>
@@ -256,6 +280,7 @@ export default function HomeScreen() {
             <Ionicons color={colors.textSoft} name="chevron-forward" size={18} />
           </Pressable>
         ) : null}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -296,13 +321,14 @@ function TodayMetric({ label, tone, value }: { label: string; tone: "expense" | 
 
 function TransactionRow({ transaction }: { transaction: ExpenseEntry }) {
   const isIncome = transaction.type === "income";
+  const category = getTransactionCategory(transaction.category);
 
   return (
     <View style={styles.transactionRow}>
-      <View style={[styles.transactionIcon, isIncome ? styles.incomeSurface : styles.expenseSurface]}>
+      <View style={[styles.transactionIcon, { backgroundColor: isIncome ? colors.successSurface : category.surface }]}>
         <Ionicons
-          color={isIncome ? colors.success : colors.primary}
-          name={isIncome ? "arrow-down-outline" : "arrow-up-outline"}
+          color={isIncome ? colors.success : category.color}
+          name={isIncome ? "arrow-down-outline" : category.icon}
           size={18}
         />
       </View>
@@ -311,7 +337,7 @@ function TransactionRow({ transaction }: { transaction: ExpenseEntry }) {
           {transaction.merchant}
         </Text>
         <Text numberOfLines={1} style={styles.transactionMeta}>
-          {transaction.category} • {formatDate(transaction.timestamp)}
+          {category.label} • {formatDate(transaction.timestamp)}
         </Text>
       </View>
       <Text style={isIncome ? styles.incomeAmount : styles.expenseAmount}>
@@ -325,50 +351,15 @@ function TransactionRow({ transaction }: { transaction: ExpenseEntry }) {
 type IconName = keyof typeof Ionicons.glyphMap;
 
 const styles = StyleSheet.create({
-  balanceCard: {
-    ...subtleShadow,
-    backgroundColor: colors.black,
-    borderRadius: 24,
-    marginBottom: 14,
-    padding: 22,
-  },
-  balanceDetail: {
-    color: "rgba(255,255,255,0.68)",
-    fontSize: 13,
-    fontWeight: "700",
-    marginTop: 8,
-  },
-  balanceHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  balanceIcon: {
-    alignItems: "center",
-    backgroundColor: colors.primary,
-    borderRadius: 14,
-    height: 44,
-    justifyContent: "center",
-    width: 44,
-  },
-  balanceLabel: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: "800",
-    marginTop: 3,
-  },
-  balanceValue: {
-    color: colors.white,
-    fontSize: 38,
-    fontWeight: "900",
-    letterSpacing: -1,
-    marginTop: 22,
-  },
+  body: { gap: 16, marginTop: -24, paddingBottom: 122, paddingHorizontal: 16 },
+  cashflowCard: { ...subtleShadow, backgroundColor: colors.surface, borderRadius: 10, padding: 14 },
+  cashflowDetail: { color: colors.textMuted, fontSize: 11, marginTop: 8 },
+  cashflowFill: { backgroundColor: colors.primary, borderRadius: 3, height: 4 },
+  cashflowPercent: { color: colors.textMuted, fontSize: 11 },
+  cashflowTitle: { color: colors.text, fontSize: 16, fontWeight: "700" },
+  cashflowTrack: { backgroundColor: colors.background, borderRadius: 3, height: 4, marginTop: 13, overflow: "hidden" },
   content: {
-    gap: 16,
-    paddingBottom: 122,
-    paddingHorizontal: 16,
-    paddingTop: 10,
+    backgroundColor: colors.background,
   },
   centerState: {
     alignItems: "center",
@@ -380,8 +371,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderRadius: 20,
-    borderWidth: 1,
+    borderRadius: 10,
     gap: 8,
     padding: 24,
   },
@@ -415,13 +405,6 @@ const styles = StyleSheet.create({
   },
   expenseSurface: {
     backgroundColor: "#E7F5F2",
-  },
-  eyebrow: {
-    color: "rgba(255,255,255,0.62)",
-    fontSize: 12,
-    fontWeight: "900",
-    letterSpacing: 0.8,
-    textTransform: "uppercase",
   },
   incomeAmount: {
     color: colors.success,
@@ -461,9 +444,11 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textAlign: "center",
   },
-  negativeValue: {
-    color: "#FDBA74",
-  },
+  portfolioBanner: { alignItems: "center", backgroundColor: colors.surface, borderRadius: 10, flexDirection: "row", gap: 11, padding: 13 },
+  portfolioCopy: { flex: 1 },
+  portfolioIcon: { alignItems: "center", backgroundColor: colors.primarySurface, borderRadius: 9, height: 42, justifyContent: "center", width: 42 },
+  portfolioText: { color: colors.textMuted, fontSize: 11, marginTop: 3 },
+  portfolioTitle: { color: colors.text, fontSize: 14, fontWeight: "800" },
   primaryButton: {
     alignItems: "center",
     backgroundColor: colors.primary,
@@ -483,6 +468,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     flex: 1,
   },
+  scroll: { backgroundColor: colors.background },
+  safeArea: { backgroundColor: colors.primaryDark, flex: 1 },
   sectionCaption: {
     color: colors.textMuted,
     fontSize: 12,
@@ -502,7 +489,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: colors.accentSurface,
     borderColor: "#FED7AA",
-    borderRadius: 18,
+    borderRadius: 10,
     borderWidth: 1,
     flexDirection: "row",
     gap: 12,
@@ -535,7 +522,7 @@ const styles = StyleSheet.create({
     ...subtleShadow,
     backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderRadius: 18,
+    borderRadius: 10,
     borderWidth: 1,
     flex: 1,
     padding: 15,
@@ -555,7 +542,7 @@ const styles = StyleSheet.create({
   },
   todayPanel: {
     backgroundColor: colors.surfaceMuted,
-    borderRadius: 18,
+    borderRadius: 10,
     padding: 16,
   },
   todayRow: {
@@ -585,8 +572,7 @@ const styles = StyleSheet.create({
   transactionPanel: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
-    borderRadius: 20,
-    borderWidth: 1,
+    borderRadius: 10,
     overflow: "hidden",
   },
   transactionRow: {
