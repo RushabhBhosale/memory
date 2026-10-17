@@ -1,26 +1,28 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ScreenHeader } from "../components/ScreenHeader";
+import { Banner, IconBadge, type IconName } from "../components/ui";
 import { useAuth } from "../context/AuthContext";
 import {
   hasExpenseSmsPermissions,
   requestExpenseSmsPermissions,
   scanRecentSms,
 } from "../services/expenses";
-import { colors, subtleShadow } from "../styles/theme";
+import { colors, radius, type } from "../styles/theme";
 
 export default function SettingsScreen() {
   const { session, signOut } = useAuth();
   const [permission, setPermission] = useState(false);
   const [loading, setLoading] = useState(Platform.OS === "android");
   const [message, setMessage] = useState("");
+  const isAndroid = Platform.OS === "android";
+  const username = session?.user.username || "User";
 
   const loadPermission = useCallback(async () => {
-    if (Platform.OS !== "android") {
+    if (!isAndroid) {
       return;
     }
 
@@ -30,7 +32,7 @@ export default function SettingsScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAndroid]);
 
   useEffect(() => {
     void loadPermission();
@@ -55,7 +57,7 @@ export default function SettingsScreen() {
       const result = await scanRecentSms(100);
       setMessage(
         result.matched
-          ? `${result.matched} transaction${result.matched === 1 ? "" : "s"} ready for review.`
+          ? `${result.matched} transaction${result.matched === 1 ? "" : "s"} ready for review in Activity.`
           : `Checked ${result.scanned} messages. No new transactions found.`,
       );
     } catch (err) {
@@ -65,96 +67,135 @@ export default function SettingsScreen() {
     }
   };
 
+  const confirmSignOut = () => {
+    Alert.alert("Log out?", "You can sign back in any time.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Log out", style: "destructive", onPress: () => void signOut() },
+    ]);
+  };
+
   return (
     <SafeAreaView edges={["top"]} style={styles.screen}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <ScreenHeader mode="back" title="Settings" />
-        <View style={styles.intro}>
-          <Text style={styles.title}>Finance settings</Text>
-          <Text style={styles.subtitle}>Signed in as {session?.user.username || "user"}. Manage local storage, cloud sync, and bank SMS access.</Text>
-        </View>
+        <ScreenHeader title="Settings" />
 
-        <View style={styles.panel}>
-          <View style={styles.row}>
-            <View style={styles.iconBubble}>
-              <Ionicons color={colors.primary} name="cloud-done-outline" size={20} />
-            </View>
-            <View style={styles.rowCopy}>
-              <Text style={styles.rowTitle}>Transaction sync</Text>
-              <Text style={styles.rowDetail}>Transactions save locally first. Use cloud sync from the Transactions screen when you want to update MongoDB.</Text>
-            </View>
-            <Ionicons color={colors.success} name="checkmark-circle" size={20} />
+        <View style={styles.profile}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{username.slice(0, 1).toUpperCase()}</Text>
           </View>
-
-          <View style={styles.row}>
-            <View style={styles.iconBubble}>
-              <Ionicons color={colors.accent} name="chatbubble-ellipses-outline" size={20} />
-            </View>
-            <View style={styles.rowCopy}>
-              <Text style={styles.rowTitle}>Bank SMS import</Text>
-              <Text style={styles.rowDetail}>
-                {Platform.OS === "android"
-                  ? permission
-                    ? "Enabled. New alerts wait here for your review."
-                    : "Disabled. Allow access to review transaction alerts."
-                  : "Available in the Android app build. Manual entry and bill scanning work here."}
-              </Text>
-            </View>
-            {Platform.OS === "android" ? (
-              loading ? (
-                <ActivityIndicator color={colors.primary} />
-              ) : (
-                <Pressable style={styles.smallButton} onPress={() => void enableSms()}>
-                  <Text style={styles.smallButtonText}>{permission ? "Enabled" : "Allow"}</Text>
-                </Pressable>
-              )
-            ) : null}
+          <View style={styles.flex}>
+            <Text style={styles.profileName}>{username}</Text>
+            <Text style={styles.profileMeta}>Personal account</Text>
           </View>
         </View>
 
-        {Platform.OS === "android" && permission ? (
-          <Pressable disabled={loading} style={styles.actionButton} onPress={() => void scanSms()}>
-            {loading ? <ActivityIndicator color={colors.white} /> : <Ionicons color={colors.white} name="refresh-outline" size={18} />}
-            <Text style={styles.actionButtonText}>Scan recent SMS now</Text>
-          </Pressable>
-        ) : null}
+        {message ? <Banner message={message} tone="info" /> : null}
 
-        {message ? <Text style={styles.message}>{message}</Text> : null}
+        <Text style={styles.groupLabel}>Data</Text>
+        <View style={styles.group}>
+          <SettingRow
+            detail="Saved on device first, then synced to the cloud."
+            icon="cloud-done-outline"
+            right={<Ionicons color={colors.success} name="checkmark-circle" size={20} />}
+            title="Cloud sync"
+          />
+          <SettingRow
+            detail={
+              isAndroid
+                ? permission
+                  ? "On · new bank alerts wait in Activity for review"
+                  : "Off · allow access to detect transactions"
+                : "Available on Android"
+            }
+            icon="chatbubble-ellipses-outline"
+            last={!(isAndroid && permission)}
+            onPress={isAndroid && !permission && !loading ? () => void enableSms() : undefined}
+            right={
+              isAndroid ? (
+                loading ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : (
+                  <Text style={[styles.status, permission && styles.statusOn]}>{permission ? "On" : "Allow"}</Text>
+                )
+              ) : null
+            }
+            title="Bank SMS import"
+          />
+          {isAndroid && permission ? (
+            <SettingRow
+              icon="refresh-outline"
+              last
+              onPress={loading ? undefined : () => void scanSms()}
+              right={<Ionicons color={colors.textSoft} name="chevron-forward" size={18} />}
+              title="Scan recent SMS now"
+            />
+          ) : null}
+        </View>
 
-        <Pressable
-          style={styles.logoutButton}
-          onPress={() => void signOut()}
-        >
-          <Text style={styles.logoutText}>Log out</Text>
-        </Pressable>
-
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backButtonText}>Back to money</Text>
-        </Pressable>
+        <Text style={styles.groupLabel}>Account</Text>
+        <View style={styles.group}>
+          <SettingRow danger icon="log-out-outline" last onPress={confirmSignOut} title="Log out" />
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
+function SettingRow({
+  danger,
+  detail,
+  icon,
+  last,
+  onPress,
+  right,
+  title,
+}: {
+  danger?: boolean;
+  detail?: string;
+  icon: IconName;
+  last?: boolean;
+  onPress?: () => void;
+  right?: React.ReactNode;
+  title: string;
+}) {
+  return (
+    <Pressable
+      disabled={!onPress}
+      onPress={onPress}
+      style={({ pressed }) => [styles.row, !last && styles.rowDivider, pressed && styles.pressed]}
+    >
+      <IconBadge
+        color={danger ? colors.danger : colors.text}
+        icon={icon}
+        size={36}
+        surface={danger ? colors.dangerSurface : colors.surfaceMuted}
+      />
+      <View style={styles.flex}>
+        <Text style={[styles.rowTitle, danger && styles.danger]}>{title}</Text>
+        {detail ? <Text style={styles.rowDetail}>{detail}</Text> : null}
+      </View>
+      {right}
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  actionButton: { alignItems: "center", backgroundColor: colors.primary, borderRadius: 999, flexDirection: "row", gap: 8, justifyContent: "center", minHeight: 48, paddingHorizontal: 18 },
-  actionButtonText: { color: colors.white, fontSize: 14, fontWeight: "900" },
-  backButton: { alignItems: "center", paddingVertical: 14 },
-  backButtonText: { color: colors.primary, fontSize: 14, fontWeight: "900" },
-  content: { gap: 16, paddingBottom: 38, paddingHorizontal: 16, paddingTop: 10 },
-  iconBubble: { alignItems: "center", backgroundColor: colors.backgroundSoft, borderRadius: 13, height: 42, justifyContent: "center", width: 42 },
-  intro: { marginBottom: 3 },
-  message: { color: colors.primary, fontSize: 13, fontWeight: "800", textAlign: "center" },
-  logoutButton: { alignItems: "center", borderColor: colors.danger, borderRadius: 999, borderWidth: 1, minHeight: 46, justifyContent: "center", marginTop: 4 },
-  logoutText: { color: colors.danger, fontSize: 14, fontWeight: "900" },
-  panel: { ...subtleShadow, backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 20, borderWidth: 1, overflow: "hidden" },
-  row: { alignItems: "center", borderBottomColor: colors.border, borderBottomWidth: 1, flexDirection: "row", gap: 11, padding: 14 },
-  rowCopy: { flex: 1 },
-  rowDetail: { color: colors.textMuted, fontSize: 12, fontWeight: "600", lineHeight: 17, marginTop: 3 },
-  rowTitle: { color: colors.text, fontSize: 15, fontWeight: "900" },
+  avatar: { alignItems: "center", backgroundColor: colors.primary, borderRadius: radius.pill, height: 56, justifyContent: "center", width: 56 },
+  avatarText: { color: colors.white, fontSize: 22, fontWeight: "700" },
+  content: { gap: 12, paddingBottom: 40, paddingHorizontal: 20 },
+  danger: { color: colors.danger },
+  flex: { flex: 1 },
+  group: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, overflow: "hidden" },
+  groupLabel: { ...type.overline, color: colors.textMuted, marginLeft: 4, marginTop: 12 },
+  pressed: { backgroundColor: colors.backgroundSoft },
+  profile: { alignItems: "center", backgroundColor: colors.surface, borderColor: colors.border, borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: 14, marginTop: 8, padding: 16 },
+  profileMeta: { ...type.caption, color: colors.textMuted, marginTop: 3 },
+  profileName: { ...type.heading, color: colors.text },
+  row: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 60, paddingHorizontal: 16, paddingVertical: 12 },
+  rowDetail: { ...type.caption, color: colors.textMuted, lineHeight: 17, marginTop: 2 },
+  rowDivider: { borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth },
+  rowTitle: { color: colors.text, fontSize: 15, fontWeight: "500" },
   screen: { backgroundColor: colors.background, flex: 1 },
-  smallButton: { backgroundColor: colors.primary, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 8 },
-  smallButtonText: { color: colors.white, fontSize: 12, fontWeight: "900" },
-  subtitle: { color: colors.textMuted, fontSize: 14, fontWeight: "600", lineHeight: 21, marginTop: 6 },
-  title: { color: colors.text, fontSize: 30, fontWeight: "900" },
+  status: { ...type.label, color: colors.primary, fontWeight: "600" },
+  statusOn: { color: colors.success },
 });

@@ -6,7 +6,6 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
-  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -16,8 +15,20 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { HeaderIcon } from "../../components/AppHeader";
-import { FinanceHero } from "../../components/FinanceHero";
+import {
+  Banner,
+  Button,
+  Card,
+  Chip,
+  EmptyState,
+  IconBadge,
+  IconButton,
+  PageHeader,
+  Segmented,
+  TAB_BAR_CLEARANCE,
+  TransactionRow,
+  groupByDay,
+} from "../../components/ui";
 import {
   getTransactionCategory,
   transactionCategories,
@@ -40,7 +51,7 @@ import {
   type PendingTransaction,
   type PendingTransactionType,
 } from "../../services/expenses";
-import { colors, subtleShadow } from "../../styles/theme";
+import { colors, radius, type } from "../../styles/theme";
 import { formatCurrency, formatDate } from "../../utils/localization";
 
 const REMOTE_PAGE_SIZE = 100;
@@ -133,7 +144,7 @@ export default function ExpensesScreen() {
       setTransactions(merged);
       void syncExpensesToMongo(local).catch(() => undefined);
       setMessage(
-        `Cloud sync complete · ${remote.count} transaction${remote.count === 1 ? "" : "s"} loaded`,
+        `Synced · ${remote.count} transaction${remote.count === 1 ? "" : "s"} loaded from cloud`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sync transactions");
@@ -172,22 +183,16 @@ export default function ExpensesScreen() {
     ),
     [categoryFilter, filter, transactions],
   );
-  const monthIncome = transactions
-    .filter((item) => item.type === "income" && isThisMonth(item.timestamp))
-    .reduce((total, item) => total + item.amount, 0);
-  const monthExpense = transactions
-    .filter((item) => item.type === "expense" && isThisMonth(item.timestamp))
-    .reduce((total, item) => total + item.amount, 0);
-  const categoryTotals = useMemo(() => {
-    const totals = new Map<string, number>();
-    transactions
-      .filter((item) => item.type === "expense" && isThisMonth(item.timestamp))
-      .forEach((item) => totals.set(item.category, (totals.get(item.category) || 0) + item.amount));
-
-    return [...totals.entries()]
-      .map(([category, amount]) => ({ amount, category: getTransactionCategory(category) }))
-      .sort((a, b) => b.amount - a.amount)
-      .slice(0, 4);
+  const groups = useMemo(() => groupByDay(visibleTransactions), [visibleTransactions]);
+  const { monthExpense, monthIncome } = useMemo(() => {
+    let income = 0;
+    let expense = 0;
+    transactions.forEach((item) => {
+      if (!isThisMonth(item.timestamp)) return;
+      if (item.type === "income") income += item.amount;
+      else expense += item.amount;
+    });
+    return { monthExpense: expense, monthIncome: income };
   }, [transactions]);
 
   const requestPermissions = async () => {
@@ -273,7 +278,7 @@ export default function ExpensesScreen() {
   const removeTransaction = (transaction: ExpenseEntry) => {
     Alert.alert(
       "Delete transaction?",
-      `${transaction.merchant} • ${formatCurrency(transaction.amount, transaction.currency)}`,
+      `${transaction.merchant} · ${formatCurrency(transaction.amount, transaction.currency)}`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -293,6 +298,20 @@ export default function ExpensesScreen() {
             }
           },
         },
+      ],
+    );
+  };
+
+  const openTransaction = (transaction: ExpenseEntry) => {
+    Alert.alert(
+      transaction.merchant,
+      `${formatCurrency(transaction.amount, transaction.currency)} · ${formatDate(transaction.timestamp)}${
+        transaction.note ? `\n${transaction.note}` : ""
+      }`,
+      [
+        { text: "Change category", onPress: () => setRecategorizingId(transaction.id) },
+        { text: "Delete", style: "destructive", onPress: () => removeTransaction(transaction) },
+        { text: "Close", style: "cancel" },
       ],
     );
   };
@@ -325,20 +344,18 @@ export default function ExpensesScreen() {
 
   if (loading && !transactions.length) {
     return (
-      <SafeAreaView edges={["top"]} style={styles.screen}>
-        <View style={styles.centerState}>
-          <ActivityIndicator color={colors.primary} />
-          <Text style={styles.mutedText}>Loading local transactions…</Text>
-        </View>
+      <SafeAreaView edges={["top"]} style={styles.center}>
+        <ActivityIndicator color={colors.primary} />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView edges={["top"]} style={styles.safeArea}>
-      <StatusBar style="light" />
+    <SafeAreaView edges={["top"]} style={styles.screen}>
+      <StatusBar style="dark" />
       <ScrollView
         contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
             colors={[colors.primary]}
@@ -348,212 +365,223 @@ export default function ExpensesScreen() {
           />
         }
         showsVerticalScrollIndicator={false}
-        style={styles.scroll}
       >
-        <FinanceHero
-          label="Spent this month"
-          title="Transactions"
-          value={formatCurrency(monthExpense)}
-          rightContent={
-            <View style={styles.heroActions}>
-              <>
-                {Platform.OS === "android" ? (
-                  <HeaderIcon accessibilityLabel="Scan transaction messages" name="refresh-outline" onPress={() => void refreshSms()} />
-                ) : null}
-                <HeaderIcon accessibilityLabel="Sync transactions" name="cloud-upload-outline" onPress={() => void syncCloud()} />
-                <HeaderIcon accessibilityLabel="Add transaction" name="add-outline" onPress={() => router.push("/expense-add")} />
-              </>
-            </View>
+        <PageHeader
+          right={
+            <>
+              {Platform.OS === "android" ? (
+                <IconButton
+                  accessibilityLabel="Scan bank SMS"
+                  disabled={scanning}
+                  icon="chatbubble-ellipses-outline"
+                  onPress={() => void refreshSms()}
+                />
+              ) : null}
+              <IconButton
+                accessibilityLabel="Sync with cloud"
+                disabled={syncingRemote}
+                icon="cloud-upload-outline"
+                onPress={() => void syncCloud()}
+              />
+            </>
           }
+          subtitle="This month"
+          title="Activity"
         />
 
-        <View style={styles.body}>
+        <Card style={styles.summaryCard}>
+          <SummaryItem label="Money in" tone="income" value={formatCurrency(monthIncome)} />
+          <View style={styles.summaryDivider} />
+          <SummaryItem label="Money out" tone="expense" value={formatCurrency(monthExpense)} />
+        </Card>
 
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {error ? <Banner message={error} onPress={() => void loadData()} /> : null}
+        {message ? <Banner message={message} tone="info" /> : null}
 
         {Platform.OS === "android" && !hasPermission ? (
-          <View style={styles.permissionPanel}>
-            <View style={styles.permissionIcon}>
-              <Ionicons color={colors.accent} name="chatbubble-ellipses-outline" size={20} />
+          <Card style={styles.permissionCard}>
+            <IconBadge color={colors.primary} icon="chatbubble-ellipses-outline" surface={colors.primarySurface} />
+            <View style={styles.flex}>
+              <Text style={styles.cardTitle}>Import from bank SMS</Text>
+              <Text style={styles.cardText}>You approve every transaction before it's saved.</Text>
             </View>
-            <View style={styles.permissionCopy}>
-              <Text style={styles.panelTitle}>Import bank transaction SMS</Text>
-              <Text style={styles.panelText}>You review every detected item before it becomes a transaction.</Text>
-            </View>
-            <Pressable style={styles.smallButton} onPress={() => void requestPermissions()}>
-              <Text style={styles.smallButtonText}>Allow</Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        {message ? <Text style={styles.messageText}>{message}</Text> : null}
-
-        <View style={styles.summaryGrid}>
-          <SummaryCard label="This month in" value={formatCurrency(monthIncome)} tone="income" />
-          <SummaryCard label="This month out" value={formatCurrency(monthExpense)} tone="expense" />
-        </View>
-
-        {categoryTotals.length ? (
-          <View style={styles.categoryBreakdown}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Spending by category</Text>
-              <Text style={styles.sectionCaption}>This month</Text>
-            </View>
-            <View style={styles.categoryBar}>
-              {categoryTotals.map((item) => (
-                <View
-                  key={item.category.key}
-                  style={{
-                    backgroundColor: item.category.color,
-                    flex: Math.max(item.amount, monthExpense * 0.03),
-                  }}
-                />
-              ))}
-            </View>
-            <View style={styles.categoryLegend}>
-              {categoryTotals.map((item) => (
-                <View key={item.category.key} style={styles.categoryLegendItem}>
-                  <Ionicons color={item.category.color} name={item.category.icon} size={15} />
-                  <Text style={styles.categoryLegendLabel}>{item.category.label}</Text>
-                  <Text style={styles.categoryLegendValue}>{formatCurrency(item.amount)}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
+            <Button label="Allow" onPress={() => void requestPermissions()} style={styles.smallButton} />
+          </Card>
         ) : null}
 
         {pending.length ? (
-          <View style={styles.panel}>
-            <View style={styles.sectionHeader}>
+          <View style={styles.section}>
+            <View style={styles.sectionRow}>
               <Text style={styles.sectionTitle}>Needs review</Text>
-              <Text style={styles.sectionCaption}>{pending.length}</Text>
+              <View style={styles.countBadge}>
+                <Text style={styles.countText}>{pending.length}</Text>
+              </View>
             </View>
             {pending.map((item) => {
               const isEditing = editingId === item.id;
               const isSaving = savingId === item.id;
+              const category = getTransactionCategory(isEditing ? editing.category : item.category);
 
               return (
-                <View key={item.id} style={styles.pendingCard}>
+                <Card key={item.id} style={styles.pendingCard}>
                   <View style={styles.pendingHeader}>
-                    <Text style={styles.pendingAmount}>{formatCurrency(item.amount, item.currency)}</Text>
-                    <Text style={styles.pendingType}>{item.type === "credit" ? "Income" : "Expense"}</Text>
+                    <IconBadge color={category.color} icon={category.icon} surface={category.surface} />
+                    <View style={styles.flex}>
+                      <Text numberOfLines={1} style={styles.cardTitle}>{item.merchant}</Text>
+                      <Text style={styles.cardText}>{category.label} · {formatDate(item.timestamp)}</Text>
+                    </View>
+                    <Text style={[styles.pendingAmount, item.type === "credit" && styles.incomeText]}>
+                      {item.type === "credit" ? "+" : "−"}{formatCurrency(item.amount, item.currency)}
+                    </Text>
                   </View>
+
                   {isEditing ? (
                     <View style={styles.editBox}>
+                      <Segmented
+                        onChange={(value) => setEditing((current) => ({ ...current, type: value }))}
+                        options={[
+                          { label: "Expense", value: "debit" },
+                          { label: "Income", value: "credit" },
+                        ]}
+                        value={editing.type}
+                      />
                       <TextInput
                         keyboardType="decimal-pad"
                         onChangeText={(amount) => setEditing((current) => ({ ...current, amount }))}
                         placeholder="Amount"
+                        placeholderTextColor={colors.textSoft}
                         style={styles.input}
                         value={editing.amount}
                       />
                       <TextInput
                         onChangeText={(merchant) => setEditing((current) => ({ ...current, merchant }))}
                         placeholder="Merchant or person"
+                        placeholderTextColor={colors.textSoft}
                         style={styles.input}
                         value={editing.merchant}
                       />
                       <CategoryPicker
-                        selected={editing.category}
                         onSelect={(category) => setEditing((current) => ({ ...current, category }))}
-                      />
-                      <ChipPicker
-                        options={["debit", "credit"]}
-                        labels={{ credit: "Income", debit: "Expense" }}
-                        selected={editing.type}
-                        onSelect={(type) => setEditing((current) => ({ ...current, type: type as PendingTransactionType }))}
+                        selected={editing.category}
                       />
                     </View>
                   ) : (
-                    <>
-                      <Text style={styles.transactionTitle}>{item.merchant}</Text>
-                      <Text style={styles.transactionMeta}>{getTransactionCategory(item.category).label} • {formatDate(item.timestamp)}</Text>
-                    </>
+                    <Text numberOfLines={2} style={styles.preview}>{item.messagePreview}</Text>
                   )}
-                  <Text numberOfLines={2} style={styles.previewText}>{item.messagePreview}</Text>
+
                   <View style={styles.actionRow}>
-                    <Pressable disabled={isSaving} style={styles.primaryAction} onPress={() => void confirmTransaction(item)}>
-                      <Text style={styles.primaryActionText}>{isSaving ? "Saving…" : "Confirm"}</Text>
-                    </Pressable>
-                    <Pressable disabled={isSaving} style={styles.secondaryAction} onPress={() => void ignoreTransaction(item)}>
-                      <Text style={styles.secondaryActionText}>Ignore</Text>
-                    </Pressable>
-                    <Pressable disabled={isSaving} style={styles.secondaryAction} onPress={() => isEditing ? setEditingId("") : startEditing(item)}>
-                      <Text style={styles.secondaryActionText}>{isEditing ? "Cancel" : "Edit"}</Text>
-                    </Pressable>
+                    <Button
+                      label="Confirm"
+                      loading={isSaving}
+                      onPress={() => void confirmTransaction(item)}
+                      style={styles.flex}
+                    />
+                    <Button
+                      disabled={isSaving}
+                      label={isEditing ? "Cancel" : "Edit"}
+                      onPress={() => isEditing ? setEditingId("") : startEditing(item)}
+                      style={styles.flex}
+                      variant="secondary"
+                    />
+                    <Button
+                      disabled={isSaving}
+                      label="Ignore"
+                      onPress={() => void ignoreTransaction(item)}
+                      style={styles.flex}
+                      variant="danger"
+                    />
                   </View>
-                </View>
+                </Card>
               );
             })}
           </View>
         ) : null}
 
-        <View style={styles.filterRow}>
-          {(["all", "expense", "income"] as const).map((value) => (
-            <Pressable
-              key={value}
-              style={[styles.filterChip, filter === value && styles.filterChipSelected]}
-              onPress={() => setFilter(value)}
-            >
-              <Text style={[styles.filterText, filter === value && styles.filterTextSelected]}>
-                {value === "all" ? "All" : value === "income" ? "Income" : "Expenses"}
-              </Text>
-            </Pressable>
-          ))}
+        <View style={styles.section}>
+          <Segmented
+            onChange={setFilter}
+            options={[
+              { label: "All", value: "all" },
+              { label: "Expenses", value: "expense" },
+              { label: "Income", value: "income" },
+            ]}
+            value={filter}
+          />
         </View>
 
         <ScrollView
-          contentContainerStyle={styles.categoryFilterContent}
+          contentContainerStyle={styles.chipScroll}
           horizontal
           showsHorizontalScrollIndicator={false}
+          style={styles.chipScrollView}
         >
-          <Pressable
-            onPress={() => setCategoryFilter("all")}
-            style={[styles.categoryFilter, categoryFilter === "all" && styles.categoryFilterSelected]}
-          >
-            <Ionicons color={categoryFilter === "all" ? colors.white : colors.textMuted} name="apps-outline" size={15} />
-            <Text style={[styles.categoryFilterText, categoryFilter === "all" && styles.categoryFilterTextSelected]}>All categories</Text>
-          </Pressable>
+          <Chip label="All categories" onPress={() => setCategoryFilter("all")} selected={categoryFilter === "all"} />
           {transactionCategories.map((category) => (
-            <Pressable
+            <Chip
+              color={category.color}
+              icon={category.icon}
               key={category.key}
+              label={category.label}
               onPress={() => setCategoryFilter(category.key)}
-              style={[styles.categoryFilter, categoryFilter === category.key && styles.categoryFilterSelected]}
-            >
-              <Ionicons color={categoryFilter === category.key ? colors.white : category.color} name={category.icon} size={15} />
-              <Text style={[styles.categoryFilterText, categoryFilter === category.key && styles.categoryFilterTextSelected]}>{category.label}</Text>
-            </Pressable>
+              selected={categoryFilter === category.key}
+            />
           ))}
         </ScrollView>
 
-        <View style={styles.panel}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Ledger</Text>
-            <Text style={styles.sectionCaption}>{visibleTransactions.length}</Text>
-          </View>
-          {visibleTransactions.length ? (
-            visibleTransactions.map((transaction) => (
-              <TransactionRow
-                key={transaction.id}
-                categoryOpen={recategorizingId === transaction.id}
-                onCategoryPress={() => setRecategorizingId((current) => current === transaction.id ? "" : transaction.id)}
-                onCategorySelect={(category) => void recategorizeTransaction(transaction, category)}
-                saving={savingId === transaction.id}
-                transaction={transaction}
-                onDelete={() => removeTransaction(transaction)}
-              />
-            ))
-          ) : (
-            <View style={styles.emptyState}>
-              <Ionicons color={colors.textSoft} name="receipt-outline" size={28} />
-              <Text style={styles.mutedText}>No {filter === "all" ? "" : `${filter} `}transactions yet.</Text>
-              <Pressable style={styles.primaryButton} onPress={() => router.push("/expense-add")}>
-                <Text style={styles.primaryActionText}>Add transaction</Text>
-              </Pressable>
+        {groups.length ? (
+          groups.map((group) => (
+            <View key={group.key} style={styles.group}>
+              <View style={styles.groupHeader}>
+                <Text style={styles.groupLabel}>{group.label}</Text>
+                <Text style={styles.groupNet}>
+                  {group.net >= 0 ? "+" : "−"}{formatCurrency(Math.abs(group.net))}
+                </Text>
+              </View>
+              <Card padded={false}>
+                {group.items.map((transaction, index) => (
+                  <View key={transaction.id}>
+                    <TransactionRow
+                      last={index === group.items.length - 1 && recategorizingId !== transaction.id}
+                      onPress={savingId === transaction.id ? undefined : () => openTransaction(transaction)}
+                      transaction={transaction}
+                    />
+                    {recategorizingId === transaction.id ? (
+                      <View style={[styles.recategorize, index !== group.items.length - 1 && styles.recategorizeDivider]}>
+                        <View style={styles.recategorizeHeader}>
+                          <Text style={styles.recategorizeLabel}>Move to category</Text>
+                          <Ionicons
+                            color={colors.textSoft}
+                            name="close"
+                            onPress={() => setRecategorizingId("")}
+                            size={18}
+                          />
+                        </View>
+                        <CategoryPicker
+                          onSelect={(category) => void recategorizeTransaction(transaction, category)}
+                          selected={transaction.category}
+                        />
+                      </View>
+                    ) : null}
+                  </View>
+                ))}
+              </Card>
             </View>
-          )}
-        </View>
-        </View>
+          ))
+        ) : (
+          <Card padded={false}>
+            <EmptyState
+              actionLabel="Add transaction"
+              icon="receipt-outline"
+              message={
+                filter === "all" && categoryFilter === "all"
+                  ? "Add your first expense or income to get started."
+                  : "Nothing matches these filters."
+              }
+              onAction={() => router.push("/expense-add")}
+              title="No transactions"
+            />
+          </Card>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -561,178 +589,70 @@ export default function ExpensesScreen() {
 
 function CategoryPicker({ onSelect, selected }: { onSelect: (value: string) => void; selected: string }) {
   return (
-    <View style={styles.chipRow}>
+    <View style={styles.pickerWrap}>
       {transactionCategories.map((category) => (
-        <Pressable
+        <Chip
+          color={category.color}
+          icon={category.icon}
           key={category.key}
+          label={category.label}
           onPress={() => onSelect(category.key)}
-          style={[styles.chip, selected === category.key && styles.selectedChip]}
-        >
-          <Ionicons color={selected === category.key ? colors.white : category.color} name={category.icon} size={14} />
-          <Text style={[styles.chipText, selected === category.key && styles.selectedChipText]}>{category.label}</Text>
-        </Pressable>
+          selected={selected === category.key}
+        />
       ))}
     </View>
   );
 }
 
-function SummaryCard({ label, tone, value }: { label: string; tone: "expense" | "income"; value: string }) {
+function SummaryItem({ label, tone, value }: { label: string; tone: "expense" | "income"; value: string }) {
   return (
-    <View style={styles.summaryCard}>
-      <Text style={styles.metricLabel}>{label}</Text>
-      <Text style={[styles.metricValue, tone === "income" ? styles.incomeAmount : styles.expenseAmount]}>
-        {value}
-      </Text>
-    </View>
-  );
-}
-
-function ChipPicker({
-  labels,
-  onSelect,
-  options,
-  selected,
-}: {
-  labels?: Record<string, string>;
-  onSelect: (value: string) => void;
-  options: string[];
-  selected: string;
-}) {
-  return (
-    <View style={styles.chipRow}>
-      {options.map((option) => (
-        <Pressable key={option} style={[styles.chip, selected === option && styles.selectedChip]} onPress={() => onSelect(option)}>
-          <Text style={[styles.chipText, selected === option && styles.selectedChipText]}>
-            {labels?.[option] || option}
-          </Text>
-        </Pressable>
-      ))}
-    </View>
-  );
-}
-
-function TransactionRow({
-  categoryOpen,
-  onCategoryPress,
-  onCategorySelect,
-  onDelete,
-  saving,
-  transaction,
-}: {
-  categoryOpen: boolean;
-  onCategoryPress: () => void;
-  onCategorySelect: (category: string) => void;
-  onDelete: () => void;
-  saving: boolean;
-  transaction: ExpenseEntry;
-}) {
-  const isIncome = transaction.type === "income";
-  const category = getTransactionCategory(transaction.category);
-
-  return (
-    <View style={styles.transactionItem}>
-    <View style={styles.transactionRow}>
-      <Pressable accessibilityLabel={`Change category for ${transaction.merchant}`} accessibilityRole="button" hitSlop={7} onPress={onCategoryPress} style={[styles.transactionIcon, { backgroundColor: isIncome ? colors.successSurface : category.surface }]}>
-        <Ionicons color={isIncome ? colors.success : category.color} name={isIncome ? "arrow-down-outline" : category.icon} size={18} />
-      </Pressable>
-      <View style={styles.transactionCopy}>
-        <Text numberOfLines={1} style={styles.transactionTitle}>{transaction.merchant}</Text>
-        <Text numberOfLines={1} style={styles.transactionMeta}>{category.label} • {formatDate(transaction.timestamp)}</Text>
-        {transaction.note ? <Text numberOfLines={1} style={styles.noteText}>{transaction.note}</Text> : null}
+    <View style={styles.flex}>
+      <View style={styles.summaryLabelRow}>
+        <View style={[styles.dot, { backgroundColor: tone === "income" ? colors.success : colors.primary }]} />
+        <Text style={styles.summaryLabel}>{label}</Text>
       </View>
-      <View style={styles.amountCopy}>
-        <Text style={isIncome ? styles.incomeAmount : styles.expenseAmount}>
-          {isIncome ? "+" : "−"}{formatCurrency(transaction.amount, transaction.currency)}
-        </Text>
-        <Pressable accessibilityLabel={`Delete ${transaction.merchant}`} accessibilityRole="button" disabled={saving} onPress={onDelete} style={styles.deleteButton}>
-          <Ionicons color={colors.danger} name="trash-outline" size={17} />
-        </Pressable>
-      </View>
-    </View>
-    {categoryOpen ? (
-      <View style={styles.recategorizePanel}>
-        <Text style={styles.recategorizeLabel}>Move to category</Text>
-        <CategoryPicker onSelect={onCategorySelect} selected={transaction.category} />
-      </View>
-    ) : null}
+      <Text adjustsFontSizeToFit numberOfLines={1} style={styles.summaryValue}>{value}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  actionRow: { flexDirection: "row", gap: 8, marginTop: 12 },
-  amountCopy: { alignItems: "flex-end", gap: 8 },
-  centerState: { alignItems: "center", flex: 1, gap: 10, justifyContent: "center" },
-  body: { gap: 16, marginTop: -24, paddingBottom: 122, paddingHorizontal: 16 },
-  categoryBar: { borderRadius: 3, flexDirection: "row", height: 5, marginTop: 14, overflow: "hidden" },
-  categoryBreakdown: { ...subtleShadow, backgroundColor: colors.surface, borderRadius: 10, padding: 14 },
-  categoryFilter: { alignItems: "center", backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 9, borderWidth: 1, flexDirection: "row", gap: 6, paddingHorizontal: 11, paddingVertical: 8 },
-  categoryFilterContent: { gap: 8, paddingRight: 16 },
-  categoryFilterSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
-  categoryFilterText: { color: colors.textMuted, fontSize: 12, fontWeight: "700" },
-  categoryFilterTextSelected: { color: colors.white },
-  categoryLegend: { flexDirection: "row", flexWrap: "wrap", gap: 12, marginTop: 12 },
-  categoryLegendItem: { alignItems: "center", flexDirection: "row", gap: 5 },
-  categoryLegendLabel: { color: colors.textMuted, fontSize: 11 },
-  categoryLegendValue: { color: colors.text, fontSize: 11, fontWeight: "700" },
-  chip: { alignItems: "center", backgroundColor: colors.backgroundSoft, borderColor: colors.border, borderRadius: 9, borderWidth: 1, flexDirection: "row", gap: 5, paddingHorizontal: 10, paddingVertical: 7 },
-  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 8 },
-  chipText: { color: colors.textMuted, fontSize: 12, fontWeight: "800" },
-  content: { backgroundColor: colors.background },
-  deleteButton: { padding: 2 },
-  emptyState: { alignItems: "center", gap: 8, padding: 22 },
-  errorText: { color: colors.danger, fontSize: 13, fontWeight: "800" },
-  expenseAmount: { color: colors.primary, fontSize: 14, fontWeight: "900" },
-  expenseSurface: { backgroundColor: "#E7F5F2" },
-  editBox: { marginTop: 10 },
-  filterChip: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 9, borderWidth: 1, paddingHorizontal: 15, paddingVertical: 9 },
-  filterChipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
-  filterRow: { flexDirection: "row", gap: 8 },
-  filterText: { color: colors.textMuted, fontSize: 13, fontWeight: "800" },
-  filterTextSelected: { color: colors.white },
-  incomeAmount: { color: colors.success, fontSize: 14, fontWeight: "900" },
-  incomeSurface: { backgroundColor: colors.successSurface },
-  heroActions: { alignItems: "center", backgroundColor: colors.white, borderRadius: 10, flexDirection: "row", paddingHorizontal: 4 },
-  input: { backgroundColor: colors.backgroundSoft, borderColor: colors.border, borderRadius: 12, borderWidth: 1, color: colors.text, fontSize: 14, marginTop: 8, paddingHorizontal: 12, paddingVertical: 10 },
-  messageText: { color: colors.primary, fontSize: 13, fontWeight: "800" },
-  metricLabel: { color: colors.textMuted, fontSize: 12, fontWeight: "800" },
-  metricValue: { fontSize: 19, fontWeight: "900", marginTop: 5 },
-  mutedText: { color: colors.textMuted, fontSize: 13, fontWeight: "600", textAlign: "center" },
-  panel: { ...subtleShadow, backgroundColor: colors.surface, borderRadius: 10, overflow: "hidden", padding: 14 },
-  panelText: { color: colors.textMuted, fontSize: 12, fontWeight: "600", lineHeight: 17, marginTop: 4 },
-  panelTitle: { color: colors.text, fontSize: 14, fontWeight: "900" },
-  pendingAmount: { color: colors.text, fontSize: 20, fontWeight: "900" },
-  pendingCard: { borderTopColor: colors.border, borderTopWidth: 1, marginTop: 13, paddingTop: 13 },
-  pendingHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
-  pendingType: { color: colors.accent, fontSize: 12, fontWeight: "900" },
-  permissionCopy: { flex: 1 },
-  permissionIcon: { alignItems: "center", backgroundColor: colors.accentSurface, borderRadius: 12, height: 40, justifyContent: "center", width: 40 },
-  permissionPanel: { alignItems: "center", backgroundColor: colors.accentSurface, borderColor: "#FED7AA", borderRadius: 17, borderWidth: 1, flexDirection: "row", gap: 10, padding: 13 },
-  primaryAction: { alignItems: "center", backgroundColor: colors.primary, borderRadius: 9, flex: 1, justifyContent: "center", minHeight: 38, paddingHorizontal: 13 },
-  primaryActionText: { color: colors.white, fontSize: 12, fontWeight: "900" },
-  primaryButton: { alignItems: "center", backgroundColor: colors.primary, borderRadius: 999, marginTop: 10, paddingHorizontal: 16, paddingVertical: 11 },
-  safeArea: { backgroundColor: colors.primaryDark, flex: 1 },
+  actionRow: { flexDirection: "row", gap: 8, marginTop: 14 },
+  cardText: { ...type.caption, color: colors.textMuted, marginTop: 3 },
+  cardTitle: { color: colors.text, fontSize: 15, fontWeight: "600" },
+  center: { alignItems: "center", backgroundColor: colors.background, flex: 1, justifyContent: "center" },
+  chipScroll: { gap: 8, paddingHorizontal: 20 },
+  chipScrollView: { marginBottom: 8, marginHorizontal: -20 },
+  content: { gap: 12, paddingBottom: TAB_BAR_CLEARANCE, paddingHorizontal: 20 },
+  countBadge: { backgroundColor: colors.warningSurface, borderRadius: radius.pill, paddingHorizontal: 9, paddingVertical: 3 },
+  countText: { color: colors.warning, fontSize: 12, fontWeight: "700" },
+  dot: { borderRadius: 4, height: 8, width: 8 },
+  editBox: { gap: 10, marginTop: 14 },
+  flex: { flex: 1 },
+  group: { gap: 8 },
+  groupHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 4 },
+  groupLabel: { ...type.overline, color: colors.textMuted },
+  groupNet: { ...type.caption, color: colors.textSoft, fontVariant: ["tabular-nums"] },
+  incomeText: { color: colors.success },
+  input: { backgroundColor: colors.backgroundSoft, borderColor: colors.border, borderRadius: radius.md, borderWidth: 1, color: colors.text, fontSize: 15, minHeight: 48, paddingHorizontal: 14 },
+  pendingAmount: { color: colors.text, fontSize: 15, fontVariant: ["tabular-nums"], fontWeight: "700" },
+  pendingCard: { marginBottom: 10 },
+  pendingHeader: { alignItems: "center", flexDirection: "row", gap: 12 },
+  permissionCard: { alignItems: "center", flexDirection: "row", gap: 12 },
+  pickerWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  preview: { ...type.caption, backgroundColor: colors.backgroundSoft, borderRadius: radius.sm, color: colors.textMuted, lineHeight: 17, marginTop: 12, padding: 10 },
+  recategorize: { backgroundColor: colors.backgroundSoft, gap: 10, padding: 16 },
+  recategorizeDivider: { borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth },
+  recategorizeHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  recategorizeLabel: { ...type.overline, color: colors.textMuted },
   screen: { backgroundColor: colors.background, flex: 1 },
-  scroll: { backgroundColor: colors.background },
-  secondaryAction: { alignItems: "center", backgroundColor: colors.backgroundSoft, borderRadius: 999, justifyContent: "center", minHeight: 38, paddingHorizontal: 12 },
-  secondaryActionText: { color: colors.text, fontSize: 12, fontWeight: "900" },
-  sectionCaption: { color: colors.textMuted, fontSize: 12, fontWeight: "800" },
-  sectionHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
-  sectionTitle: { color: colors.text, fontSize: 18, fontWeight: "900" },
-  selectedChip: { backgroundColor: colors.primary, borderColor: colors.primary },
-  selectedChipText: { color: colors.white },
-  smallButton: { backgroundColor: colors.primary, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
-  smallButtonText: { color: colors.white, fontSize: 12, fontWeight: "900" },
-  summaryCard: { ...subtleShadow, backgroundColor: colors.surface, borderRadius: 10, flex: 1, padding: 15 },
-  summaryGrid: { flexDirection: "row", gap: 12 },
-  noteText: { color: colors.textSoft, fontSize: 11, fontWeight: "600", marginTop: 3 },
-  previewText: { color: colors.textMuted, fontSize: 12, fontWeight: "600", lineHeight: 17, marginTop: 9 },
-  recategorizeLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700" },
-  recategorizePanel: { backgroundColor: colors.backgroundSoft, borderRadius: 9, marginBottom: 10, padding: 10 },
-  transactionCopy: { flex: 1 },
-  transactionIcon: { alignItems: "center", borderRadius: 12, height: 38, justifyContent: "center", width: 38 },
-  transactionItem: { borderBottomColor: colors.border, borderBottomWidth: 1 },
-  transactionMeta: { color: colors.textMuted, fontSize: 11, fontWeight: "600", marginTop: 4 },
-  transactionRow: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 74, paddingVertical: 11 },
-  transactionTitle: { color: colors.text, fontSize: 14, fontWeight: "900" },
+  section: { marginTop: 4 },
+  sectionRow: { alignItems: "center", flexDirection: "row", gap: 8, marginBottom: 10 },
+  sectionTitle: { ...type.heading, color: colors.text },
+  smallButton: { minHeight: 38, paddingHorizontal: 16 },
+  summaryCard: { flexDirection: "row", gap: 16 },
+  summaryDivider: { backgroundColor: colors.border, width: StyleSheet.hairlineWidth },
+  summaryLabel: { ...type.caption, color: colors.textMuted },
+  summaryLabelRow: { alignItems: "center", flexDirection: "row", gap: 6 },
+  summaryValue: { color: colors.text, fontSize: 20, fontVariant: ["tabular-nums"], fontWeight: "700", marginTop: 6 },
 });

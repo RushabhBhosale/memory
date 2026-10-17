@@ -12,13 +12,13 @@ export type InvestmentTypeOption = {
 };
 
 export const investmentTypes: InvestmentTypeOption[] = [
-  { key: "equity", label: "Stocks", icon: "stats-chart-outline", color: "#315497", surface: "#E7EDF8" },
-  { key: "mutual-fund", label: "Funds", icon: "pie-chart-outline", color: "#6A9FCD", surface: "#E8F2FA" },
-  { key: "fixed-income", label: "Fixed income", icon: "shield-checkmark-outline", color: "#5C8D95", surface: "#E6F1F2" },
-  { key: "crypto", label: "Crypto", icon: "logo-bitcoin", color: "#C47B14", surface: "#FFF2DD" },
-  { key: "real-estate", label: "Real estate", icon: "business-outline", color: "#7F549E", surface: "#EFE7F4" },
-  { key: "cash", label: "Cash", icon: "cash-outline", color: "#278C52", surface: "#E5F5EB" },
-  { key: "other", label: "Other", icon: "layers-outline", color: "#667085", surface: "#EEF0F3" },
+  { key: "equity", label: "Stocks", icon: "stats-chart-outline", color: "#3D4EE0", surface: "#EEF0FD" },
+  { key: "mutual-fund", label: "Funds", icon: "pie-chart-outline", color: "#1E9BC0", surface: "#E6F5FA" },
+  { key: "fixed-income", label: "Fixed income", icon: "shield-checkmark-outline", color: "#12A16B", surface: "#E6F6EF" },
+  { key: "crypto", label: "Crypto", icon: "logo-bitcoin", color: "#D9822B", surface: "#FDF3E7" },
+  { key: "real-estate", label: "Real estate", icon: "business-outline", color: "#8B5CF6", surface: "#F1ECFE" },
+  { key: "cash", label: "Cash", icon: "cash-outline", color: "#2E9E6A", surface: "#E7F6EE" },
+  { key: "other", label: "Other", icon: "layers-outline", color: "#5E6476", surface: "#F0F1F4" },
 ];
 
 export const getInvestmentType = (key: InvestmentAssetType) =>

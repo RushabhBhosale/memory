@@ -467,21 +467,21 @@ export const getDailySummary = async (date: string) => {
   return response.data;
 };
 
-export const syncChatGptDailyBrief = async (date?: string) => {
-  const { chatGptDailyBriefSyncUrl } = getApiConfig();
-  const apiKey = process.env.EXPO_PUBLIC_MEMORY_API_KEY;
-  const response = await request<DailyBriefSyncResponse>(
-    chatGptDailyBriefSyncUrl,
-    "",
-    {
-      body: JSON.stringify(date ? { date } : {}),
-      headers: apiKey ? { "x-api-key": apiKey } : undefined,
-      method: "POST",
-    },
-  );
+// export const syncChatGptDailyBrief = async (date?: string) => {
+//   const { chatGptDailyBriefSyncUrl } = getApiConfig();
+//   const apiKey = process.env.EXPO_PUBLIC_MEMORY_API_KEY;
+//   const response = await request<DailyBriefSyncResponse>(
+//     chatGptDailyBriefSyncUrl,
+//     "",
+//     {
+//       body: JSON.stringify(date ? { date } : {}),
+//       headers: apiKey ? { "x-api-key": apiKey } : undefined,
+//       method: "POST",
+//     },
+//   );
 
-  return response;
-};
+//   return response;
+// };
 
 export const upsertExpense = async (input: RemoteExpenseInput) => {
   const { expensesUrl } = getApiConfig();
@@ -508,7 +508,10 @@ export const loginExpenseUser = async (username: string, password: string) => {
   return response.data;
 };
 
-export const registerExpenseUser = async (username: string, password: string) => {
+export const registerExpenseUser = async (
+  username: string,
+  password: string,
+) => {
   const { registerUrl } = getApiConfig();
   const response = await request<{
     data: {

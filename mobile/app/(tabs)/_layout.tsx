@@ -3,7 +3,7 @@ import { router, Tabs } from "expo-router";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { colors, subtleShadow } from "../../styles/theme";
+import { colors } from "../../styles/theme";
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
@@ -41,31 +41,11 @@ const tabConfig: Record<
   string,
   { active: IconName; inactive: IconName; label: string }
 > = {
-  expenses: {
-    active: "swap-vertical",
-    inactive: "swap-vertical-outline",
-    label: "Transactions",
-  },
-  index: {
-    active: "home",
-    inactive: "home-outline",
-    label: "Home",
-  },
-  analytics: {
-    active: "stats-chart",
-    inactive: "stats-chart-outline",
-    label: "Insights",
-  },
-  create: {
-    active: "add-circle",
-    inactive: "add-circle-outline",
-    label: "Add",
-  },
-  investments: {
-    active: "pie-chart",
-    inactive: "pie-chart-outline",
-    label: "Portfolio",
-  },
+  index: { active: "home", inactive: "home-outline", label: "Home" },
+  expenses: { active: "list", inactive: "list-outline", label: "Activity" },
+  create: { active: "add", inactive: "add", label: "Add" },
+  analytics: { active: "pie-chart", inactive: "pie-chart-outline", label: "Insights" },
+  investments: { active: "trending-up", inactive: "trending-up-outline", label: "Portfolio" },
 };
 
 function FinanceTabBar({ state, descriptors, navigation }: FinanceTabBarProps) {
@@ -73,58 +53,60 @@ function FinanceTabBar({ state, descriptors, navigation }: FinanceTabBarProps) {
   const visibleRoutes = state.routes.filter((route) => tabConfig[route.name]);
 
   return (
-    <View
-      pointerEvents="box-none"
-      style={[styles.tabBarShell, { paddingBottom: Math.max(insets.bottom, 8) }]}
-    >
-      <View style={styles.tabBar}>
-        {visibleRoutes.map((route) => {
-          const isFocused = state.routes[state.index]?.key === route.key;
-          const options = descriptors[route.key].options;
-          const config = tabConfig[route.name];
+    <View style={[styles.tabBar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+      {visibleRoutes.map((route) => {
+        const isFocused = state.routes[state.index]?.key === route.key;
+        const options = descriptors[route.key].options;
+        const config = tabConfig[route.name];
 
-          const onPress = () => {
-            if (route.name === "create") {
-              router.push("/capture" as never);
-              return;
-            }
-
-            const event = navigation.emit({
-              type: "tabPress",
-              target: route.key,
-              canPreventDefault: true,
-            });
-
-            if (!isFocused && !event.defaultPrevented) {
-              navigation.navigate(route.name, route.params);
-            }
-          };
-
+        if (route.name === "create") {
           return (
-            <Pressable
-              accessibilityLabel={options.tabBarAccessibilityLabel}
-              accessibilityRole="button"
-              accessibilityState={isFocused ? { selected: true } : {}}
-              key={route.key}
-              onPress={onPress}
-              style={({ pressed }) => [
-                styles.tabItem,
-                pressed && styles.pressedItem,
-              ]}
-              testID={options.tabBarButtonTestID}
-            >
-              <Ionicons
-                color={route.name === "create" ? colors.primary : isFocused ? colors.primary : colors.textSoft}
-                name={isFocused || route.name === "create" ? config.active : config.inactive}
-                size={route.name === "create" ? 28 : 22}
-              />
-              <Text style={[styles.tabLabel, isFocused && styles.activeTabLabel]}>
-                {config.label}
-              </Text>
-            </Pressable>
+            <View key={route.key} style={styles.tabItem}>
+              <Pressable
+                accessibilityLabel="Add transaction"
+                accessibilityRole="button"
+                onPress={() => router.push("/expense-add")}
+                style={({ pressed }) => [styles.addButton, pressed && styles.addPressed]}
+              >
+                <Ionicons color={colors.white} name="add" size={28} />
+              </Pressable>
+            </View>
           );
-        })}
-      </View>
+        }
+
+        const onPress = () => {
+          const event = navigation.emit({
+            type: "tabPress",
+            target: route.key,
+            canPreventDefault: true,
+          });
+
+          if (!isFocused && !event.defaultPrevented) {
+            navigation.navigate(route.name, route.params);
+          }
+        };
+
+        return (
+          <Pressable
+            accessibilityLabel={options.tabBarAccessibilityLabel ?? config.label}
+            accessibilityRole="button"
+            accessibilityState={isFocused ? { selected: true } : {}}
+            key={route.key}
+            onPress={onPress}
+            style={styles.tabItem}
+            testID={options.tabBarButtonTestID}
+          >
+            <Ionicons
+              color={isFocused ? colors.text : colors.textSoft}
+              name={isFocused ? config.active : config.inactive}
+              size={22}
+            />
+            <Text style={[styles.tabLabel, isFocused && styles.activeTabLabel]}>
+              {config.label}
+            </Text>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
@@ -140,50 +122,56 @@ export default function TabsLayout() {
       tabBar={(props) => <FinanceTabBar {...props} />}
     >
       <Tabs.Screen name="index" options={{ title: "Home" }} />
-      <Tabs.Screen name="expenses" options={{ title: "Transactions" }} />
+      <Tabs.Screen name="expenses" options={{ title: "Activity" }} />
+      <Tabs.Screen name="create" options={{ title: "Add" }} />
       <Tabs.Screen name="analytics" options={{ title: "Insights" }} />
       <Tabs.Screen name="investments" options={{ title: "Portfolio" }} />
-      <Tabs.Screen name="create" options={{ title: "Add transaction" }} />
     </Tabs>
   );
 }
 
 const styles = StyleSheet.create({
   activeTabLabel: {
-    color: colors.primary,
+    color: colors.text,
   },
-  pressedItem: {
-    opacity: 0.7,
+  addButton: {
+    alignItems: "center",
+    backgroundColor: colors.primary,
+    borderRadius: 18,
+    height: 50,
+    justifyContent: "center",
+    shadowColor: colors.primary,
+    shadowOffset: { height: 6, width: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    width: 50,
+    elevation: 4,
+  },
+  addPressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.96 }],
   },
   tabBar: {
-    ...subtleShadow,
-    alignItems: "center",
     backgroundColor: colors.surface,
-    borderColor: colors.borderStrong,
-    borderRadius: 18,
-    borderWidth: 1,
-    flexDirection: "row",
-    justifyContent: "space-around",
-    minHeight: 68,
-    paddingHorizontal: 6,
-  },
-  tabBarShell: {
+    borderTopColor: colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
     bottom: 0,
+    flexDirection: "row",
     left: 0,
+    paddingTop: 8,
     position: "absolute",
     right: 0,
-    paddingHorizontal: 10,
   },
   tabItem: {
     alignItems: "center",
     flex: 1,
-    gap: 3,
+    gap: 4,
     justifyContent: "center",
-    minHeight: 60,
+    minHeight: 52,
   },
   tabLabel: {
     color: colors.textSoft,
-    fontSize: 9,
-    fontWeight: "800",
+    fontSize: 11,
+    fontWeight: "500",
   },
 });

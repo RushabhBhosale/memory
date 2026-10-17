@@ -1,4 +1,3 @@
-import { Ionicons } from "@expo/vector-icons";
 import { router, useFocusEffect } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useMemo, useState } from "react";
@@ -14,7 +13,16 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { FinanceHero } from "../../components/FinanceHero";
+import {
+  Banner,
+  Card,
+  EmptyState,
+  IconBadge,
+  IconButton,
+  PageHeader,
+  SectionHeader,
+  TAB_BAR_CLEARANCE,
+} from "../../components/ui";
 import { getInvestmentType } from "../../constants/investmentTypes";
 import {
   deleteInvestment,
@@ -22,7 +30,7 @@ import {
   listInvestments,
   type InvestmentHolding,
 } from "../../services/investments";
-import { colors, subtleShadow } from "../../styles/theme";
+import { colors, radius, type } from "../../styles/theme";
 import { formatCurrency } from "../../utils/localization";
 
 export default function InvestmentsScreen() {
@@ -88,17 +96,19 @@ export default function InvestmentsScreen() {
 
   if (loading && !holdings.length) {
     return (
-      <SafeAreaView edges={["top"]} style={styles.loadingScreen}>
-        <ActivityIndicator color={colors.white} />
+      <SafeAreaView edges={["top"]} style={styles.center}>
+        <ActivityIndicator color={colors.primary} />
       </SafeAreaView>
     );
   }
 
+  const isGain = summary.profit >= 0;
+
   return (
-    <SafeAreaView edges={["top"]} style={styles.safeArea}>
-      <StatusBar style="light" />
+    <SafeAreaView edges={["top"]} style={styles.screen}>
+      <StatusBar style="dark" />
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={styles.content}
         refreshControl={
           <RefreshControl
             colors={[colors.primary]}
@@ -108,209 +118,163 @@ export default function InvestmentsScreen() {
           />
         }
         showsVerticalScrollIndicator={false}
-        style={styles.scroll}
       >
-        <FinanceHero
-          actionIcon="add-outline"
-          actionLabel="Add investment"
-          label="Total investment"
-          onAction={() => router.push("/investment-add")}
+        <PageHeader
+          right={
+            <IconButton
+              accessibilityLabel="Add investment"
+              icon="add"
+              onPress={() => router.push("/investment-add")}
+              tone="primary"
+            />
+          }
+          subtitle="Your investments"
           title="Portfolio"
-          value={formatCurrency(summary.current)}
         />
 
-        <View style={styles.body}>
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {error ? <Banner message={error} onPress={() => void loadHoldings()} /> : null}
 
-          <View style={styles.summaryCard}>
-            <PortfolioMetric label="Invested" value={formatCurrency(summary.invested)} />
-            <View style={styles.divider} />
-            <PortfolioMetric
-              label="Profit / loss"
-              tone={summary.profit >= 0 ? "positive" : "negative"}
-              value={`${summary.profit >= 0 ? "+" : "−"}${formatCurrency(Math.abs(summary.profit))}`}
-            />
-            <View style={styles.performanceRow}>
-              <View style={styles.performanceTrack}>
-                <View
-                  style={[
-                    styles.performanceFill,
-                    summary.profit < 0 && styles.performanceFillNegative,
-                    { width: `${Math.min(Math.abs(summary.profitPercent), 100)}%` as `${number}%` },
-                  ]}
-                />
-              </View>
-              <Text style={[styles.performanceText, summary.profit < 0 && styles.lossText]}>
-                {summary.profit >= 0 ? "+" : ""}{summary.profitPercent.toFixed(1)}%
-              </Text>
+        <View style={styles.valueCard}>
+          <Text style={styles.valueLabel}>Current value</Text>
+          <Text adjustsFontSizeToFit numberOfLines={1} style={styles.value}>
+            {formatCurrency(summary.current)}
+          </Text>
+          <View style={[styles.returnPill, { backgroundColor: isGain ? "rgba(18,161,107,0.18)" : "rgba(229,72,77,0.18)" }]}>
+            <Text style={[styles.returnText, { color: isGain ? "#4ADE9B" : "#FF8A8D" }]}>
+              {isGain ? "▲" : "▼"} {formatCurrency(Math.abs(summary.profit))} ({isGain ? "+" : ""}{summary.profitPercent.toFixed(1)}%)
+            </Text>
+          </View>
+          <View style={styles.valueSplit}>
+            <View style={styles.flex}>
+              <Text style={styles.valueStatLabel}>Invested</Text>
+              <Text numberOfLines={1} style={styles.valueStat}>{formatCurrency(summary.invested)}</Text>
+            </View>
+            <View style={styles.flex}>
+              <Text style={styles.valueStatLabel}>Holdings</Text>
+              <Text style={styles.valueStat}>{holdings.length}</Text>
             </View>
           </View>
-
-          {allocations.length ? (
-            <View>
-              <Text style={styles.sectionTitle}>Allocation</Text>
-              <View style={styles.allocationCard}>
-                <View style={styles.allocationBar}>
-                  {allocations.map((allocation) => (
-                    <View
-                      key={allocation.config.key}
-                      style={{
-                        backgroundColor: allocation.config.color,
-                        flex: Math.max(allocation.percent, 2),
-                      }}
-                    />
-                  ))}
-                </View>
-                <View style={styles.allocationLegend}>
-                  {allocations.map((allocation) => (
-                    <View key={allocation.config.key} style={styles.legendItem}>
-                      <View style={[styles.legendDot, { backgroundColor: allocation.config.color }]} />
-                      <Text style={styles.legendLabel}>{allocation.config.label}</Text>
-                      <Text style={styles.legendPercent}>{allocation.percent.toFixed(0)}%</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            </View>
-          ) : null}
-
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Your investments</Text>
-            <Text style={styles.sectionCaption}>{holdings.length} assets</Text>
-          </View>
-
-          {holdings.length ? (
-            <View style={styles.holdingsList}>
-              {holdings.map((holding) => (
-                <HoldingRow holding={holding} key={holding.id} onRemove={() => removeHolding(holding)} />
-              ))}
-            </View>
-          ) : (
-            <View style={styles.emptyCard}>
-              <View style={styles.emptyIcon}>
-                <Ionicons color={colors.primary} name="trending-up-outline" size={25} />
-              </View>
-              <Text style={styles.emptyTitle}>Build your portfolio</Text>
-              <Text style={styles.emptyText}>
-                Add stocks, funds, property, crypto, or cash to see value, allocation, and returns together.
-              </Text>
-              <Pressable style={styles.addButton} onPress={() => router.push("/investment-add")}>
-                <Ionicons color={colors.white} name="add" size={18} />
-                <Text style={styles.addButtonText}>Add investment</Text>
-              </Pressable>
-            </View>
-          )}
         </View>
+
+        {allocations.length ? (
+          <>
+            <SectionHeader title="Allocation" />
+            <Card>
+              <View style={styles.allocationBar}>
+                {allocations.map((allocation) => (
+                  <View
+                    key={allocation.config.key}
+                    style={{ backgroundColor: allocation.config.color, flex: Math.max(allocation.percent, 2) }}
+                  />
+                ))}
+              </View>
+              <View style={styles.legend}>
+                {allocations.map((allocation) => (
+                  <View key={allocation.config.key} style={styles.legendRow}>
+                    <View style={[styles.legendDot, { backgroundColor: allocation.config.color }]} />
+                    <Text style={styles.legendLabel}>{allocation.config.label}</Text>
+                    <Text style={styles.legendValue}>{formatCurrency(allocation.value)}</Text>
+                    <Text style={styles.legendPercent}>{allocation.percent.toFixed(0)}%</Text>
+                  </View>
+                ))}
+              </View>
+            </Card>
+          </>
+        ) : null}
+
+        <SectionHeader title="Holdings" />
+        <Card padded={false}>
+          {holdings.length ? (
+            holdings.map((holding, index) => (
+              <HoldingRow
+                holding={holding}
+                key={holding.id}
+                last={index === holdings.length - 1}
+                onLongPress={() => removeHolding(holding)}
+              />
+            ))
+          ) : (
+            <EmptyState
+              actionLabel="Add investment"
+              icon="trending-up-outline"
+              message="Add stocks, funds, property, crypto or cash to see value and returns in one place."
+              onAction={() => router.push("/investment-add")}
+              title="Build your portfolio"
+            />
+          )}
+        </Card>
+        {holdings.length ? <Text style={styles.hint}>Long-press a holding to remove it.</Text> : null}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function PortfolioMetric({
-  label,
-  tone,
-  value,
-}: {
-  label: string;
-  tone?: "negative" | "positive";
-  value: string;
-}) {
-  return (
-    <View style={styles.metric}>
-      <Text style={styles.metricLabel}>{label}</Text>
-      <Text
-        style={[
-          styles.metricValue,
-          tone === "positive" && styles.gainText,
-          tone === "negative" && styles.lossText,
-        ]}
-      >
-        {value}
-      </Text>
-    </View>
-  );
-}
-
 function HoldingRow({
   holding,
-  onRemove,
+  last,
+  onLongPress,
 }: {
   holding: InvestmentHolding;
-  onRemove: () => void;
+  last: boolean;
+  onLongPress: () => void;
 }) {
   const config = getInvestmentType(holding.type);
   const value = holding.currentPrice * holding.quantity;
-  const profit = (holding.currentPrice - holding.averagePrice) * holding.quantity;
   const profitPercent = holding.averagePrice > 0
     ? ((holding.currentPrice - holding.averagePrice) / holding.averagePrice) * 100
     : 0;
+  const isGain = profitPercent >= 0;
 
   return (
-    <View style={styles.holdingRow}>
-      <View style={[styles.holdingIcon, { backgroundColor: config.surface }]}>
-        <Ionicons color={config.color} name={config.icon} size={20} />
-      </View>
-      <View style={styles.holdingCopy}>
+    <Pressable
+      accessibilityHint="Long-press to remove"
+      onLongPress={onLongPress}
+      style={({ pressed }) => [styles.holdingRow, !last && styles.divider, pressed && styles.pressed]}
+    >
+      <IconBadge color={config.color} icon={config.icon} surface={config.surface} />
+      <View style={styles.flex}>
         <Text numberOfLines={1} style={styles.holdingName}>{holding.name}</Text>
         <Text numberOfLines={1} style={styles.holdingMeta}>
           {holding.symbol || config.label} · {holding.quantity} units
         </Text>
       </View>
-      <View style={styles.holdingValueCopy}>
+      <View style={styles.holdingRight}>
         <Text style={styles.holdingValue}>{formatCurrency(value, holding.currency)}</Text>
-        <Text style={profit >= 0 ? styles.gainText : styles.lossText}>
-          {profit >= 0 ? "+" : ""}{profitPercent.toFixed(1)}%
+        <Text style={[styles.holdingReturn, { color: isGain ? colors.success : colors.danger }]}>
+          {isGain ? "+" : ""}{profitPercent.toFixed(1)}%
         </Text>
       </View>
-      <Pressable accessibilityLabel={`Remove ${holding.name}`} accessibilityRole="button" hitSlop={8} onPress={onRemove} style={styles.moreButton}>
-        <Ionicons color={colors.textSoft} name="trash-outline" size={17} />
-      </Pressable>
-    </View>
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  addButton: { alignItems: "center", backgroundColor: colors.primary, borderRadius: 10, flexDirection: "row", gap: 7, marginTop: 8, paddingHorizontal: 15, paddingVertical: 11 },
-  addButtonText: { color: colors.white, fontSize: 13, fontWeight: "800" },
-  allocationBar: { borderRadius: 3, flexDirection: "row", height: 5, overflow: "hidden" },
-  allocationCard: { backgroundColor: colors.surface, borderRadius: 10, marginTop: 10, padding: 13 },
-  allocationLegend: { flexDirection: "row", flexWrap: "wrap", gap: 12, marginTop: 12 },
-  body: { gap: 18, marginTop: -24, paddingBottom: 120, paddingHorizontal: 16 },
-  divider: { backgroundColor: colors.borderStrong, height: 46, width: 1 },
-  emptyCard: { alignItems: "center", backgroundColor: colors.surface, borderRadius: 10, gap: 8, padding: 24 },
-  emptyIcon: { alignItems: "center", backgroundColor: colors.primarySurface, borderRadius: 999, height: 48, justifyContent: "center", width: 48 },
-  emptyText: { color: colors.textMuted, fontSize: 13, lineHeight: 19, maxWidth: 290, textAlign: "center" },
-  emptyTitle: { color: colors.text, fontSize: 17, fontWeight: "800" },
-  errorText: { color: colors.danger, fontSize: 13, fontWeight: "700" },
-  gainText: { color: colors.success },
-  holdingCopy: { flex: 1 },
-  holdingIcon: { alignItems: "center", borderRadius: 4, height: 40, justifyContent: "center", width: 40 },
-  holdingMeta: { color: colors.textMuted, fontSize: 11, marginTop: 3 },
-  holdingName: { color: colors.text, fontSize: 15, fontWeight: "700" },
-  holdingRow: { alignItems: "center", borderBottomColor: colors.border, borderBottomWidth: 1, flexDirection: "row", gap: 10, minHeight: 70, paddingHorizontal: 12, paddingVertical: 10 },
-  holdingValue: { color: colors.text, fontSize: 14, fontWeight: "700" },
-  holdingValueCopy: { alignItems: "flex-end", gap: 3 },
-  holdingsList: { backgroundColor: colors.surface, borderRadius: 10, overflow: "hidden" },
-  legendDot: { borderRadius: 3, height: 7, width: 7 },
-  legendItem: { alignItems: "center", flexDirection: "row", gap: 5 },
-  legendLabel: { color: colors.textMuted, fontSize: 11 },
-  legendPercent: { color: colors.text, fontSize: 11, fontWeight: "700" },
-  loadingScreen: { alignItems: "center", backgroundColor: colors.primaryDark, flex: 1, justifyContent: "center" },
-  lossText: { color: colors.danger },
-  metric: { flex: 1 },
-  metricLabel: { color: colors.textMuted, fontSize: 12, marginBottom: 5 },
-  metricValue: { color: colors.primary, fontSize: 17, fontWeight: "800" },
-  moreButton: { padding: 4 },
-  performanceFill: { backgroundColor: colors.success, borderRadius: 3, height: 4 },
-  performanceFillNegative: { backgroundColor: colors.danger },
-  performanceRow: { alignItems: "center", bottom: 12, flexDirection: "row", gap: 10, left: 13, position: "absolute", right: 13 },
-  performanceText: { color: colors.success, fontSize: 11, fontWeight: "800" },
-  performanceTrack: { backgroundColor: colors.background, borderRadius: 3, flex: 1, height: 4 },
-  safeArea: { backgroundColor: colors.primaryDark, flex: 1 },
-  scroll: { backgroundColor: colors.background },
-  scrollContent: { backgroundColor: colors.background },
-  sectionCaption: { color: colors.textMuted, fontSize: 12 },
-  sectionHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
-  sectionTitle: { color: colors.text, fontSize: 20, fontWeight: "700" },
-  summaryCard: { ...subtleShadow, backgroundColor: colors.surface, borderRadius: 10, flexDirection: "row", gap: 18, minHeight: 116, paddingBottom: 30, paddingHorizontal: 18, paddingTop: 18 },
+  allocationBar: { borderRadius: 4, flexDirection: "row", gap: 2, height: 8, overflow: "hidden" },
+  center: { alignItems: "center", backgroundColor: colors.background, flex: 1, justifyContent: "center" },
+  content: { gap: 12, paddingBottom: TAB_BAR_CLEARANCE, paddingHorizontal: 20 },
+  divider: { borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth },
+  flex: { flex: 1 },
+  hint: { ...type.caption, color: colors.textSoft, textAlign: "center" },
+  holdingMeta: { ...type.caption, color: colors.textMuted, marginTop: 3 },
+  holdingName: { color: colors.text, fontSize: 15, fontWeight: "600" },
+  holdingReturn: { ...type.caption, fontVariant: ["tabular-nums"], fontWeight: "600" },
+  holdingRight: { alignItems: "flex-end", gap: 3 },
+  holdingRow: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 66, paddingHorizontal: 16, paddingVertical: 12 },
+  holdingValue: { color: colors.text, fontSize: 15, fontVariant: ["tabular-nums"], fontWeight: "600" },
+  legend: { gap: 12, marginTop: 16 },
+  legendDot: { borderRadius: 4, height: 8, width: 8 },
+  legendLabel: { ...type.label, color: colors.text, flex: 1 },
+  legendPercent: { ...type.caption, color: colors.textSoft, fontVariant: ["tabular-nums"], textAlign: "right", width: 40 },
+  legendRow: { alignItems: "center", flexDirection: "row", gap: 10 },
+  legendValue: { ...type.label, color: colors.textMuted, fontVariant: ["tabular-nums"] },
+  pressed: { backgroundColor: colors.backgroundSoft },
+  returnPill: { alignSelf: "flex-start", borderRadius: radius.pill, marginTop: 10, paddingHorizontal: 10, paddingVertical: 5 },
+  returnText: { fontSize: 13, fontVariant: ["tabular-nums"], fontWeight: "600" },
+  screen: { backgroundColor: colors.background, flex: 1 },
+  value: { ...type.display, color: colors.white, fontVariant: ["tabular-nums"], marginTop: 6 },
+  valueCard: { backgroundColor: colors.ink, borderRadius: radius.xl, padding: 20 },
+  valueLabel: { ...type.label, color: colors.inkMuted },
+  valueSplit: { borderTopColor: colors.inkLine, borderTopWidth: 1, flexDirection: "row", gap: 16, marginTop: 18, paddingTop: 16 },
+  valueStat: { color: colors.white, fontSize: 16, fontVariant: ["tabular-nums"], fontWeight: "600", marginTop: 3 },
+  valueStatLabel: { ...type.caption, color: colors.inkMuted },
 });

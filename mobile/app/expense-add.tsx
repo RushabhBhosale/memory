@@ -1,10 +1,10 @@
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
-import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
+import { useLocalSearchParams } from "expo-router";
+import { useMemo, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,395 +14,250 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { ScreenHeader } from "../components/ScreenHeader";
-import { transactionCategories } from "../constants/transactionCategories";
-import {
-  addManualExpense,
-  type ExpenseType,
-} from "../services/expenses";
-import { colors, subtleShadow } from "../styles/theme";
+import { goBack, ScreenHeader } from "../components/ScreenHeader";
+import { Button, Chip, Segmented } from "../components/ui";
+import { getCategoriesForType, getTransactionCategory } from "../constants/transactionCategories";
+import { addManualExpense, type ExpenseType } from "../services/expenses";
+import { colors, radius, type } from "../styles/theme";
+import { getDateKey } from "../utils/financeAnalytics";
 
-type ManualExpenseState = {
-  amount: string;
-  category: string;
-  merchant: string;
-  note: string;
-  type: ExpenseType;
+type DateOption = "today" | "yesterday" | "custom";
+
+const startOfToday = () => {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
 };
 
-const getParamValue = (value?: string | string[]) =>
-  Array.isArray(value) ? value[0] : value;
+/** Keep the current time of day so entries sort naturally within a day. */
+const withCurrentTime = (day: Date) => {
+  const now = new Date();
+  const result = new Date(day);
+  result.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), 0);
+  return result.getTime();
+};
 
 export default function ExpenseAddScreen() {
-  const params = useLocalSearchParams<{
-    amount?: string;
-    category?: string;
-    merchant?: string;
-    note?: string;
-    type?: string;
-  }>();
-  const [expense, setExpense] = useState<ManualExpenseState>({
-    amount: "",
-    category: "general",
-    merchant: "",
-    note: "",
-    type: "expense",
-  });
+  const params = useLocalSearchParams<{ type?: string }>();
+  const [kind, setKind] = useState<ExpenseType>(params.type === "income" ? "income" : "expense");
+  const [amount, setAmount] = useState("");
+  const [merchant, setMerchant] = useState("");
+  const [note, setNote] = useState("");
+  const [category, setCategory] = useState(kind === "income" ? "salary" : "food");
+  const [dateOption, setDateOption] = useState<DateOption>("today");
+  const [customDate, setCustomDate] = useState(startOfToday);
+  const [showPicker, setShowPicker] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    const amount = getParamValue(params.amount);
-    const merchant = getParamValue(params.merchant);
-    const category = getParamValue(params.category);
-    const note = getParamValue(params.note);
-    const type = getParamValue(params.type);
+  const categories = useMemo(() => getCategoriesForType(kind), [kind]);
+  const parsedAmount = Number.parseFloat(amount.replace(/,/g, ""));
+  const canSave = Number.isFinite(parsedAmount) && parsedAmount > 0;
+  const accent = kind === "income" ? colors.success : colors.text;
 
-    if (!amount && !merchant && !category && !note && !type) {
-      return;
+  const changeKind = (next: ExpenseType) => {
+    setKind(next);
+    if (!getCategoriesForType(next).some((item) => item.key === category)) {
+      setCategory(next === "income" ? "salary" : "food");
     }
+  };
 
-    setExpense((current) => ({
-      ...current,
-      amount: amount || current.amount,
-      category: category || current.category,
-      merchant: merchant || current.merchant,
-      note: note || current.note,
-      type: type === "income" ? "income" : current.type,
-    }));
-  }, [params.amount, params.category, params.merchant, params.note, params.type]);
-
-  const saveManualExpense = async () => {
-    const amount = Number.parseFloat(expense.amount);
-
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setError("Enter a valid amount.");
-      return;
+  const getTimestamp = () => {
+    if (dateOption === "today") return Date.now();
+    if (dateOption === "yesterday") {
+      const day = startOfToday();
+      day.setDate(day.getDate() - 1);
+      return withCurrentTime(day);
     }
+    return getDateKey(customDate) === getDateKey(new Date()) ? Date.now() : withCurrentTime(customDate);
+  };
 
-    if (!expense.merchant.trim()) {
-      setError("Add a merchant, person, or source name.");
+  const save = async () => {
+    if (!canSave) {
+      setError("Enter an amount greater than zero.");
       return;
     }
 
     try {
       setSaving(true);
       setError("");
-
       await addManualExpense({
-        amount,
-        category: expense.category,
-        merchant: expense.merchant.trim(),
-        note: expense.note.trim(),
-        type: expense.type,
+        amount: parsedAmount,
+        category,
+        merchant: merchant.trim() || getTransactionCategory(category).label,
+        note: note.trim(),
+        timestamp: getTimestamp(),
+        type: kind,
       });
-
-      Alert.alert("Saved", "Transaction added.", [
-        {
-          text: "OK",
-          onPress: () => router.back(),
-        },
-      ]);
+      goBack();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to add transaction");
-    } finally {
+      setError(err instanceof Error ? err.message : "Unable to save transaction");
       setSaving(false);
     }
   };
 
+  const customLabel = dateOption === "custom"
+    ? new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(customDate)
+    : "Pick date";
+
   return (
-    <SafeAreaView edges={["top"]} style={styles.screen}>
-      <KeyboardAvoidingView
-        style={styles.keyboardView}
-      >
+    <SafeAreaView edges={["top", "bottom"]} style={styles.screen}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
+        <View style={styles.headerWrap}>
+          <ScreenHeader icon="close" title="New transaction" />
+        </View>
+
         <ScrollView
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <ScreenHeader mode="back" title="Add Transaction" />
+          <Segmented
+            onChange={changeKind}
+            options={[
+              { label: "Expense", value: "expense" },
+              { label: "Income", value: "income" },
+            ]}
+            value={kind}
+          />
 
-          <View style={styles.formPanel}>
-            <View style={styles.formHeader}>
-              <View style={styles.formIcon}>
-                <Ionicons color={colors.primary} name="receipt-outline" size={18} />
-              </View>
-              <View style={styles.formCopy}>
-                <Text style={styles.formTitle}>Manual entry</Text>
-                <Text style={styles.formMeta}>
-                  Add cash, UPI, income, or anything SMS detection missed. It saves locally first.
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.segmentedControl}>
-              {(["expense", "income"] as const).map((type) => (
-                <Pressable
-                  key={type}
-                  style={[
-                    styles.segmentButton,
-                    expense.type === type && styles.segmentButtonSelected,
-                  ]}
-                  onPress={() => setExpense((current) => ({ ...current, type }))}
-                >
-                  <Text
-                    style={[
-                      styles.segmentText,
-                      expense.type === type && styles.segmentTextSelected,
-                    ]}
-                  >
-                    {type === "income" ? "Income" : "Expense"}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <Text style={styles.label}>Amount</Text>
+          <View style={styles.amountBlock}>
+            <Text style={styles.amountLabel}>Amount</Text>
             <TextInput
+              autoFocus
               keyboardType="decimal-pad"
-              onChangeText={(value) => setExpense((current) => ({ ...current, amount: value }))}
-              placeholder="0"
-              placeholderTextColor={colors.textSoft}
-              style={styles.input}
-              value={expense.amount}
+              maxLength={13}
+              onChangeText={(value) => {
+                const digits = value.replace(/[^0-9.]/g, "");
+                // Allow a single decimal point with at most two decimals.
+                const [whole, ...rest] = digits.split(".");
+                setAmount(rest.length ? `${whole}.${rest.join("").slice(0, 2)}` : whole);
+                if (error) setError("");
+              }}
+              placeholder="₹0"
+              placeholderTextColor={colors.borderStrong}
+              selectionColor={colors.primary}
+              style={[styles.amountInput, { color: accent }]}
+              value={amount ? `₹${amount}` : ""}
             />
+          </View>
 
-            <Text style={styles.label}>Merchant or person</Text>
-            <TextInput
-              onChangeText={(value) => setExpense((current) => ({ ...current, merchant: value }))}
-              placeholder="Cash, Friend, Swiggy, Salary..."
-              placeholderTextColor={colors.textSoft}
-              style={styles.input}
-              value={expense.merchant}
-            />
+          <View style={styles.fieldCard}>
+            <View style={styles.fieldRow}>
+              <Ionicons color={colors.textSoft} name={kind === "income" ? "person-outline" : "storefront-outline"} size={18} />
+              <TextInput
+                onChangeText={setMerchant}
+                placeholder={kind === "income" ? "Received from (optional)" : "Paid to (optional)"}
+                placeholderTextColor={colors.textSoft}
+                returnKeyType="next"
+                style={styles.fieldInput}
+                value={merchant}
+              />
+            </View>
+            <View style={styles.fieldDivider} />
+            <View style={styles.fieldRow}>
+              <Ionicons color={colors.textSoft} name="document-text-outline" size={18} />
+              <TextInput
+                onChangeText={setNote}
+                placeholder="Note (optional)"
+                placeholderTextColor={colors.textSoft}
+                style={styles.fieldInput}
+                value={note}
+              />
+            </View>
+          </View>
 
-            <Text style={styles.label}>Category</Text>
-            <View style={styles.chipRow}>
-              {transactionCategories.map((category) => (
+          <Text style={styles.sectionLabel}>Category</Text>
+          <View style={styles.categoryGrid}>
+            {categories.map((item) => {
+              const selected = item.key === category;
+              return (
                 <Pressable
-                  key={category.key}
-                  style={[styles.chip, expense.category === category.key && styles.selectedChip]}
-                  onPress={() => setExpense((current) => ({ ...current, category: category.key }))}
+                  accessibilityLabel={item.label}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  key={item.key}
+                  onPress={() => setCategory(item.key)}
+                  style={styles.categoryCell}
                 >
-                  <Ionicons
-                    color={expense.category === category.key ? colors.white : category.color}
-                    name={category.icon}
-                    size={15}
-                  />
-                  <Text
+                  <View
                     style={[
-                      styles.chipText,
-                      expense.category === category.key && styles.selectedChipText,
+                      styles.categoryTile,
+                      { backgroundColor: selected ? item.color : item.surface },
                     ]}
                   >
-                    {category.label}
+                    <Ionicons color={selected ? colors.white : item.color} name={item.icon} size={22} />
+                  </View>
+                  <Text numberOfLines={1} style={[styles.categoryLabel, selected && styles.categoryLabelSelected]}>
+                    {item.label}
                   </Text>
                 </Pressable>
-              ))}
-            </View>
-
-            <Text style={styles.label}>Note</Text>
-            <TextInput
-              multiline
-              onChangeText={(value) => setExpense((current) => ({ ...current, note: value }))}
-              placeholder="Optional context"
-              placeholderTextColor={colors.textSoft}
-              style={[styles.input, styles.noteInput]}
-              value={expense.note}
-            />
-
-            {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-            <Pressable
-              disabled={saving}
-              onPress={() => void saveManualExpense()}
-              style={[styles.primaryButton, saving && styles.disabledButton]}
-            >
-              {saving ? (
-                <ActivityIndicator color={colors.white} />
-              ) : (
-                <>
-                  <Text style={styles.primaryButtonText}>Save transaction</Text>
-                  <Ionicons color={colors.white} name="checkmark" size={17} />
-                </>
-              )}
-            </Pressable>
+              );
+            })}
           </View>
+
+          <Text style={styles.sectionLabel}>Date</Text>
+          <View style={styles.dateRow}>
+            <Chip label="Today" onPress={() => setDateOption("today")} selected={dateOption === "today"} />
+            <Chip label="Yesterday" onPress={() => setDateOption("yesterday")} selected={dateOption === "yesterday"} />
+            <Chip
+              icon="calendar-outline"
+              label={customLabel}
+              onPress={() => setShowPicker(true)}
+              selected={dateOption === "custom"}
+            />
+          </View>
+
+          {showPicker ? (
+            <DateTimePicker
+              display={Platform.OS === "ios" ? "inline" : "default"}
+              maximumDate={new Date()}
+              mode="date"
+              onChange={(event, date) => {
+                if (Platform.OS !== "ios") setShowPicker(false);
+                if (event.type === "set" && date) {
+                  setCustomDate(date);
+                  setDateOption("custom");
+                  if (Platform.OS === "ios") setShowPicker(false);
+                }
+              }}
+              value={customDate}
+            />
+          ) : null}
         </ScrollView>
+
+        <View style={styles.footer}>
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+          <Button
+            disabled={!canSave}
+            label={kind === "income" ? "Save income" : "Save expense"}
+            loading={saving}
+            onPress={() => void save()}
+          />
+        </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  centerState: {
-    alignItems: "center",
-    flex: 1,
-    gap: 12,
-    justifyContent: "center",
-    padding: 24,
-  },
-  chip: {
-    alignItems: "center",
-    backgroundColor: colors.backgroundSoft,
-    borderColor: colors.border,
-    borderRadius: 9,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-  },
-  chipRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 18,
-  },
-  chipText: {
-    color: colors.text,
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "capitalize",
-  },
-  content: {
-    paddingBottom: 36,
-    paddingHorizontal: 22,
-    paddingTop: 18,
-  },
-  disabledButton: {
-    opacity: 0.72,
-  },
-  errorText: {
-    color: colors.danger,
-    fontSize: 13,
-    fontWeight: "800",
-    lineHeight: 18,
-    marginBottom: 14,
-  },
-  formCopy: {
-    flex: 1,
-  },
-  formHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 12,
-    marginBottom: 20,
-  },
-  formIcon: {
-    alignItems: "center",
-    backgroundColor: colors.accentSurface,
-    borderRadius: 999,
-    height: 40,
-    justifyContent: "center",
-    width: 40,
-  },
-  formMeta: {
-    color: colors.textMuted,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  formPanel: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 18,
-    ...subtleShadow,
-  },
-  formTitle: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: "900",
-    marginBottom: 2,
-  },
-  input: {
-    backgroundColor: colors.backgroundSoft,
-    borderColor: colors.border,
-    borderRadius: 14,
-    borderWidth: 1,
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: "800",
-    marginBottom: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  label: {
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: "800",
-    marginBottom: 8,
-  },
-  mutedText: {
-    color: colors.textMuted,
-    fontSize: 14,
-    fontWeight: "700",
-    lineHeight: 20,
-    textAlign: "center",
-  },
-  noteInput: {
-    minHeight: 92,
-    textAlignVertical: "top",
-  },
-  primaryButton: {
-    alignItems: "center",
-    backgroundColor: colors.primary,
-    borderRadius: 10,
-    flexDirection: "row",
-    gap: 8,
-    justifyContent: "center",
-    minHeight: 48,
-    paddingHorizontal: 18,
-    paddingVertical: 13,
-  },
-  primaryButtonText: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: "900",
-  },
-  screen: {
-    backgroundColor: colors.background,
-    flex: 1,
-  },
-  segmentedControl: {
-    backgroundColor: colors.backgroundSoft,
-    borderColor: colors.border,
-    borderRadius: 10,
-    borderWidth: 1,
-    flexDirection: "row",
-    marginBottom: 18,
-    padding: 4,
-  },
-  segmentButton: {
-    alignItems: "center",
-    borderRadius: 999,
-    flex: 1,
-    paddingVertical: 10,
-  },
-  segmentButtonSelected: {
-    backgroundColor: colors.primary,
-  },
-  segmentText: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  segmentTextSelected: {
-    color: colors.white,
-  },
-  selectedChip: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  selectedChipText: {
-    color: colors.white,
-  },
-  title: {
-    color: colors.text,
-    fontSize: 28,
-    fontWeight: "900",
-  },
+  amountBlock: { alignItems: "center", paddingBottom: 28, paddingTop: 32 },
+  amountInput: { alignSelf: "stretch", fontSize: 52, fontVariant: ["tabular-nums"], fontWeight: "700", letterSpacing: -1.5, marginTop: 8, padding: 0, textAlign: "center" },
+  amountLabel: { ...type.label, color: colors.textMuted },
+  categoryCell: { alignItems: "center", gap: 6, marginBottom: 14, width: "25%" },
+  categoryGrid: { flexDirection: "row", flexWrap: "wrap", marginHorizontal: -4 },
+  categoryLabel: { ...type.caption, color: colors.textMuted },
+  categoryLabelSelected: { color: colors.text, fontWeight: "600" },
+  categoryTile: { alignItems: "center", borderRadius: radius.lg, height: 54, justifyContent: "center", width: 54 },
+  content: { paddingBottom: 24, paddingHorizontal: 20, paddingTop: 4 },
+  dateRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 8 },
+  error: { ...type.label, color: colors.danger, marginBottom: 10, textAlign: "center" },
+  fieldCard: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, marginBottom: 24 },
+  fieldDivider: { backgroundColor: colors.border, height: StyleSheet.hairlineWidth, marginLeft: 46 },
+  fieldInput: { color: colors.text, flex: 1, fontSize: 16, minHeight: 52, paddingVertical: 12 },
+  fieldRow: { alignItems: "center", flexDirection: "row", gap: 12, paddingHorizontal: 16 },
+  flex: { flex: 1 },
+  footer: { backgroundColor: colors.background, borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth, paddingBottom: 8, paddingHorizontal: 20, paddingTop: 12 },
+  headerWrap: { paddingHorizontal: 20 },
+  screen: { backgroundColor: colors.background, flex: 1 },
+  sectionLabel: { ...type.overline, color: colors.textMuted, marginBottom: 12 },
 });

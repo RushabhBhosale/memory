@@ -14,10 +14,19 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { CashflowChart } from "../../components/CashflowChart";
 import { ExpenseCalendar } from "../../components/ExpenseCalendar";
-import { FinanceHero } from "../../components/FinanceHero";
+import {
+  Banner,
+  Card,
+  IconBadge,
+  PageHeader,
+  Segmented,
+  SectionHeader,
+  TAB_BAR_CLEARANCE,
+  TransactionRow,
+} from "../../components/ui";
 import { getTransactionCategory } from "../../constants/transactionCategories";
 import { useExpenseData } from "../../hooks/useExpenseData";
-import { colors, subtleShadow } from "../../styles/theme";
+import { colors, radius, type } from "../../styles/theme";
 import {
   buildAllTimeCashflowPoints,
   buildMonthlyCashflowPoints,
@@ -53,7 +62,6 @@ export default function AnalyticsScreen() {
     [monthTransactions, scope, transactions],
   );
   const totals = useMemo(() => getCashflowTotals(scopeTransactions), [scopeTransactions]);
-  const monthTotals = useMemo(() => getCashflowTotals(monthTransactions), [monthTransactions]);
   const dailyExpenses = useMemo(
     () => getDailyExpenseTotals(monthTransactions),
     [monthTransactions],
@@ -87,6 +95,8 @@ export default function AnalyticsScreen() {
     .filter((item) => item.type === "expense")
     .reduce((sum, item) => sum + item.amount, 0);
   const selectedDate = parseDateKey(selectedDateKey);
+  const savingsRate = totals.income > 0 ? Math.round((totals.net / totals.income) * 100) : null;
+  const isCurrentMonth = getDateKey(month).slice(0, 7) === getDateKey(new Date()).slice(0, 7);
 
   const moveMonth = (offset: number) => {
     const nextMonth = new Date(month.getFullYear(), month.getMonth() + offset, 1);
@@ -96,18 +106,15 @@ export default function AnalyticsScreen() {
 
   if (loading && !transactions.length) {
     return (
-      <SafeAreaView edges={["top"]} style={styles.screen}>
-        <View style={styles.centerState}>
-          <ActivityIndicator color={colors.primary} />
-          <Text style={styles.mutedText}>Building your insights…</Text>
-        </View>
+      <SafeAreaView edges={["top"]} style={styles.center}>
+        <ActivityIndicator color={colors.primary} />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView edges={["top"]} style={styles.safeArea}>
-      <StatusBar style="light" />
+    <SafeAreaView edges={["top"]} style={styles.screen}>
+      <StatusBar style="dark" />
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={
@@ -115,250 +122,175 @@ export default function AnalyticsScreen() {
             colors={[colors.primary]}
             onRefresh={() => void loadTransactions({ refreshing: true })}
             refreshing={refreshing}
-            tintColor={colors.white}
+            tintColor={colors.primary}
           />
         }
         showsVerticalScrollIndicator={false}
-        style={styles.scroll}
       >
-        <FinanceHero
-          label={`Spent in ${formatMonth(month)}`}
-          title="Insights"
-          value={formatCurrency(monthTotals.expense)}
+        <PageHeader subtitle="Where your money goes" title="Insights" />
+
+        {error ? <Banner message={error} onPress={() => void loadTransactions()} /> : null}
+
+        <View style={styles.monthSwitcher}>
+          <Pressable
+            accessibilityLabel="Previous month"
+            accessibilityRole="button"
+            hitSlop={8}
+            onPress={() => moveMonth(-1)}
+            style={styles.monthArrow}
+          >
+            <Ionicons color={colors.text} name="chevron-back" size={18} />
+          </Pressable>
+          <Text style={styles.monthLabel}>{formatMonth(month)}</Text>
+          <Pressable
+            accessibilityLabel="Next month"
+            accessibilityRole="button"
+            disabled={isCurrentMonth}
+            hitSlop={8}
+            onPress={() => moveMonth(1)}
+            style={[styles.monthArrow, isCurrentMonth && styles.disabled]}
+          >
+            <Ionicons color={colors.text} name="chevron-forward" size={18} />
+          </Pressable>
+        </View>
+
+        <Segmented
+          onChange={setScope}
+          options={[
+            { label: "This month", value: "month" },
+            { label: "All time", value: "all" },
+          ]}
+          value={scope}
         />
 
-        <View style={styles.body}>
-          {error ? (
-            <Pressable style={styles.errorPanel} onPress={() => void loadTransactions()}>
-              <Text style={styles.errorText}>{error}</Text>
-              <Text style={styles.retryText}>Tap to retry</Text>
-            </Pressable>
+        <Card style={styles.totalsCard}>
+          <Text style={styles.totalsLabel}>Net savings</Text>
+          <Text
+            adjustsFontSizeToFit
+            numberOfLines={1}
+            style={[styles.totalsValue, { color: totals.net >= 0 ? colors.success : colors.danger }]}
+          >
+            {totals.net >= 0 ? "+" : "−"}{formatCurrency(Math.abs(totals.net))}
+          </Text>
+          {savingsRate !== null ? (
+            <Text style={styles.totalsHint}>{savingsRate}% of income saved</Text>
           ) : null}
-
-          <View style={styles.calendarCard}>
-            <View style={styles.sectionHeader}>
-              <Pressable
-                accessibilityLabel="Previous month"
-                accessibilityRole="button"
-                onPress={() => moveMonth(-1)}
-                style={styles.iconButton}
-              >
-                <Ionicons color={colors.text} name="chevron-back" size={18} />
-              </Pressable>
-              <View style={styles.calendarTitleBlock}>
-                <Text style={styles.calendarTitle}>{formatMonth(month)}</Text>
-                <Text style={styles.calendarCaption}>Tap a day to inspect spending</Text>
-              </View>
-              <Pressable
-                accessibilityLabel="Next month"
-                accessibilityRole="button"
-                onPress={() => moveMonth(1)}
-                style={styles.iconButton}
-              >
-                <Ionicons color={colors.text} name="chevron-forward" size={18} />
-              </Pressable>
-            </View>
-            <ExpenseCalendar
-              dailyExpenses={dailyExpenses}
-              month={month}
-              onSelectDate={setSelectedDateKey}
-              selectedDateKey={selectedDateKey}
-            />
-            <View style={styles.heatLegend}>
-              <Text style={styles.heatLegendText}>No spend</Text>
-              <View style={[styles.heatSwatch, styles.heatLow]} />
-              <View style={[styles.heatSwatch, styles.heatMedium]} />
-              <View style={[styles.heatSwatch, styles.heatHigh]} />
-              <Text style={styles.heatLegendText}>Higher spend</Text>
-            </View>
+          <View style={styles.totalsSplit}>
+            <Metric color={colors.success} label="Income" value={formatCurrency(totals.income)} />
+            <Metric color={colors.primary} label="Expenses" value={formatCurrency(totals.expense)} />
           </View>
+        </Card>
 
-          <View style={styles.selectedDayCard}>
-            <View>
-              <Text style={styles.eyebrow}>
-                {new Intl.DateTimeFormat(undefined, { day: "numeric", month: "long", weekday: "long" }).format(selectedDate)}
-              </Text>
-              <Text style={styles.selectedDayValue}>{formatCurrency(selectedDayExpense)}</Text>
-            </View>
-            <View style={styles.transactionCountBadge}>
-              <Text style={styles.transactionCountText}>
-                {selectedTransactions.length} transaction{selectedTransactions.length === 1 ? "" : "s"}
-              </Text>
-            </View>
-          </View>
+        <SectionHeader title="Cash flow" />
+        <Card>
+          <CashflowChart points={cashflowPoints} />
+        </Card>
 
-          {selectedTransactions.length ? (
-            <View style={styles.dayTransactions}>
-              {selectedTransactions.slice(0, 4).map((transaction) => {
-                const category = getTransactionCategory(transaction.category);
+        <SectionHeader title="Top categories" />
+        <Card>
+          {categoryTotals.length ? (
+            <View style={styles.categoryList}>
+              {categoryTotals.map(({ amount, category }) => {
+                const ratio = totals.expense ? amount / totals.expense : 0;
                 return (
-                  <View key={transaction.id} style={styles.dayTransactionRow}>
-                    <View style={[styles.categoryIcon, { backgroundColor: category.surface }]}>
-                      <Ionicons color={category.color} name={category.icon} size={17} />
+                  <View key={category.key} style={styles.categoryRow}>
+                    <IconBadge color={category.color} icon={category.icon} size={36} surface={category.surface} />
+                    <View style={styles.flex}>
+                      <View style={styles.categoryHeader}>
+                        <Text style={styles.categoryName}>{category.label}</Text>
+                        <Text style={styles.categoryValue}>{formatCurrency(amount)}</Text>
+                      </View>
+                      <View style={styles.track}>
+                        <View
+                          style={[
+                            styles.trackFill,
+                            { backgroundColor: category.color, width: `${Math.max(ratio * 100, 2)}%` },
+                          ]}
+                        />
+                      </View>
                     </View>
-                    <View style={styles.transactionCopy}>
-                      <Text numberOfLines={1} style={styles.transactionTitle}>{transaction.merchant}</Text>
-                      <Text style={styles.transactionMeta}>
-                        {category.label} · {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(transaction.timestamp))}
-                      </Text>
-                    </View>
-                    <Text style={transaction.type === "income" ? styles.incomeAmount : styles.expenseAmount}>
-                      {transaction.type === "income" ? "+" : "−"}{formatCurrency(transaction.amount, transaction.currency)}
-                    </Text>
+                    <Text style={styles.categoryPercent}>{Math.round(ratio * 100)}%</Text>
                   </View>
                 );
               })}
             </View>
-          ) : null}
+          ) : (
+            <Text style={styles.muted}>No expenses in this period.</Text>
+          )}
+        </Card>
 
-          <View style={styles.segmentedControl}>
-            <ScopeButton label="This month" onPress={() => setScope("month")} selected={scope === "month"} />
-            <ScopeButton label="All time" onPress={() => setScope("all")} selected={scope === "all"} />
-          </View>
+        <SectionHeader title="Daily spending" />
+        <Card>
+          <ExpenseCalendar
+            dailyExpenses={dailyExpenses}
+            month={month}
+            onSelectDate={setSelectedDateKey}
+            selectedDateKey={selectedDateKey}
+          />
+        </Card>
 
-          <View style={styles.metricsGrid}>
-            <MetricCard label="Income" tone="income" value={formatCurrency(totals.income)} />
-            <MetricCard label="Expenses" tone="expense" value={formatCurrency(totals.expense)} />
-            <MetricCard label="Net saved" tone={totals.net >= 0 ? "income" : "expense"} value={formatCurrency(totals.net)} />
-          </View>
-
-          <View style={styles.chartCard}>
-            <View style={styles.chartHeader}>
-              <View>
-                <Text style={styles.sectionTitle}>Income vs expenses</Text>
-                <Text style={styles.sectionCaption}>
-                  {scope === "month" ? "Weekly cash flow" : "Across all recorded months"}
-                </Text>
-              </View>
-              <Ionicons color={colors.textSoft} name="stats-chart" size={20} />
+        <Card padded={false}>
+          <View style={styles.dayHeader}>
+            <View>
+              <Text style={styles.dayLabel}>
+                {new Intl.DateTimeFormat(undefined, { day: "numeric", month: "long", weekday: "long" }).format(selectedDate)}
+              </Text>
+              <Text style={styles.dayValue}>{formatCurrency(selectedDayExpense)} spent</Text>
             </View>
-            <CashflowChart points={cashflowPoints} />
+            <Text style={styles.dayCount}>
+              {selectedTransactions.length} item{selectedTransactions.length === 1 ? "" : "s"}
+            </Text>
           </View>
-
-          <View style={styles.chartCard}>
-            <View style={styles.chartHeader}>
-              <View>
-                <Text style={styles.sectionTitle}>Top spending categories</Text>
-                <Text style={styles.sectionCaption}>
-                  {scope === "month" ? formatMonth(month) : "All recorded transactions"}
-                </Text>
-              </View>
-            </View>
-            {categoryTotals.length ? (
-              <View style={styles.categoryList}>
-                {categoryTotals.map(({ amount, category }) => {
-                  const ratio = totals.expense ? amount / totals.expense : 0;
-                  return (
-                    <View key={category.key} style={styles.categoryRow}>
-                      <View style={[styles.categoryIcon, { backgroundColor: category.surface }]}>
-                        <Ionicons color={category.color} name={category.icon} size={17} />
-                      </View>
-                      <View style={styles.categoryDetails}>
-                        <View style={styles.categoryHeader}>
-                          <Text style={styles.categoryName}>{category.label}</Text>
-                          <Text style={styles.categoryValue}>{formatCurrency(amount)}</Text>
-                        </View>
-                        <View style={styles.categoryTrack}>
-                          <View style={[styles.categoryFill, { backgroundColor: category.color, width: `${Math.max(ratio * 100, 2)}%` as `${number}%` }]} />
-                        </View>
-                      </View>
-                      <Text style={styles.categoryPercent}>{Math.round(ratio * 100)}%</Text>
-                    </View>
-                  );
-                })}
-              </View>
-            ) : (
-              <Text style={styles.mutedText}>No expenses in this period.</Text>
-            )}
-          </View>
-        </View>
+          {selectedTransactions.slice(0, 5).map((transaction, index, list) => (
+            <TransactionRow key={transaction.id} last={index === list.length - 1} transaction={transaction} />
+          ))}
+        </Card>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function ScopeButton({ label, onPress, selected }: { label: string; onPress: () => void; selected: boolean }) {
+function Metric({ color, label, value }: { color: string; label: string; value: string }) {
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={[styles.scopeButton, selected && styles.scopeButtonSelected]}
-    >
-      <Text style={[styles.scopeButtonText, selected && styles.scopeButtonTextSelected]}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function MetricCard({ label, tone, value }: { label: string; tone: "expense" | "income"; value: string }) {
-  return (
-    <View style={styles.metricCard}>
-      <View style={[styles.metricDot, tone === "income" ? styles.incomeDot : styles.expenseDot]} />
-      <Text style={styles.metricLabel}>{label}</Text>
-      <Text numberOfLines={1} adjustsFontSizeToFit style={styles.metricValue}>{value}</Text>
+    <View style={styles.flex}>
+      <View style={styles.metricLabelRow}>
+        <View style={[styles.dot, { backgroundColor: color }]} />
+        <Text style={styles.metricLabel}>{label}</Text>
+      </View>
+      <Text adjustsFontSizeToFit numberOfLines={1} style={styles.metricValue}>{value}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  body: { gap: 14, marginTop: -24, paddingBottom: 126, paddingHorizontal: 14 },
-  calendarCaption: { color: colors.textMuted, fontSize: 10, marginTop: 2 },
-  calendarCard: { ...subtleShadow, backgroundColor: colors.surface, borderRadius: 16, padding: 14 },
-  calendarTitle: { color: colors.text, fontSize: 16, fontWeight: "800" },
-  calendarTitleBlock: { alignItems: "center", flex: 1 },
-  categoryDetails: { flex: 1 },
-  categoryFill: { borderRadius: 3, height: 5 },
-  categoryHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 7 },
-  categoryIcon: { alignItems: "center", borderRadius: 9, height: 36, justifyContent: "center", width: 36 },
-  categoryList: { gap: 16 },
-  categoryName: { color: colors.text, fontSize: 13, fontWeight: "700" },
-  categoryPercent: { color: colors.textSoft, fontSize: 10, textAlign: "right", width: 30 },
-  categoryRow: { alignItems: "center", flexDirection: "row", gap: 10 },
-  categoryTrack: { backgroundColor: colors.surfaceMuted, borderRadius: 3, height: 5, overflow: "hidden" },
-  categoryValue: { color: colors.text, fontSize: 12, fontWeight: "800" },
-  centerState: { alignItems: "center", flex: 1, gap: 10, justifyContent: "center" },
-  chartCard: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 14, borderWidth: 1, padding: 15 },
-  chartHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 18 },
-  content: { backgroundColor: colors.background },
-  dayTransactionRow: { alignItems: "center", flexDirection: "row", gap: 10, paddingVertical: 10 },
-  dayTransactions: { backgroundColor: colors.surface, borderRadius: 14, paddingHorizontal: 13 },
-  errorPanel: { backgroundColor: colors.dangerSurface, borderRadius: 12, padding: 13 },
-  errorText: { color: colors.danger, fontSize: 12, fontWeight: "700" },
-  expenseAmount: { color: colors.text, fontSize: 12, fontWeight: "800" },
-  expenseDot: { backgroundColor: colors.secondary },
-  eyebrow: { color: "rgba(255,255,255,0.64)", fontSize: 11, fontWeight: "800", textTransform: "uppercase" },
-  heatHigh: { backgroundColor: colors.primary },
-  heatLegend: { alignItems: "center", flexDirection: "row", justifyContent: "flex-end", marginTop: 10 },
-  heatLegendText: { color: colors.textSoft, fontSize: 9, marginHorizontal: 5 },
-  heatLow: { backgroundColor: colors.primarySurface },
-  heatMedium: { backgroundColor: "#8BC8B1" },
-  heatSwatch: { borderRadius: 3, height: 8, marginHorizontal: 2, width: 8 },
-  iconButton: { alignItems: "center", backgroundColor: colors.backgroundSoft, borderRadius: 9, height: 34, justifyContent: "center", width: 34 },
-  incomeAmount: { color: colors.success, fontSize: 12, fontWeight: "800" },
-  incomeDot: { backgroundColor: colors.success },
-  metricCard: { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 12, borderWidth: 1, flex: 1, minWidth: 100, padding: 12 },
-  metricDot: { borderRadius: 3, height: 6, marginBottom: 13, width: 18 },
-  metricLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "700" },
-  metricValue: { color: colors.text, fontSize: 14, fontWeight: "800", marginTop: 5 },
-  metricsGrid: { flexDirection: "row", gap: 8 },
-  mutedText: { color: colors.textMuted, fontSize: 12, textAlign: "center" },
-  retryText: { color: colors.danger, fontSize: 11, fontWeight: "800", marginTop: 5 },
-  safeArea: { backgroundColor: colors.primaryDark, flex: 1 },
-  scopeButton: { alignItems: "center", borderRadius: 9, flex: 1, paddingVertical: 10 },
-  scopeButtonSelected: { backgroundColor: colors.surface },
-  scopeButtonText: { color: colors.textMuted, fontSize: 12, fontWeight: "800" },
-  scopeButtonTextSelected: { color: colors.primary },
+  categoryHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 8 },
+  categoryList: { gap: 18 },
+  categoryName: { color: colors.text, fontSize: 14, fontWeight: "600" },
+  categoryPercent: { ...type.caption, color: colors.textSoft, fontVariant: ["tabular-nums"], textAlign: "right", width: 36 },
+  categoryRow: { alignItems: "center", flexDirection: "row", gap: 12 },
+  categoryValue: { color: colors.text, fontSize: 14, fontVariant: ["tabular-nums"], fontWeight: "600" },
+  center: { alignItems: "center", backgroundColor: colors.background, flex: 1, justifyContent: "center" },
+  content: { gap: 12, paddingBottom: TAB_BAR_CLEARANCE, paddingHorizontal: 20 },
+  dayCount: { ...type.caption, color: colors.textMuted },
+  dayHeader: { alignItems: "center", borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: "row", justifyContent: "space-between", padding: 16 },
+  dayLabel: { ...type.caption, color: colors.textMuted },
+  dayValue: { color: colors.text, fontSize: 18, fontVariant: ["tabular-nums"], fontWeight: "700", marginTop: 4 },
+  disabled: { opacity: 0.35 },
+  dot: { borderRadius: 4, height: 8, width: 8 },
+  flex: { flex: 1 },
+  metricLabel: { ...type.caption, color: colors.textMuted },
+  metricLabelRow: { alignItems: "center", flexDirection: "row", gap: 6 },
+  metricValue: { color: colors.text, fontSize: 17, fontVariant: ["tabular-nums"], fontWeight: "600", marginTop: 4 },
+  monthArrow: { alignItems: "center", backgroundColor: colors.surface, borderColor: colors.border, borderRadius: radius.pill, borderWidth: 1, height: 36, justifyContent: "center", width: 36 },
+  monthLabel: { ...type.heading, color: colors.text },
+  monthSwitcher: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  muted: { ...type.label, color: colors.textMuted, textAlign: "center" },
   screen: { backgroundColor: colors.background, flex: 1 },
-  scroll: { backgroundColor: colors.background },
-  sectionCaption: { color: colors.textMuted, fontSize: 10, marginTop: 3 },
-  sectionHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 16 },
-  sectionTitle: { color: colors.text, fontSize: 15, fontWeight: "800" },
-  segmentedControl: { backgroundColor: colors.surfaceMuted, borderRadius: 11, flexDirection: "row", padding: 3 },
-  selectedDayCard: { alignItems: "center", backgroundColor: colors.primaryDark, borderRadius: 14, flexDirection: "row", justifyContent: "space-between", padding: 15 },
-  selectedDayValue: { color: colors.white, fontSize: 22, fontWeight: "800", marginTop: 5 },
-  transactionCopy: { flex: 1 },
-  transactionCountBadge: { backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
-  transactionCountText: { color: colors.white, fontSize: 10, fontWeight: "700" },
-  transactionMeta: { color: colors.textMuted, fontSize: 10, marginTop: 3 },
-  transactionTitle: { color: colors.text, fontSize: 12, fontWeight: "800" },
+  totalsCard: { padding: 20 },
+  totalsHint: { ...type.caption, color: colors.textMuted, marginTop: 4 },
+  totalsLabel: { ...type.label, color: colors.textMuted },
+  totalsSplit: { borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: "row", gap: 16, marginTop: 16, paddingTop: 16 },
+  totalsValue: { fontSize: 30, fontVariant: ["tabular-nums"], fontWeight: "700", letterSpacing: -0.6, marginTop: 4 },
+  track: { backgroundColor: colors.surfaceMuted, borderRadius: 3, height: 6, overflow: "hidden" },
+  trackFill: { borderRadius: 3, height: 6 },
 });

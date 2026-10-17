@@ -38,14 +38,13 @@ function AppNavigator() {
         headerStyle: { backgroundColor: colors.background },
         headerShadowVisible: false,
         headerTintColor: colors.text,
-        headerTitleStyle: { fontWeight: "700" },
+        headerTitleStyle: { fontWeight: "600" },
       }}
     >
       <Stack.Screen name="login" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="capture" options={{ headerShown: false }} />
-      <Stack.Screen name="expense-add" options={{ headerShown: false }} />
-      <Stack.Screen name="investment-add" options={{ headerShown: false }} />
+      <Stack.Screen name="expense-add" options={{ animation: "slide_from_bottom", headerShown: false }} />
+      <Stack.Screen name="investment-add" options={{ animation: "slide_from_bottom", headerShown: false }} />
       <Stack.Screen name="settings" options={{ headerShown: false }} />
     </Stack>
   );

@@ -4,86 +4,61 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { colors } from "../styles/theme";
 
-type ScreenHeaderProps = {
-  title?: string;
-  eyebrow?: string;
-  mode?: "identity" | "back";
+/** Go back, or land on Home when the screen was opened without history (deep link, reload). */
+export const goBack = () => {
+  if (router.canGoBack()) {
+    router.back();
+  } else {
+    router.replace("/(tabs)");
+  }
 };
 
-export function ScreenHeader({
-  title,
-  eyebrow = "Second Brain",
-  mode = "identity",
-}: ScreenHeaderProps) {
-  if (mode === "back") {
-    return (
-      <View style={styles.header}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons color={colors.text} name="arrow-back" size={22} />
-        </Pressable>
-        {title ? <Text style={styles.backTitle}>{title}</Text> : null}
-        <View style={styles.backSpacer} />
-      </View>
-    );
-  }
+type ScreenHeaderProps = {
+  icon?: "back" | "close";
+  title?: string;
+};
 
+export function ScreenHeader({ icon = "back", title }: ScreenHeaderProps) {
   return (
     <View style={styles.header}>
-      <View style={styles.identityRow}>
-        <View style={styles.brandMark} />
-        <Text style={styles.eyebrow}>{eyebrow}</Text>
-        {title ? <Text style={styles.title}>{title}</Text> : null}
-      </View>
+      <Pressable
+        accessibilityLabel={icon === "close" ? "Close" : "Go back"}
+        accessibilityRole="button"
+        hitSlop={8}
+        onPress={goBack}
+        style={({ pressed }) => [styles.button, pressed && styles.pressed]}
+      >
+        <Ionicons color={colors.text} name={icon === "close" ? "close" : "chevron-back"} size={22} />
+      </Pressable>
+      {title ? <Text style={styles.title}>{title}</Text> : null}
+      <View style={styles.spacer} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
+  button: {
     alignItems: "center",
-    flexDirection: "row",
-    marginBottom: 20,
-    minHeight: 68,
-  },
-  identityRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 10,
-  },
-  backButton: {
-    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 999,
+    borderWidth: 1,
     height: 40,
     justifyContent: "center",
     width: 40,
   },
-  backTitle: {
-    color: colors.text,
-    flex: 1,
-    fontSize: 19,
-    fontWeight: "700",
-    lineHeight: 24,
-    textAlign: "center",
+  header: {
+    alignItems: "center",
+    flexDirection: "row",
+    minHeight: 56,
   },
-  backSpacer: {
-    width: 40,
-  },
-  brandMark: {
-    backgroundColor: colors.black,
-    borderRadius: 999,
-    height: 12,
-    width: 12,
-  },
-  eyebrow: {
-    color: colors.textMuted,
-    fontSize: 14,
-    fontWeight: "800",
-    letterSpacing: 0,
-    lineHeight: 18,
-  },
+  pressed: { opacity: 0.7 },
+  spacer: { width: 40 },
   title: {
     color: colors.text,
-    fontSize: 31,
-    fontWeight: "500",
-    lineHeight: 37,
+    flex: 1,
+    fontSize: 17,
+    fontWeight: "600",
+    textAlign: "center",
   },
 });

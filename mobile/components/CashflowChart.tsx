@@ -27,7 +27,7 @@ export function CashflowChart({ points }: CashflowChartProps) {
   return (
     <View>
       <View style={styles.legend}>
-        <LegendItem color={colors.secondary} label="Expenses" />
+        <LegendItem color={colors.primary} label="Expenses" />
         <LegendItem color={colors.success} label="Income" />
         <Text style={styles.scale}>Peak ₹{formatCompactAmount(maximum)}</Text>
       </View>
@@ -84,22 +84,22 @@ function LegendItem({ color, label }: { color: string; label: string }) {
 }
 
 const styles = StyleSheet.create({
-  bar: { borderRadius: 4, minWidth: 8, width: 9 },
+  bar: { borderRadius: 3, minWidth: 8, width: 10 },
   barArea: { alignItems: "flex-end", flexDirection: "row", gap: 3, height: CHART_HEIGHT, justifyContent: "center" },
   chartContent: { gap: 5, minWidth: "100%", paddingHorizontal: 4 },
-  emptyState: { alignItems: "center", backgroundColor: colors.backgroundSoft, borderRadius: 10, padding: 28 },
+  emptyState: { alignItems: "center", backgroundColor: colors.backgroundSoft, borderRadius: 12, padding: 28 },
   emptyText: { color: colors.textMuted, fontSize: 12, marginTop: 4 },
-  emptyTitle: { color: colors.text, fontSize: 14, fontWeight: "800" },
-  expenseBar: { backgroundColor: colors.secondary },
-  gridLine: { borderTopColor: colors.border, borderTopWidth: 1, flex: 1 },
+  emptyTitle: { color: colors.text, fontSize: 14, fontWeight: "600" },
+  expenseBar: { backgroundColor: colors.primary },
+  gridLine: { borderStyle: "dashed", borderTopColor: colors.border, borderTopWidth: 1, flex: 1 },
   gridLines: { bottom: 25, justifyContent: "space-between", left: 0, position: "absolute", right: 0, top: 5 },
   group: { alignItems: "center", minWidth: 48 },
   incomeBar: { backgroundColor: colors.success },
-  label: { color: colors.textSoft, fontSize: 9, fontWeight: "700", marginTop: 7, maxWidth: 50 },
+  label: { color: colors.textSoft, fontSize: 10, fontWeight: "500", marginTop: 7, maxWidth: 50 },
   legend: { alignItems: "center", flexDirection: "row", gap: 14, marginBottom: 12 },
-  legendDot: { borderRadius: 3, height: 6, width: 6 },
+  legendDot: { borderRadius: 4, height: 8, width: 8 },
   legendItem: { alignItems: "center", flexDirection: "row", gap: 5 },
-  legendLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "700" },
+  legendLabel: { color: colors.textMuted, fontSize: 12, fontWeight: "500" },
   plot: { minHeight: CHART_HEIGHT + 28 },
-  scale: { color: colors.textSoft, fontSize: 10, marginLeft: "auto" },
+  scale: { color: colors.textSoft, fontSize: 11, marginLeft: "auto" },
 });
